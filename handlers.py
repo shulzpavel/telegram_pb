@@ -188,32 +188,30 @@ async def show_summary(msg: types.Message):
         return
 
     text = "📦 Итоги последнего набора задач:\n"
-    total_all = 0
-    count_all = 0
+    sum_of_averages = 0  # Суммируем только средние оценки
 
     for i, h in enumerate(state.last_batch, 1):
         text += f"\n🔹 <b>{i}. {h['task']}</b>\n"
         total = 0
         count = 0
+
         for uid, v in h['votes'].items():
             name = state.participants.get(uid, f"ID {uid}")
             text += f"— {name}: {v}\n"
             try:
                 total += int(v)
                 count += 1
-                total_all += int(v)
-                count_all += 1
             except ValueError:
                 continue
+
         if count > 0:
             avg = round(total / count, 1)
+            sum_of_averages += avg
             text += f"📈 Среднее: {avg}\n"
         else:
             text += "📈 Среднее: невозможно посчитать\n"
 
-    if count_all > 0:
-        overall = round(total_all, 1)
-        text += f"\n📦 Сумма SP за банч: {overall}"
+    text += f"\n📦 Сумма SP за банч: {round(sum_of_averages, 1)}"
     await msg.answer(text)
 
 @router.message(Command("start", "help"))
