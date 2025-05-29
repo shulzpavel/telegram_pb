@@ -99,7 +99,7 @@ async def handle_menu(callback: CallbackQuery, **kwargs):
         ]
         keyboard = types.InlineKeyboardMarkup(inline_keyboard=buttons)
         await callback.message.answer("👤 Выберите участника для удаления:", reply_markup=keyboard)
-        
+
 @router.message(state.PokerStates.waiting_for_task_text)
 async def receive_task_list(msg: types.Message, **kwargs):
     if msg.chat.id != ALLOWED_CHAT_ID or msg.message_thread_id != ALLOWED_TOPIC_ID:
@@ -225,7 +225,7 @@ async def show_summary(msg: types.Message):
             text += "📈 Среднее: невозможно посчитать\n"
 
     text += f"\n📦 Сумма SP за банч: {round(sum_of_averages, 1)}"
-    await msg.answer(text)
+    await msg.answer(text, reply_markup=get_main_menu())
 
 @router.message(Command("start", "help"))
 async def help_command(msg: types.Message):
