@@ -89,17 +89,27 @@ async def handle_menu(callback: CallbackQuery, **kwargs):
 
 @router.message(state.PokerStates.waiting_for_task_text)
 async def receive_task_list(msg: types.Message, **kwargs):
+    if msg.chat.id != ALLOWED_CHAT_ID or msg.message_thread_id != ALLOWED_TOPIC_ID:
+        return
+
     fsm: FSMContext = kwargs["state"]
     raw_lines = msg.text.strip().splitlines()
+
+    # Очистка состояния
     state.tasks_queue = [line.strip() for line in raw_lines if line.strip()]
     state.current_task_index = 0
     state.votes.clear()
-    state.last_batch.clear()  # очищаем предыдущий банч
+    state.last_batch.clear()
+    state.batch_completed = False
+
     await fsm.clear()
     await start_next_task(msg)
-
 async def start_next_task(msg: types.Message):
+    if getattr(state, "batch_completed", False):
+        return
+
     if state.current_task_index >= len(state.tasks_queue):
+        state.batch_completed = True
         await show_summary(msg)
         return
 
