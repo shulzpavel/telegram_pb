@@ -18,11 +18,12 @@ def get_main_menu():
         [
             types.InlineKeyboardButton(text="🆕 Список задач", callback_data="menu:new_task"),
             types.InlineKeyboardButton(text="📋 Итоги дня", callback_data="menu:summary")
-        ],
-        [
-            types.InlineKeyboardButton(text="♻️ Обнулить голоса", callback_data="menu:revote"),
-            types.InlineKeyboardButton(text="🔚 Завершить голосование", callback_data="menu:reveal")
-        ],
+        ]
+        ,
+        #[
+        #   types.InlineKeyboardButton(text="♻️ Обнулить голоса", callback_data="menu:revote"),
+        #    types.InlineKeyboardButton(text="🔚 Завершить голосование", callback_data="menu:reveal")
+        #],
         [
             types.InlineKeyboardButton(text="👥 Участники", callback_data="menu:show_participants"),
             types.InlineKeyboardButton(text="🚪 Покинуть", callback_data="menu:leave"),
