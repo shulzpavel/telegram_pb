@@ -117,8 +117,7 @@ async def start_next_task(msg: types.Message):
 
 @router.callback_query(F.data.startswith("vote:"))
 async def vote_handler(callback: types.CallbackQuery):
-    await callback.answer()
-    if callback.message.chat.id != ALLOWED_CHAT_ID:
+    if callback.message.chat.id != ALLOWED_CHAT_ID or callback.message.message_thread_id != ALLOWED_TOPIC_ID:
         return
 
     value = callback.data.split(":")[1]
