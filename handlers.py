@@ -224,7 +224,7 @@ async def help_command(msg: types.Message):
 
 @router.message()
 async def unknown_input(msg: types.Message):
-    if msg.chat.id != ALLOWED_CHAT_ID:
-        return
+    if msg.chat.id != ALLOWED_CHAT_ID or msg.message_thread_id != ALLOWED_TOPIC_ID:
+        return  # ⛔ не тот чат или топик — выходим
     if msg.from_user.id not in state.participants:
-        await msg.answer("⚠️ Вы не авторизованы. Напишите `/join` и введи токен или нажмите /start для инструкций.")
+        await msg.answer("⚠️ Вы не авторизованы. Напишите `/join <токен>` или нажмите /start для инструкций.")
