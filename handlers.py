@@ -87,6 +87,18 @@ async def handle_menu(callback: CallbackQuery, **kwargs):
             del state.participants[user_id]
             state.votes.pop(user_id, None)
             await callback.message.answer("🚪 Вы покинули сессию.")
+    
+    elif action == "kick":
+        if not state.participants:
+            await callback.message.answer("⛔ Участников пока нет.")
+            return
+
+    buttons = [
+        [types.InlineKeyboardButton(text=name, callback_data=f"kick_user:{uid}")]
+        for uid, name in state.participants.items()
+    ]
+    keyboard = types.InlineKeyboardMarkup(inline_keyboard=buttons)
+    await callback.message.answer("👤 Выберите участника для удаления:", reply_markup=keyboard)
 
 @router.message(state.PokerStates.waiting_for_task_text)
 async def receive_task_list(msg: types.Message, **kwargs):
@@ -238,22 +250,6 @@ async def unknown_input(msg: types.Message):
     if msg.from_user.id not in state.participants:
         await msg.answer("⚠️ Вы не авторизованы. Напишите `/join <токен>` или нажмите /start для инструкций.")
 
-@router.callback_query(F.data == "menu:kick")
-async def show_kick_menu(callback: CallbackQuery):
-    if callback.message.chat.id != ALLOWED_CHAT_ID or callback.message.message_thread_id != ALLOWED_TOPIC_ID:
-        return
-    if not is_admin(callback.from_user):
-        return
-    if not state.participants:
-        await callback.message.answer("⛔ Участников пока нет.")
-        return
-
-    buttons = [
-        [types.InlineKeyboardButton(text=name, callback_data=f"kick_user:{uid}")]
-        for uid, name in state.participants.items()
-    ]
-    keyboard = types.InlineKeyboardMarkup(inline_keyboard=buttons)
-    await callback.message.answer("👤 Выберите участника для удаления:", reply_markup=keyboard)
 
 @router.callback_query(F.data.startswith("kick_user:"))
 async def kick_user(callback: CallbackQuery):
