@@ -25,7 +25,8 @@ def get_main_menu():
         ],
         [
             types.InlineKeyboardButton(text="👥 Участники", callback_data="menu:participants"),
-            types.InlineKeyboardButton(text="🚪 Покинуть", callback_data="menu:leave")
+            types.InlineKeyboardButton(text="🚪 Покинуть", callback_data="menu:leave"),
+            types.InlineKeyboardButton(text="🗑️ Удалить участника", callback_data="menu:kick")
         ]
     ])
 
@@ -236,3 +237,35 @@ async def unknown_input(msg: types.Message):
         return  # ⛔ не тот чат или топик — выходим
     if msg.from_user.id not in state.participants:
         await msg.answer("⚠️ Вы не авторизованы. Напишите `/join <токен>` или нажмите /start для инструкций.")
+
+@router.callback_query(F.data == "menu:kick")
+async def show_kick_menu(callback: CallbackQuery):
+    if callback.message.chat.id != ALLOWED_CHAT_ID or callback.message.message_thread_id != ALLOWED_TOPIC_ID:
+        return
+    if not is_admin(callback.from_user):
+        return
+    if not state.participants:
+        await callback.message.answer("⛔ Участников пока нет.")
+        return
+
+    buttons = [
+        [types.InlineKeyboardButton(text=name, callback_data=f"kick_user:{uid}")]
+        for uid, name in state.participants.items()
+    ]
+    keyboard = types.InlineKeyboardMarkup(inline_keyboard=buttons)
+    await callback.message.answer("👤 Выберите участника для удаления:", reply_markup=keyboard)
+
+@router.callback_query(F.data.startswith("kick_user:"))
+async def kick_user(callback: CallbackQuery):
+    if callback.message.chat.id != ALLOWED_CHAT_ID or callback.message.message_thread_id != ALLOWED_TOPIC_ID:
+        return
+    if not is_admin(callback.from_user):
+        return
+
+    uid = int(callback.data.split(":")[1])
+    name = state.participants.pop(uid, None)
+    state.votes.pop(uid, None)
+    if name:
+        await callback.message.answer(f"🚫 Участник <b>{name}</b> удалён из сессии.")
+    else:
+        await callback.message.answer("❌ Участник уже был удалён.")
