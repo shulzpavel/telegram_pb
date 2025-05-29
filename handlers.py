@@ -2,7 +2,7 @@ from aiogram import types, Router, F
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery
-from config import ADMINS, ALLOWED_CHAT_ID
+from config import ADMINS, ALLOWED_CHAT_ID , ALLOWED_TOPIC_ID
 import state
 from datetime import datetime
 import copy
@@ -31,12 +31,14 @@ def get_main_menu():
 
 @router.message(Command("join"))
 async def join(msg: types.Message):
-    if msg.chat.id != ALLOWED_CHAT_ID:
+    if msg.chat.id != ALLOWED_CHAT_ID or msg.message_thread_id != ALLOWED_TOPIC_ID:
         return
+
     args = msg.text.split()
     if len(args) != 2 or args[1] != state.current_token:
         await msg.answer("❌ Неверный токен.")
         return
+
     state.participants[msg.from_user.id] = msg.from_user.full_name
     await msg.answer(f"✅ {msg.from_user.full_name} присоединился к сессии.")
     if is_admin(msg.from_user):
@@ -46,8 +48,11 @@ async def join(msg: types.Message):
 async def handle_menu(callback: CallbackQuery, **kwargs):
     fsm: FSMContext = kwargs["state"]
     await callback.answer()
-    action = callback.data.split(":")[1]
 
+    if callback.message.chat.id != ALLOWED_CHAT_ID or callback.message.message_thread_id != ALLOWED_TOPIC_ID:
+        return
+
+    action = callback.data.split(":")[1]
     if callback.message.chat.id != ALLOWED_CHAT_ID or not is_admin(callback.from_user):
         return
 
