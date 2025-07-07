@@ -201,17 +201,19 @@ async def show_summary(msg: types.Message):
         await msg.answer("📭 Сессия ещё не проводилась.")
         return
 
-    text = "📦 Итоги последнего набора задач:\n"
-    sum_of_averages = 0  # Суммируем только средние оценки
+    header = "📦 Итоги последнего набора задач:\n"
+    chunks = [header]
+    current_chunk = ""
+    sum_of_averages = 0
 
     for i, h in enumerate(state.last_batch, 1):
-        text += f"\n🔹 <b>{i}. {h['task']}</b>\n"
+        block = f"\n🔹 <b>{i}. {h['task']}</b>\n"
         total = 0
         count = 0
 
         for uid, v in h['votes'].items():
             name = state.participants.get(uid, f"ID {uid}")
-            text += f"— {name}: {v}\n"
+            block += f"— {name}: {v}\n"
             try:
                 total += int(v)
                 count += 1
@@ -221,12 +223,26 @@ async def show_summary(msg: types.Message):
         if count > 0:
             avg = round(total / count, 1)
             sum_of_averages += avg
-            text += f"📈 Среднее: {avg}\n"
+            block += f"📈 Среднее: {avg}\n"
         else:
-            text += "📈 Среднее: невозможно посчитать\n"
+            block += "📈 Среднее: невозможно посчитать\n"
 
-    text += f"\n📦 Сумма SP за банч: {round(sum_of_averages, 1)}"
-    await msg.answer(text, reply_markup=get_main_menu())
+        # Добавляем блок в текущий кусок или начинаем новый
+        if len(current_chunk) + len(block) >= 4000:
+            chunks.append(current_chunk)
+            current_chunk = block
+        else:
+            current_chunk += block
+
+    # Добавим последний кусок
+    chunks.append(current_chunk)
+    chunks.append(f"\n📦 Сумма SP за банч: {round(sum_of_averages, 1)}")
+
+    for part in chunks:
+        await msg.answer(part.strip(), parse_mode="HTML")
+
+    # Добавим главное меню в последнем сообщении
+    await msg.answer("📌 Главное меню:", reply_markup=get_main_menu())
 
 @router.message(Command("start", "help"))
 async def help_command(msg: types.Message):
