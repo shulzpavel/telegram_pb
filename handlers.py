@@ -100,7 +100,8 @@ async def handle_menu(callback: CallbackQuery, **kwargs):
         await callback.message.answer("👤 Выберите участника для удаления:", reply_markup=keyboard)
 
 @router.message(state.PokerStates.waiting_for_task_text)
-async def receive_task_list(msg: types.Message, state_context: FSMContext):
+async def receive_task_list(msg: types.Message, **kwargs):
+    state_context: FSMContext = kwargs["state"]
     if msg.chat.id != ALLOWED_CHAT_ID or msg.message_thread_id != ALLOWED_TOPIC_ID:
         return
 
