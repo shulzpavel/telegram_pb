@@ -204,7 +204,6 @@ async def vote_handler(callback: CallbackQuery):
 import copy
 from datetime import datetime
 import state
-from bot import start_next_task
 
 active_vote_message_id = None
 active_vote_task = None
