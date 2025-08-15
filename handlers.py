@@ -23,8 +23,8 @@ def get_main_menu():
     return types.InlineKeyboardMarkup(inline_keyboard=[
         [
             types.InlineKeyboardButton(text="🆕 Список задач", callback_data="menu:new_task"),
-            types.InlineKeyboardButton(text="📋 Итоги банча", callback_data="menu:summary_last"),
-            types.InlineKeyboardButton(text="📅 Итоги дня", callback_data="menu:summary_day")
+            types.InlineKeyboardButton(text="📦 Итоги банча", callback_data="menu:summary"),
+            types.InlineKeyboardButton(text="📊 Общие итоги", callback_data="menu:global_summary"),
         ],
         [
             types.InlineKeyboardButton(text="👥 Участники", callback_data="menu:show_participants"),
@@ -64,10 +64,8 @@ async def handle_menu(callback: CallbackQuery, **kwargs):
         await callback.message.answer("✏️ Кидай список задач в формате:\nНазвание задачи https://ссылка")
         await state_context.set_state(state.PokerStates.waiting_for_task_text)
 
-    elif action == "summary_last":
-        await show_summary(callback.message, batch_only=True)
-    elif action == "summary_day":
-        await show_summary(callback.message, batch_only=False)
+    elif action == "summary":
+        await show_summary(callback.message)
 
     elif action == "revote":
         state.votes.clear()
@@ -181,7 +179,8 @@ async def vote_handler(callback: CallbackQuery):
     if len(state.votes) == len(state.participants):
         if active_vote_task and not active_vote_task.done():
             active_vote_task.cancel()
-        await reveal_votes(callback.message)
+        # await reveal_votes(callback.message)
+        await callback.message.answer("✅ Задача оценена.")
 
 async def reveal_votes(msg: types.Message):
     global active_vote_message_id, active_vote_task
@@ -190,7 +189,25 @@ async def reveal_votes(msg: types.Message):
         await msg.answer("❌ Нет голосов.")
         return
 
-    await msg.answer("✅ Задача оценена.")
+    result = "📊 Результаты голосования:\n"
+    total = 0
+    count = 0
+    for uid, value in state.votes.items():
+        name = state.participants.get(uid, f"ID {uid}")
+        result += f"- {name}: {value}\n"
+        try:
+            total += int(value)
+            count += 1
+        except ValueError:
+            continue
+
+    if count > 0:
+        avg = round(total / count, 1)
+        result += f"\n📈 Средняя оценка: {avg}"
+    else:
+        result += "\n📈 Невозможно вычислить среднюю оценку"
+
+    await msg.answer(result)
     active_vote_message_id = None
     if active_vote_task and not active_vote_task.done():
         active_vote_task.cancel()
@@ -208,7 +225,7 @@ async def reveal_votes(msg: types.Message):
     state.current_task_index += 1
     await start_next_task(msg)
 
-async def show_summary(msg: types.Message, batch_only=True):
+async def show_summary(msg: types.Message):
     if not state.last_batch:
         await msg.answer("📭 Сессия ещё не проводилась.")
         return
@@ -216,21 +233,27 @@ async def show_summary(msg: types.Message, batch_only=True):
     header = "📦 Итоги последнего набора задач:\n"
     chunks = [header]
     current_chunk = ""
-    sum_of_averages = 0
+    sum_of_max_votes = 0
 
-    source = state.last_batch if batch_only else state.history
-    for i, h in enumerate(source, 1):
+    for i, h in enumerate(state.last_batch, 1):
         block = f"\n🔹 <b>{i}. {h['task']}</b>\n"
+        # total = 0
+        # count = 0
 
-        numeric_votes = [int(v) for v in h['votes'].values() if v.isdigit()]
-        if numeric_votes:
-            max_vote = max(numeric_votes)
-            sum_of_averages += max_vote
-            block += f"📈 Максимальная оценка: {max_vote}\n"
-        else:
-            block += "📈 Оценка: невозможно посчитать\n"
+        for uid, v in h['votes'].items():
+            name = state.participants.get(uid, f"ID {uid}")
+            block += f"— {name}: {v}\n"
+            # try:
+            #     total += int(v)
+            #     count += 1
+            # except ValueError:
+            #     continue
 
-        if len(current_chunk) + len(block) >= 3500:
+        max_vote = max([int(v) for v in h['votes'].values() if v.isdigit()], default=0)
+        sum_of_max_votes += max_vote
+        block += f"📈 Максимум: {max_vote}\n"
+
+        if len(current_chunk) + len(block) >= 3000:
             chunks.append(current_chunk)
             current_chunk = block
         else:
@@ -239,10 +262,11 @@ async def show_summary(msg: types.Message, batch_only=True):
     if current_chunk:
         chunks.append(current_chunk)
 
-    chunks.append(f"\n📦 Сумма SP за банч: {round(sum_of_averages, 1)}")
+    chunks.append(f"\n📦 Сумма SP за банч: {sum_of_max_votes}")
 
     for part in chunks:
         await msg.answer(part.strip(), parse_mode="HTML")
+        await asyncio.sleep(1)
 
     await msg.answer("📌 Главное меню:", reply_markup=get_main_menu())
 
