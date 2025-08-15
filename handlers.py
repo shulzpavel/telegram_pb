@@ -14,6 +14,7 @@ fibonacci_values = ['1', '2', '3', '5', '8', '13']
 vote_timeout_seconds = 90
 active_vote_message_id = None
 active_vote_task = None
+vote_active = False
 
 HARD_ADMINS = {'@shults_shults_shults', '@naumov_egor'}
 
@@ -146,7 +147,7 @@ async def vote_timeout(msg: types.Message):
     await reveal_votes(msg)
 
 async def start_next_task(msg: types.Message):
-    global active_vote_message_id, active_vote_task
+    global active_vote_message_id, active_vote_task, vote_active
 
     if getattr(state, "batch_completed", False):
         return
@@ -158,6 +159,8 @@ async def start_next_task(msg: types.Message):
 
     state.current_task = state.tasks_queue[state.current_task_index]
     state.votes.clear()
+
+    vote_active = True
 
     keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
         [types.InlineKeyboardButton(text=v, callback_data=f"vote:{v}") for v in fibonacci_values[i:i + 3]]
@@ -178,7 +181,7 @@ async def start_next_task(msg: types.Message):
 async def vote_handler(callback: CallbackQuery):
     global active_vote_message_id, active_vote_task
 
-    if callback.message.message_id != active_vote_message_id:
+    if not vote_active:
         await callback.answer("❌ Это уже неактивное голосование.", show_alert=True)
         return
 
@@ -205,19 +208,17 @@ import copy
 from datetime import datetime
 import state
 
-active_vote_message_id = None
-active_vote_task = None
-
 async def reveal_votes(msg: types.Message):
-    global active_vote_message_id, active_vote_task
+    global active_vote_message_id, active_vote_task, vote_active
 
     if not state.votes:
         await msg.answer("❌ Нет голосов.")
         return
 
+    vote_active = False
+
     # Removed detailed voting results output per instructions
     await msg.answer("✅ Задача оценена.")
-    active_vote_message_id = None
     if active_vote_task and not active_vote_task.done():
         active_vote_task.cancel()
 
