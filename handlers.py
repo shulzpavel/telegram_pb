@@ -14,7 +14,6 @@ vote_timeout_seconds = 90
 active_vote_message_id = None
 active_vote_task = None
 
-# Только этим пользователям разрешены админские действия
 HARD_ADMINS = {'@shults_shults_shults', '@naumov_egor'}
 
 def is_admin(user):
@@ -54,7 +53,6 @@ async def handle_menu(callback: CallbackQuery, state_context: FSMContext):
 
     if callback.message.chat.id != ALLOWED_CHAT_ID or callback.message.message_thread_id != ALLOWED_TOPIC_ID:
         return
-
     if not is_admin(callback.from_user):
         return
 
@@ -155,7 +153,7 @@ async def start_next_task(msg: types.Message):
 
 @router.callback_query(F.data.startswith("vote:"))
 async def vote_handler(callback: CallbackQuery):
-    global active_vote_message_id
+    global active_vote_message_id, active_vote_task
 
     if callback.message.message_id != active_vote_message_id:
         await callback.answer("❌ Это уже неактивное голосование.", show_alert=True)
@@ -176,10 +174,12 @@ async def vote_handler(callback: CallbackQuery):
     await callback.answer("✅ Голос учтён!" if not already_voted else "♻️ Обновлено")
 
     if len(state.votes) == len(state.participants):
+        if active_vote_task and not active_vote_task.done():
+            active_vote_task.cancel()
         await reveal_votes(callback.message)
 
 async def reveal_votes(msg: types.Message):
-    global active_vote_message_id
+    global active_vote_message_id, active_vote_task
 
     if not state.votes:
         await msg.answer("❌ Нет голосов.")
@@ -205,6 +205,8 @@ async def reveal_votes(msg: types.Message):
 
     await msg.answer(result)
     active_vote_message_id = None
+    if active_vote_task and not active_vote_task.done():
+        active_vote_task.cancel()
 
     state.history.append({
         'task': state.current_task,
