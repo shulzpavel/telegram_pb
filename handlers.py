@@ -2,13 +2,17 @@ from aiogram import types, Router, F
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery
-from config import ADMINS, ALLOWED_CHAT_ID , ALLOWED_TOPIC_ID
+from config import ADMINS, ALLOWED_CHAT_ID, ALLOWED_TOPIC_ID
 import state
-from datetime import datetime
+from datetime import datetime, timedelta
 import copy
+import asyncio
 
 router = Router()
 fibonacci_values = ['1', '2', '3', '5', '8', '13']
+vote_timeout_seconds = 90
+active_vote_message_id = None
+active_vote_task = None
 
 def is_admin(user):
     return user.username and ('@' + user.username) in ADMINS
@@ -18,12 +22,7 @@ def get_main_menu():
         [
             types.InlineKeyboardButton(text="🆕 Список задач", callback_data="menu:new_task"),
             types.InlineKeyboardButton(text="📋 Итоги дня", callback_data="menu:summary")
-        ]
-        ,
-        #[
-        #   types.InlineKeyboardButton(text="♻️ Обнулить голоса", callback_data="menu:revote"),
-        #    types.InlineKeyboardButton(text="🔚 Завершить голосование", callback_data="menu:reveal")
-        #],
+        ],
         [
             types.InlineKeyboardButton(text="👥 Участники", callback_data="menu:show_participants"),
             types.InlineKeyboardButton(text="🚪 Покинуть", callback_data="menu:leave"),
@@ -73,7 +72,7 @@ async def handle_menu(callback: CallbackQuery, **kwargs):
         await callback.message.answer("🔄 Голоса обнулены.")
 
     elif action == "reveal":
-        await reveal_votes(callback)
+        await reveal_votes(callback.message)
 
     elif action == "show_participants":
         if not state.participants:
@@ -109,7 +108,6 @@ async def receive_task_list(msg: types.Message, **kwargs):
     fsm: FSMContext = kwargs["state"]
     raw_lines = msg.text.strip().splitlines()
 
-    # Очистка состояния
     state.tasks_queue = [line.strip() for line in raw_lines if line.strip()]
     state.current_task_index = 0
     state.votes.clear()
@@ -118,7 +116,16 @@ async def receive_task_list(msg: types.Message, **kwargs):
 
     await fsm.clear()
     await start_next_task(msg)
+
+async def vote_timeout(msg: types.Message):
+    await asyncio.sleep(vote_timeout_seconds)
+    if not state.votes:
+        return
+    await reveal_votes(msg)
+
 async def start_next_task(msg: types.Message):
+    global active_vote_message_id, active_vote_task
+
     if getattr(state, "batch_completed", False):
         return
 
@@ -131,16 +138,28 @@ async def start_next_task(msg: types.Message):
     state.votes.clear()
 
     keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
-        [types.InlineKeyboardButton(text=v, callback_data=f"vote:{v}") for v in fibonacci_values[i:i+3]]
+        [types.InlineKeyboardButton(text=v, callback_data=f"vote:{v}") for v in fibonacci_values[i:i + 3]]
         for i in range(0, len(fibonacci_values), 3)
     ])
-    await msg.answer(
+
+    sent_msg = await msg.answer(
         f"📝 Оценка задачи:\n\n{state.current_task}\n\nВыберите вашу оценку:",
         reply_markup=keyboard
     )
 
+    active_vote_message_id = sent_msg.message_id
+    if active_vote_task:
+        active_vote_task.cancel()
+    active_vote_task = asyncio.create_task(vote_timeout(msg))
+
 @router.callback_query(F.data.startswith("vote:"))
-async def vote_handler(callback: types.CallbackQuery):
+async def vote_handler(callback: CallbackQuery):
+    global active_vote_message_id
+
+    if callback.message.message_id != active_vote_message_id:
+        await callback.answer("❌ Это уже неактивное голосование.", show_alert=True)
+        return
+
     if callback.message.chat.id != ALLOWED_CHAT_ID or callback.message.message_thread_id != ALLOWED_TOPIC_ID:
         return
 
@@ -156,10 +175,11 @@ async def vote_handler(callback: types.CallbackQuery):
     await callback.answer("✅ Голос учтён!" if not already_voted else "♻️ Обновлено")
 
     if len(state.votes) == len(state.participants):
-        await reveal_votes(callback)
+        await reveal_votes(callback.message)
 
-async def reveal_votes(callback: types.CallbackQuery):
-    msg = callback.message
+async def reveal_votes(msg: types.Message):
+    global active_vote_message_id
+
     if not state.votes:
         await msg.answer("❌ Нет голосов.")
         return
@@ -175,6 +195,7 @@ async def reveal_votes(callback: types.CallbackQuery):
             count += 1
         except ValueError:
             continue
+
     if count > 0:
         avg = round(total / count, 1)
         result += f"\n📈 Средняя оценка: {avg}"
@@ -182,6 +203,7 @@ async def reveal_votes(callback: types.CallbackQuery):
         result += "\n📈 Невозможно вычислить среднюю оценку"
 
     await msg.answer(result)
+    active_vote_message_id = None
 
     state.history.append({
         'task': state.current_task,
@@ -189,10 +211,10 @@ async def reveal_votes(callback: types.CallbackQuery):
         'timestamp': datetime.now()
     })
     state.last_batch.append({
-    'task': state.current_task,
-    'votes': copy.deepcopy(state.votes),
-    'timestamp': datetime.now()
-})
+        'task': state.current_task,
+        'votes': copy.deepcopy(state.votes),
+        'timestamp': datetime.now()
+    })
     state.current_task_index += 1
     await start_next_task(msg)
 
@@ -227,21 +249,20 @@ async def show_summary(msg: types.Message):
         else:
             block += "📈 Среднее: невозможно посчитать\n"
 
-        # Добавляем блок в текущий кусок или начинаем новый
-        if len(current_chunk) + len(block) >= 4000:
+        if len(current_chunk) + len(block) >= 3500:
             chunks.append(current_chunk)
             current_chunk = block
         else:
             current_chunk += block
 
-    # Добавим последний кусок
-    chunks.append(current_chunk)
+    if current_chunk:
+        chunks.append(current_chunk)
+
     chunks.append(f"\n📦 Сумма SP за банч: {round(sum_of_averages, 1)}")
 
     for part in chunks:
         await msg.answer(part.strip(), parse_mode="HTML")
 
-    # Добавим главное меню в последнем сообщении
     await msg.answer("📌 Главное меню:", reply_markup=get_main_menu())
 
 @router.message(Command("start", "help"))
@@ -263,10 +284,9 @@ async def help_command(msg: types.Message):
 @router.message()
 async def unknown_input(msg: types.Message):
     if msg.chat.id != ALLOWED_CHAT_ID or msg.message_thread_id != ALLOWED_TOPIC_ID:
-        return  # ⛔ не тот чат или топик — выходим
+        return
     if msg.from_user.id not in state.participants:
         await msg.answer("⚠️ Вы не авторизованы. Напишите `/join <токен>` или нажмите /start для инструкций.")
-
 
 @router.callback_query(F.data.startswith("kick_user:"))
 async def kick_user(callback: CallbackQuery):
@@ -280,6 +300,6 @@ async def kick_user(callback: CallbackQuery):
     state.votes.pop(uid, None)
 
     if name:
-        await callback.message.answer(f"🚫 Участник <b>{name}</b> удалён из сессии.")
+        await callback.message.answer(f"🚫 Участник <b>{name}</b> удалён из сессии.", parse_mode="HTML")
     else:
         await callback.message.answer("❌ Участник уже был удалён.")
