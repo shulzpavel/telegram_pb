@@ -2,9 +2,9 @@ from aiogram import types, Router, F
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery
-from config import ADMINS, ALLOWED_CHAT_ID, ALLOWED_TOPIC_ID
+from config import ALLOWED_CHAT_ID, ALLOWED_TOPIC_ID
 import state
-from datetime import datetime, timedelta
+from datetime import datetime
 import copy
 import asyncio
 
@@ -14,8 +14,11 @@ vote_timeout_seconds = 90
 active_vote_message_id = None
 active_vote_task = None
 
+# Только этим пользователям разрешены админские действия
+HARD_ADMINS = {'@shults_shults_shults', '@naumov_egor'}
+
 def is_admin(user):
-    return user.username and ('@' + user.username) in ADMINS
+    return user.username and ('@' + user.username) in HARD_ADMINS
 
 def get_main_menu():
     return types.InlineKeyboardMarkup(inline_keyboard=[
@@ -46,23 +49,20 @@ async def join(msg: types.Message):
         await msg.answer("📌 Главное меню:", reply_markup=get_main_menu())
 
 @router.callback_query(F.data.startswith("menu:"))
-async def handle_menu(callback: CallbackQuery, **kwargs):
-    fsm: FSMContext = kwargs["state"]
+async def handle_menu(callback: CallbackQuery, state_context: FSMContext):
     await callback.answer()
 
     if callback.message.chat.id != ALLOWED_CHAT_ID or callback.message.message_thread_id != ALLOWED_TOPIC_ID:
         return
 
-    action = callback.data.split(":")[1]
     if not is_admin(callback.from_user):
         return
 
+    action = callback.data.split(":")[1]
+
     if action == "new_task":
-        await callback.message.answer(
-            "✏️ Кидай список задач в формате:\nНазвание задачи https://ссылка",
-            parse_mode=None
-        )
-        await fsm.set_state(state.PokerStates.waiting_for_task_text)
+        await callback.message.answer("✏️ Кидай список задач в формате:\nНазвание задачи https://ссылка")
+        await state_context.set_state(state.PokerStates.waiting_for_task_text)
 
     elif action == "summary":
         await show_summary(callback.message)
@@ -101,26 +101,27 @@ async def handle_menu(callback: CallbackQuery, **kwargs):
         await callback.message.answer("👤 Выберите участника для удаления:", reply_markup=keyboard)
 
 @router.message(state.PokerStates.waiting_for_task_text)
-async def receive_task_list(msg: types.Message, **kwargs):
+async def receive_task_list(msg: types.Message, state_context: FSMContext):
     if msg.chat.id != ALLOWED_CHAT_ID or msg.message_thread_id != ALLOWED_TOPIC_ID:
         return
 
-    fsm: FSMContext = kwargs["state"]
     raw_lines = msg.text.strip().splitlines()
-
     state.tasks_queue = [line.strip() for line in raw_lines if line.strip()]
     state.current_task_index = 0
     state.votes.clear()
     state.last_batch.clear()
     state.batch_completed = False
 
-    await fsm.clear()
+    await state_context.clear()
     await start_next_task(msg)
 
 async def vote_timeout(msg: types.Message):
     await asyncio.sleep(vote_timeout_seconds)
-    if not state.votes:
+
+    if state.current_task_index >= len(state.tasks_queue):
         return
+
+    await msg.answer("⏰ Время на голосование вышло. Показываю результаты...")
     await reveal_votes(msg)
 
 async def start_next_task(msg: types.Message):
@@ -148,7 +149,7 @@ async def start_next_task(msg: types.Message):
     )
 
     active_vote_message_id = sent_msg.message_id
-    if active_vote_task:
+    if active_vote_task and not active_vote_task.done():
         active_vote_task.cancel()
     active_vote_task = asyncio.create_task(vote_timeout(msg))
 
@@ -270,10 +271,9 @@ async def help_command(msg: types.Message):
     if msg.chat.id != ALLOWED_CHAT_ID:
         return
     text = (
-        "Чтобы подключиться:\n"
         "🤖 Привет! Я бот для планирования задач Planning Poker.\n\n"
-        "Команды для админов (доступны через кнопки):\n"
-        "`/join magic_token`\n\n"
+        "Чтобы подключиться:\n"
+        "`/join your_token_here`\n\n"
         "— 🆕 Список задач\n"
         "— 📋 Итоги текущего банча\n"
         "— ♻️ Обнулить голоса\n"
