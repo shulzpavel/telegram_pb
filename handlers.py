@@ -23,7 +23,8 @@ def get_main_menu():
     return types.InlineKeyboardMarkup(inline_keyboard=[
         [
             types.InlineKeyboardButton(text="🆕 Список задач", callback_data="menu:new_task"),
-            types.InlineKeyboardButton(text="📋 Итоги дня", callback_data="menu:summary")
+            types.InlineKeyboardButton(text="📋 Итоги банча", callback_data="menu:summary_last"),
+            types.InlineKeyboardButton(text="📅 Итоги дня", callback_data="menu:summary_day")
         ],
         [
             types.InlineKeyboardButton(text="👥 Участники", callback_data="menu:show_participants"),
@@ -63,8 +64,10 @@ async def handle_menu(callback: CallbackQuery, **kwargs):
         await callback.message.answer("✏️ Кидай список задач в формате:\nНазвание задачи https://ссылка")
         await state_context.set_state(state.PokerStates.waiting_for_task_text)
 
-    elif action == "summary":
-        await show_summary(callback.message)
+    elif action == "summary_last":
+        await show_summary(callback.message, batch_only=True)
+    elif action == "summary_day":
+        await show_summary(callback.message, batch_only=False)
 
     elif action == "revote":
         state.votes.clear()
@@ -187,25 +190,7 @@ async def reveal_votes(msg: types.Message):
         await msg.answer("❌ Нет голосов.")
         return
 
-    result = "📊 Результаты голосования:\n"
-    total = 0
-    count = 0
-    for uid, value in state.votes.items():
-        name = state.participants.get(uid, f"ID {uid}")
-        result += f"- {name}: {value}\n"
-        try:
-            total += int(value)
-            count += 1
-        except ValueError:
-            continue
-
-    if count > 0:
-        avg = round(total / count, 1)
-        result += f"\n📈 Средняя оценка: {avg}"
-    else:
-        result += "\n📈 Невозможно вычислить среднюю оценку"
-
-    await msg.answer(result)
+    await msg.answer("✅ Задача оценена.")
     active_vote_message_id = None
     if active_vote_task and not active_vote_task.done():
         active_vote_task.cancel()
@@ -223,7 +208,7 @@ async def reveal_votes(msg: types.Message):
     state.current_task_index += 1
     await start_next_task(msg)
 
-async def show_summary(msg: types.Message):
+async def show_summary(msg: types.Message, batch_only=True):
     if not state.last_batch:
         await msg.answer("📭 Сессия ещё не проводилась.")
         return
@@ -233,26 +218,17 @@ async def show_summary(msg: types.Message):
     current_chunk = ""
     sum_of_averages = 0
 
-    for i, h in enumerate(state.last_batch, 1):
+    source = state.last_batch if batch_only else state.history
+    for i, h in enumerate(source, 1):
         block = f"\n🔹 <b>{i}. {h['task']}</b>\n"
-        total = 0
-        count = 0
 
-        for uid, v in h['votes'].items():
-            name = state.participants.get(uid, f"ID {uid}")
-            block += f"— {name}: {v}\n"
-            try:
-                total += int(v)
-                count += 1
-            except ValueError:
-                continue
-
-        if count > 0:
-            avg = round(total / count, 1)
-            sum_of_averages += avg
-            block += f"📈 Среднее: {avg}\n"
+        numeric_votes = [int(v) for v in h['votes'].values() if v.isdigit()]
+        if numeric_votes:
+            max_vote = max(numeric_votes)
+            sum_of_averages += max_vote
+            block += f"📈 Максимальная оценка: {max_vote}\n"
         else:
-            block += "📈 Среднее: невозможно посчитать\n"
+            block += "📈 Оценка: невозможно посчитать\n"
 
         if len(current_chunk) + len(block) >= 3500:
             chunks.append(current_chunk)
