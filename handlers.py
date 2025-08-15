@@ -1,12 +1,13 @@
 from aiogram import types, Router, F
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery
+from aiogram.types import CallbackQuery, FSInputFile
 from config import ALLOWED_CHAT_ID, ALLOWED_TOPIC_ID
 import state
 from datetime import datetime
 import copy
 import asyncio
+import os
 
 router = Router()
 fibonacci_values = ['1', '2', '3', '5', '8', '13']
@@ -200,6 +201,14 @@ async def vote_handler(callback: CallbackQuery):
             active_vote_task.cancel()
         await reveal_votes(callback.message)
 
+import copy
+from datetime import datetime
+import state
+from bot import start_next_task
+
+active_vote_message_id = None
+active_vote_task = None
+
 async def reveal_votes(msg: types.Message):
     global active_vote_message_id, active_vote_task
 
@@ -207,25 +216,8 @@ async def reveal_votes(msg: types.Message):
         await msg.answer("❌ Нет голосов.")
         return
 
-    result = "📊 Результаты голосования:\n"
-    total = 0
-    count = 0
-    for uid, value in state.votes.items():
-        name = state.participants.get(uid, f"ID {uid}")
-        result += f"- {name}: {value}\n"
-        try:
-            total += int(value)
-            count += 1
-        except ValueError:
-            continue
-
-    if count > 0:
-        avg = round(total / count, 1)
-        result += f"\n📈 Средняя оценка: {avg}"
-    else:
-        result += "\n📈 Невозможно вычислить среднюю оценку"
-
-    await msg.answer(result)
+    # Removed detailed voting results output per instructions
+    await msg.answer("✅ Задача оценена.")
     active_vote_message_id = None
     if active_vote_task and not active_vote_task.done():
         active_vote_task.cancel()
@@ -248,44 +240,21 @@ async def show_summary(msg: types.Message):
         await msg.answer("📭 Сессия ещё не проводилась.")
         return
 
-    header = "📦 Итоги последнего набора задач:\n"
-    chunks = [header]
-    current_chunk = ""
-    sum_of_averages = 0
+    from aiogram.types import FSInputFile
+    import os
 
-    for i, h in enumerate(state.last_batch, 1):
-        block = f"\n🔹 <b>{i}. {h['task']}</b>\n"
-        total = 0
-        count = 0
+    output_path = "summary_report.txt"
+    with open(output_path, "w") as f:
+        for i, h in enumerate(state.last_batch, 1):
+            f.write(f"{i}. {h['task']}\n")
+            for uid, v in h['votes'].items():
+                name = state.participants.get(uid, f"ID {uid}")
+                f.write(f"  - {name}: {v}\n")
+            f.write("\n")
 
-        for uid, v in h['votes'].items():
-            name = state.participants.get(uid, f"ID {uid}")
-            block += f"— {name}: {v}\n"
-            try:
-                total += int(v)
-                count += 1
-            except ValueError:
-                continue
-
-        if count > 0:
-            avg = round(total / count, 1)
-            sum_of_averages += avg
-            block += f"📈 Среднее: {avg}\n"
-        else:
-            block += "📈 Среднее: невозможно посчитать\n"
-
-        if len(current_chunk) + len(block) >= 3000:
-            chunks.append(current_chunk)
-            current_chunk = block
-        else:
-            current_chunk += block
-
-    if current_chunk:
-        chunks.append(current_chunk)
-
-    chunks.append(f"\n📦 Сумма SP за банч: {round(sum_of_averages, 1)}")
-
-    await msg.answer("\n".join(chunks).strip(), parse_mode="HTML")
+    file = FSInputFile(output_path)
+    await msg.answer_document(file, caption="📄 Отчет по последнему банчу")
+    os.remove(output_path)
 
     await msg.answer("📌 Главное меню:", reply_markup=get_main_menu())
 
