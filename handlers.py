@@ -2,9 +2,9 @@ from aiogram import types, Router, F
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, FSInputFile
-from config import ALLOWED_CHAT_ID, ALLOWED_TOPIC_ID
+from config import ADMINS, ALLOWED_CHAT_ID, ALLOWED_TOPIC_ID
 import state
-from datetime import datetime
+from datetime import datetime, timedelta
 import copy
 import asyncio
 import os
@@ -14,7 +14,6 @@ fibonacci_values = ['1', '2', '3', '5', '8', '13']
 vote_timeout_seconds = 90
 active_vote_message_id = None
 active_vote_task = None
-vote_active = False
 
 HARD_ADMINS = {'@shults_shults_shults', '@naumov_egor'}
 
@@ -28,7 +27,6 @@ def get_main_menu():
             types.InlineKeyboardButton(text="📋 Итоги дня", callback_data="menu:summary")
         ],
         [
-            types.InlineKeyboardButton(text="📊 Итоги всего дня", callback_data="menu:summary_all"),
             types.InlineKeyboardButton(text="👥 Участники", callback_data="menu:show_participants"),
             types.InlineKeyboardButton(text="🚪 Покинуть", callback_data="menu:leave"),
             types.InlineKeyboardButton(text="🗑️ Удалить участника", callback_data="menu:kick_participant")
@@ -51,8 +49,7 @@ async def join(msg: types.Message):
         await msg.answer("📌 Главное меню:", reply_markup=get_main_menu())
 
 @router.callback_query(F.data.startswith("menu:"))
-async def handle_menu(callback: CallbackQuery, **kwargs):
-    state_context: FSMContext = kwargs['state']
+async def handle_menu(callback: CallbackQuery, state_context: FSMContext):
     await callback.answer()
 
     if callback.message.chat.id != ALLOWED_CHAT_ID or callback.message.message_thread_id != ALLOWED_TOPIC_ID:
@@ -67,33 +64,7 @@ async def handle_menu(callback: CallbackQuery, **kwargs):
         await state_context.set_state(state.PokerStates.waiting_for_task_text)
 
     elif action == "summary":
-        await show_summary(callback.message)
-
-    elif action == "summary_all":
-        # New logic: output only the total sum of all averages from state.history
-        total_sum = 0
-        for entry in state.history:
-            votes = entry.get('votes', {})
-            total = 0
-            count = 0
-            for v in votes.values():
-                try:
-                    total += int(v)
-                    count += 1
-                except ValueError:
-                    continue
-            if count > 0:
-                avg = total / count
-                total_sum += avg
-        total_sum_rounded = round(total_sum, 1)
-        await callback.message.answer(f"📊 Общая сумма SP за день: {total_sum_rounded}")
-
-    elif action == "revote":
-        state.votes.clear()
-        await callback.message.answer("🔄 Голоса обнулены.")
-
-    elif action == "reveal":
-        await reveal_votes(callback.message)
+        await show_full_day_summary(callback.message)
 
     elif action == "show_participants":
         if not state.participants:
@@ -121,9 +92,24 @@ async def handle_menu(callback: CallbackQuery, **kwargs):
         keyboard = types.InlineKeyboardMarkup(inline_keyboard=buttons)
         await callback.message.answer("👤 Выберите участника для удаления:", reply_markup=keyboard)
 
+@router.callback_query(F.data.startswith("kick_user:"))
+async def kick_user(callback: CallbackQuery):
+    if callback.message.chat.id != ALLOWED_CHAT_ID or callback.message.message_thread_id != ALLOWED_TOPIC_ID:
+        return
+    if not is_admin(callback.from_user):
+        return
+
+    uid = int(callback.data.split(":")[1])
+    name = state.participants.pop(uid, None)
+    state.votes.pop(uid, None)
+
+    if name:
+        await callback.message.answer(f"🚫 Участник <b>{name}</b> удалён из сессии.", parse_mode="HTML")
+    else:
+        await callback.message.answer("❌ Участник уже был удалён.")
+
 @router.message(state.PokerStates.waiting_for_task_text)
-async def receive_task_list(msg: types.Message, **kwargs):
-    state_context: FSMContext = kwargs["state"]
+async def receive_task_list(msg: types.Message, state_context: FSMContext):
     if msg.chat.id != ALLOWED_CHAT_ID or msg.message_thread_id != ALLOWED_TOPIC_ID:
         return
 
@@ -147,7 +133,7 @@ async def vote_timeout(msg: types.Message):
     await reveal_votes(msg)
 
 async def start_next_task(msg: types.Message):
-    global active_vote_message_id, active_vote_task, vote_active
+    global active_vote_message_id, active_vote_task
 
     if getattr(state, "batch_completed", False):
         return
@@ -159,8 +145,6 @@ async def start_next_task(msg: types.Message):
 
     state.current_task = state.tasks_queue[state.current_task_index]
     state.votes.clear()
-
-    vote_active = True
 
     keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
         [types.InlineKeyboardButton(text=v, callback_data=f"vote:{v}") for v in fibonacci_values[i:i + 3]]
@@ -181,7 +165,7 @@ async def start_next_task(msg: types.Message):
 async def vote_handler(callback: CallbackQuery):
     global active_vote_message_id, active_vote_task
 
-    if not vote_active:
+    if callback.message.message_id != active_vote_message_id:
         await callback.answer("❌ Это уже неактивное голосование.", show_alert=True)
         return
 
@@ -204,21 +188,15 @@ async def vote_handler(callback: CallbackQuery):
             active_vote_task.cancel()
         await reveal_votes(callback.message)
 
-import copy
-from datetime import datetime
-import state
-
 async def reveal_votes(msg: types.Message):
-    global active_vote_message_id, active_vote_task, vote_active
+    global active_vote_message_id, active_vote_task
 
     if not state.votes:
         await msg.answer("❌ Нет голосов.")
         return
 
-    vote_active = False
-
-    # Removed detailed voting results output per instructions
     await msg.answer("✅ Задача оценена.")
+    active_vote_message_id = None
     if active_vote_task and not active_vote_task.done():
         active_vote_task.cancel()
 
@@ -240,14 +218,12 @@ async def show_summary(msg: types.Message):
         await msg.answer("📭 Сессия ещё не проводилась.")
         return
 
-    from aiogram.types import FSInputFile
-    import os
-
     output_path = "summary_report.txt"
     with open(output_path, "w") as f:
         for i, h in enumerate(state.last_batch, 1):
             f.write(f"{i}. {h['task']}\n")
-            for uid, v in h['votes'].items():
+            sorted_votes = sorted(h['votes'].items(), key=lambda x: state.participants.get(x[0], ""))
+            for uid, v in sorted_votes:
                 name = state.participants.get(uid, f"ID {uid}")
                 f.write(f"  - {name}: {v}\n")
             f.write("\n")
@@ -255,8 +231,34 @@ async def show_summary(msg: types.Message):
     file = FSInputFile(output_path)
     await msg.answer_document(file, caption="📄 Отчет по последнему банчу")
     os.remove(output_path)
-
     await msg.answer("📌 Главное меню:", reply_markup=get_main_menu())
+
+async def show_full_day_summary(msg: types.Message):
+    if not state.history:
+        await msg.answer("📭 За сегодня ещё не было задач.")
+        return
+
+    output_path = "day_summary.txt"
+    total = 0
+    with open(output_path, "w") as f:
+        for i, h in enumerate(state.history, 1):
+            f.write(f"{i}. {h['task']}\n")
+            max_vote = 0
+            sorted_votes = sorted(h['votes'].items(), key=lambda x: state.participants.get(x[0], ""))
+            for uid, v in sorted_votes:
+                name = state.participants.get(uid, f"ID {uid}")
+                f.write(f"  - {name}: {v}\n")
+                try:
+                    max_vote = max(max_vote, int(v))
+                except:
+                    pass
+            total += max_vote
+            f.write("\n")
+        f.write(f"Всего SP за день: {total}\n")
+
+    file = FSInputFile(output_path)
+    await msg.answer_document(file, caption="📊 Итоги дня")
+    os.remove(output_path)
 
 @router.message(Command("start", "help"))
 async def help_command(msg: types.Message):
@@ -280,19 +282,3 @@ async def unknown_input(msg: types.Message):
         return
     if msg.from_user.id not in state.participants:
         await msg.answer("⚠️ Вы не авторизованы. Напишите `/join <токен>` или нажмите /start для инструкций.")
-
-@router.callback_query(F.data.startswith("kick_user:"))
-async def kick_user(callback: CallbackQuery):
-    if callback.message.chat.id != ALLOWED_CHAT_ID or callback.message.message_thread_id != ALLOWED_TOPIC_ID:
-        return
-    if not is_admin(callback.from_user):
-        return
-
-    uid = int(callback.data.split(":")[1])
-    name = state.participants.pop(uid, None)
-    state.votes.pop(uid, None)
-
-    if name:
-        await callback.message.answer(f"🚫 Участник <b>{name}</b> удалён из сессии.", parse_mode="HTML")
-    else:
-        await callback.message.answer("❌ Участник уже был удалён.")
