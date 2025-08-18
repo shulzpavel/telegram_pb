@@ -49,7 +49,7 @@ async def join(msg: types.Message):
         await msg.answer("📌 Главное меню:", reply_markup=get_main_menu())
 
 @router.callback_query(F.data.startswith("menu:"))
-async def handle_menu(callback: CallbackQuery, state: FSMContext):
+async def handle_menu(callback: CallbackQuery, fsm_state: FSMContext):
 
     await callback.answer()
 
@@ -61,14 +61,16 @@ async def handle_menu(callback: CallbackQuery, state: FSMContext):
     action = callback.data.split(":")[1]
 
     if action == "new_task":
+        from states import PokerStates
         await callback.message.answer("✏️ Кидай список задач в формате:\nНазвание задачи https://ссылка")
-        await state.set_state(state.PokerStates.waiting_for_task_text)
+        await state.set_state(PokerStates.waiting_for_task_text)
 
     elif action == "summary":
         await show_full_day_summary(callback.message)
 
     elif action == "show_participants":
-        if not state.participants:
+        data = await state.get_data()
+        if not data.get("participants"):
             await callback.message.answer("⛔ Участников пока нет.")
         else:
             text = "👥 Участники:\n" + "\n".join(f"- {v}" for v in state.participants.values())
@@ -282,4 +284,4 @@ async def unknown_input(msg: types.Message):
     if msg.chat.id != ALLOWED_CHAT_ID or msg.message_thread_id != ALLOWED_TOPIC_ID:
         return
     if msg.from_user.id not in state.participants:
-        await msg.answer("⚠️ Вы не авторизованы. Напишите `/join <токен>` или нажмите /start для инструкций.")
+        await msg.answer("⚠️ Вы не авторизованы. Напишите <code>/join &lt;токен&gt;</code> или нажмите /start для инструкций.", parse_mode="HTML")
