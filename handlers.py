@@ -49,7 +49,7 @@ async def join(msg: types.Message):
         await msg.answer("📌 Главное меню:", reply_markup=get_main_menu())
 
 @router.callback_query(F.data.startswith("menu:"))
-async def handle_menu(callback: CallbackQuery, state_context: FSMContext):
+async def handle_menu(callback: CallbackQuery, fsm_state: FSMContext, **kwargs):
 
     await callback.answer()
 
@@ -63,7 +63,7 @@ async def handle_menu(callback: CallbackQuery, state_context: FSMContext):
     if action == "new_task":
         from states import PokerStates
         await callback.message.answer("✏️ Кидай список задач в формате:\nНазвание задачи https://ссылка")
-        await state_context.set_state(PokerStates.waiting_for_task_text)
+        await fsm_state.set_state(PokerStates.waiting_for_task_text)
 
     elif action == "summary":
         await show_full_day_summary(callback.message)
@@ -112,7 +112,7 @@ async def kick_user(callback: CallbackQuery):
         await callback.message.answer("❌ Участник уже был удалён.")
 
 @router.message(state.PokerStates.waiting_for_task_text)
-async def receive_task_list(msg: types.Message, state_context: FSMContext):
+async def receive_task_list(msg: types.Message, fsm_state: FSMContext):
     if msg.chat.id != ALLOWED_CHAT_ID or msg.message_thread_id != ALLOWED_TOPIC_ID:
         return
 
@@ -123,7 +123,7 @@ async def receive_task_list(msg: types.Message, state_context: FSMContext):
     state.last_batch.clear()
     state.batch_completed = False
 
-    await state_context.clear()
+    await fsm_state.clear()
     await start_next_task(msg)
 
 async def vote_timeout(msg: types.Message):
