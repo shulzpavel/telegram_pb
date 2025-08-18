@@ -62,7 +62,7 @@ async def handle_menu(callback: CallbackQuery, fsm_state: FSMContext):
 
     if action == "new_task":
         await callback.message.answer("✏️ Кидай список задач в формате:\nНазвание задачи https://ссылка")
-        await state_context.set_state(state.PokerStates.waiting_for_task_text)
+        await fsm_state.set_state(state.PokerStates.waiting_for_task_text)
 
     elif action == "summary":
         await show_full_day_summary(callback.message)
