@@ -62,6 +62,18 @@ def _build_admin_keyboard() -> types.InlineKeyboardMarkup:
 
 @router.message(Command("join"))
 async def join(msg: types.Message):
+    # Админ не участвует в голосовании и не должен попадать в participants
+    if is_admin(msg.from_user):
+        # на всякий случай почистим, если когда-то добавляли
+        state_storage.participants.pop(msg.from_user.id, None)
+        state_storage.votes.pop(msg.from_user.id, None)
+        try:
+            await msg.answer("📌 Главное меню:", reply_markup=get_main_menu())
+        except TelegramRetryAfter as e:
+            await asyncio.sleep(e.retry_after)
+            await msg.answer("📌 Главное меню:", reply_markup=get_main_menu())
+        return
+
     if msg.chat.id != ALLOWED_CHAT_ID or msg.message_thread_id != ALLOWED_TOPIC_ID:
         return
 
@@ -80,12 +92,6 @@ async def join(msg: types.Message):
     except TelegramRetryAfter as e:
         await asyncio.sleep(e.retry_after)
         await msg.answer(f"✅ {msg.from_user.full_name} присоединился к сессии.")
-    if is_admin(msg.from_user):
-        try:
-            await msg.answer("📌 Главное меню:", reply_markup=get_main_menu())
-        except TelegramRetryAfter as e:
-            await asyncio.sleep(e.retry_after)
-            await msg.answer("📌 Главное меню:", reply_markup=get_main_menu())
 
 @router.callback_query(F.data.startswith("menu:"))
 async def handle_menu(callback: CallbackQuery, state: FSMContext):
@@ -96,6 +102,10 @@ async def handle_menu(callback: CallbackQuery, state: FSMContext):
         return
     if not is_admin(callback.from_user):
         return
+
+    # гарантируем, что админ не учитывается в голосовании
+    state_storage.participants.pop(callback.from_user.id, None)
+    state_storage.votes.pop(callback.from_user.id, None)
 
     action = callback.data.split(":")[1]
 
@@ -184,6 +194,10 @@ async def kick_user(callback: CallbackQuery):
 async def receive_task_list(msg: types.Message, state: FSMContext):
     if msg.chat.id != ALLOWED_CHAT_ID or msg.message_thread_id != ALLOWED_TOPIC_ID:
         return
+
+    # на всякий случай: админ не должен числиться в участниках/голосах
+    state_storage.participants.pop(msg.from_user.id, None)
+    state_storage.votes.pop(msg.from_user.id, None)
 
     raw_lines = msg.text.strip().splitlines()
     state_storage.tasks_queue = [line.strip() for line in raw_lines if line.strip()]
@@ -537,6 +551,9 @@ async def help_command(msg: types.Message):
 @router.message()
 async def unknown_input(msg: types.Message):
     if msg.chat.id != ALLOWED_CHAT_ID or msg.message_thread_id != ALLOWED_TOPIC_ID:
+        return
+    # Админ управляет, но не «авторизуется» как участник
+    if is_admin(msg.from_user):
         return
     if msg.from_user.id not in state_storage.participants:
         try:
