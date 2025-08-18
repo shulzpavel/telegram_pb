@@ -258,7 +258,9 @@ async def reveal_votes(msg: types.Message):
     except Exception:
         pass
 
-    await msg.answer("✅ Задача оценена.")
+    total_tasks = len(state_storage.tasks_queue)
+    remaining_tasks = max(0, total_tasks - (state_storage.current_task_index + 1))
+    await msg.answer(f"✅ Задача оценена. Осталось {remaining_tasks} из {total_tasks} задач.")
     active_vote_message_id = None
     if active_vote_task and not active_vote_task.done():
         active_vote_task.cancel()
