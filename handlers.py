@@ -2,7 +2,7 @@ from aiogram import types, Router, F
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, FSInputFile
-from config import ADMINS, ALLOWED_CHAT_ID, ALLOWED_TOPIC_ID
+from config import HARD_ADMINS, ALLOWED_CHAT_ID, ALLOWED_TOPIC_ID
 import state as state_storage
 from state import PokerStates
 from datetime import datetime, timedelta
