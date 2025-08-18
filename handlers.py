@@ -49,7 +49,7 @@ async def join(msg: types.Message):
         await msg.answer("📌 Главное меню:", reply_markup=get_main_menu())
 
 @router.callback_query(F.data.startswith("menu:"))
-async def handle_menu(callback: CallbackQuery, state_context: FSMContext):
+async def handle_menu(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
     if callback.message.chat.id != ALLOWED_CHAT_ID or callback.message.message_thread_id != ALLOWED_TOPIC_ID:
