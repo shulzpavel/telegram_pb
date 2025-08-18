@@ -1,7 +1,11 @@
 from aiogram.fsm.state import State, StatesGroup
-from datetime import datetime
 
 class PokerStates(StatesGroup):
+    idle = State()
+    entering_batch = State()        # ввод пачки задач
+    voting = State()                # идёт голосование
+    waiting_for_votes = State()     # ждём отстающих
+    showing_results = State()       # показываем итоги
     waiting_for_task_text = State()
 
 participants = {}
