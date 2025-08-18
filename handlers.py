@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 import copy
 import asyncio
 import os
+import aiohttp
 
 router = Router()
 fibonacci_values = ['1', '2', '3', '5', '8', '13']
@@ -29,6 +30,9 @@ def get_main_menu():
             types.InlineKeyboardButton(text="📋 Итоги дня", callback_data="menu:summary")
         ],
         [
+            types.InlineKeyboardButton(text="📥 Импорт из Jira", callback_data="menu:import_jira"),
+        ],
+        [
             types.InlineKeyboardButton(text="👥 Участники", callback_data="menu:show_participants"),
             types.InlineKeyboardButton(text="🚪 Покинуть", callback_data="menu:leave"),
             types.InlineKeyboardButton(text="🗑️ Удалить участника", callback_data="menu:kick_participant")
@@ -45,6 +49,48 @@ def _build_vote_keyboard() -> types.InlineKeyboardMarkup:
         [types.InlineKeyboardButton(text=v, callback_data=f"vote:{v}") for v in fibonacci_values[i:i + 3]]
         for i in range(0, len(fibonacci_values), 3)
     ])
+
+def _get_jira_config():
+    # Попытка достать из config.py, иначе из переменных окружения
+    from config import __dict__ as cfg
+    base_url = cfg.get('JIRA_BASE_URL') or os.getenv('JIRA_BASE_URL')
+    email = cfg.get('JIRA_EMAIL') or os.getenv('JIRA_EMAIL')
+    token = cfg.get('JIRA_API_TOKEN') or os.getenv('JIRA_API_TOKEN')
+    max_results = cfg.get('JIRA_MAX_RESULTS') or int(os.getenv('JIRA_MAX_RESULTS') or 20)
+    return base_url, email, token, max_results
+
+async def jira_search(jql: str, limit: int = 20):
+    base_url, email, token, max_results = _get_jira_config()
+    if not (base_url and email and token):
+        return {'error': 'Jira не сконфигурирована. Задай JIRA_BASE_URL, JIRA_EMAIL, JIRA_API_TOKEN в config.py или переменных окружения.'}
+    url = base_url.rstrip('/') + '/rest/api/3/search'
+    payload = {
+        'jql': jql,
+        'startAt': 0,
+        'maxResults': min(limit, max_results),
+        'fields': ['summary']
+    }
+    auth = aiohttp.BasicAuth(email, token)
+    headers = {'Accept': 'application/json', 'Content-Type': 'application/json'}
+    async with aiohttp.ClientSession(auth=auth, headers=headers) as session:
+        async with session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=30)) as resp:
+            if resp.status == 401:
+                return {'error': 'Jira 401 Unauthorized. Проверь JIRA_EMAIL и JIRA_API_TOKEN.'}
+            if resp.status == 400:
+                data = await resp.json()
+                return {'error': f"Ошибка JQL: {data.get('errorMessages') or data}"}
+            if resp.status >= 300:
+                text = await resp.text()
+                return {'error': f'Jira HTTP {resp.status}: {text[:300]}'}
+            data = await resp.json()
+            issues = data.get('issues', [])
+            results = []
+            for it in issues:
+                key = it.get('key')
+                summary = (it.get('fields') or {}).get('summary') or ''
+                url_issue = base_url.rstrip('/') + '/browse/' + key
+                results.append({'key': key, 'summary': summary, 'url': url_issue})
+            return {'issues': results}
 
 @router.message(Command("join"))
 async def join(msg: types.Message):
@@ -79,6 +125,13 @@ async def handle_menu(callback: CallbackQuery, state: FSMContext):
 
     elif action == "summary":
         await show_full_day_summary(callback.message)
+
+    elif action == "import_jira":
+        await callback.message.answer(
+            "🔎 Отправь JQL-запрос одной строкой. Пример: `project = MEDIA and statusCategory != Done order by updated desc`",
+            parse_mode="Markdown"
+        )
+        await state.set_state(PokerStates.waiting_for_jql)
 
     elif action == "show_participants":
         if not state_storage.participants:
@@ -136,6 +189,50 @@ async def receive_task_list(msg: types.Message, state: FSMContext):
 
     await state.clear()
     await start_next_task(msg)
+
+@router.message(PokerStates.waiting_for_jql)
+async def receive_jql(msg: types.Message, state: FSMContext):
+    if msg.chat.id != ALLOWED_CHAT_ID or msg.message_thread_id != ALLOWED_TOPIC_ID:
+        return
+    jql = msg.text.strip()
+    await _handle_jql_and_start(msg, state, jql)
+
+async def _handle_jql_and_start(msg: types.Message, state: FSMContext, jql: str):
+    if not jql:
+        await msg.answer("❌ Пустой JQL.")
+        return
+    await msg.answer("⏳ Ищу задачи в Jira по JQL...")
+    result = await jira_search(jql)
+    if 'error' in result:
+        await msg.answer(f"❌ {result['error']}")
+        await state.clear()
+        return
+    issues = result.get('issues', [])
+    if not issues:
+        await msg.answer("📭 По этому JQL задач не нашлось.")
+        await state.clear()
+        return
+    # Превращаем в список строк под текущий формат банча
+    lines = [f"{it['key']} {it['summary']} {it['url']}".strip() for it in issues]
+    state_storage.tasks_queue = lines
+    state_storage.current_task_index = 0
+    state_storage.votes.clear()
+    state_storage.last_batch.clear()
+    state_storage.batch_completed = False
+    await state.clear()
+    await msg.answer(f"✅ Импортировано из Jira: {len(lines)} задач. Запускаю голосование…")
+    await start_next_task(msg)
+
+@router.message(Command("jql"))
+async def jql_command(msg: types.Message, state: FSMContext):
+    if msg.chat.id != ALLOWED_CHAT_ID or msg.message_thread_id != ALLOWED_TOPIC_ID:
+        return
+    parts = msg.text.split(maxsplit=1)
+    if len(parts) < 2:
+        await msg.answer("⚠️ Использование: /jql <JQL>")
+        return
+    jql = parts[1].strip()
+    await _handle_jql_and_start(msg, state, jql)
 
 async def vote_timeout(msg: types.Message):
     await asyncio.sleep(vote_timeout_seconds)
