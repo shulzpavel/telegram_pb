@@ -2,7 +2,7 @@ from aiogram import types, Router, F
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, FSInputFile
-from aiogram.exceptions import TelegramBadRequest
+from aiogram.exceptions import TelegramBadRequest, TelegramRetryAfter
 from config import HARD_ADMINS, ALLOWED_CHAT_ID, ALLOWED_TOPIC_ID
 import state as state_storage
 from state import PokerStates
@@ -67,13 +67,25 @@ async def join(msg: types.Message):
 
     args = msg.text.split()
     if len(args) != 2 or args[1] != state_storage.current_token:
-        await msg.answer("❌ Неверный токен.")
+        try:
+            await msg.answer("❌ Неверный токен.")
+        except TelegramRetryAfter as e:
+            await asyncio.sleep(e.retry_after)
+            await msg.answer("❌ Неверный токен.")
         return
 
     state_storage.participants[msg.from_user.id] = msg.from_user.full_name
-    await msg.answer(f"✅ {msg.from_user.full_name} присоединился к сессии.")
+    try:
+        await msg.answer(f"✅ {msg.from_user.full_name} присоединился к сессии.")
+    except TelegramRetryAfter as e:
+        await asyncio.sleep(e.retry_after)
+        await msg.answer(f"✅ {msg.from_user.full_name} присоединился к сессии.")
     if is_admin(msg.from_user):
-        await msg.answer("📌 Главное меню:", reply_markup=get_main_menu())
+        try:
+            await msg.answer("📌 Главное меню:", reply_markup=get_main_menu())
+        except TelegramRetryAfter as e:
+            await asyncio.sleep(e.retry_after)
+            await msg.answer("📌 Главное меню:", reply_markup=get_main_menu())
 
 @router.callback_query(F.data.startswith("menu:"))
 async def handle_menu(callback: CallbackQuery, state: FSMContext):
@@ -88,30 +100,49 @@ async def handle_menu(callback: CallbackQuery, state: FSMContext):
     action = callback.data.split(":")[1]
 
     if action == "new_task":
-        await callback.message.answer("✏️ Кидай список задач в формате:\nНазвание задачи https://ссылка")
+        try:
+            await callback.message.answer("✏️ Кидай список задач в формате:\nНазвание задачи https://ссылка")
+        except TelegramRetryAfter as e:
+            await asyncio.sleep(e.retry_after)
+            await callback.message.answer("✏️ Кидай список задач в формате:\nНазвание задачи https://ссылка")
         await state.set_state(PokerStates.waiting_for_task_text)
 
     elif action == "summary":
         await show_full_day_summary(callback.message)
 
-
     elif action == "show_participants":
         if not state_storage.participants:
-            await callback.message.answer("⛔ Участников пока нет.")
+            try:
+                await callback.message.answer("⛔ Участников пока нет.")
+            except TelegramRetryAfter as e:
+                await asyncio.sleep(e.retry_after)
+                await callback.message.answer("⛔ Участников пока нет.")
         else:
             text = "👥 Участники:\n" + "\n".join(f"- {v}" for v in state_storage.participants.values())
-            await callback.message.answer(text)
+            try:
+                await callback.message.answer(text)
+            except TelegramRetryAfter as e:
+                await asyncio.sleep(e.retry_after)
+                await callback.message.answer(text)
 
     elif action == "leave":
         user_id = callback.from_user.id
         if user_id in state_storage.participants:
             del state_storage.participants[user_id]
             state_storage.votes.pop(user_id, None)
-            await callback.message.answer("🚪 Вы покинули сессию.")
+            try:
+                await callback.message.answer("🚪 Вы покинули сессию.")
+            except TelegramRetryAfter as e:
+                await asyncio.sleep(e.retry_after)
+                await callback.message.answer("🚪 Вы покинули сессию.")
 
     elif action == "kick_participant":
         if not state_storage.participants:
-            await callback.message.answer("⛔ Участников пока нет.")
+            try:
+                await callback.message.answer("⛔ Участников пока нет.")
+            except TelegramRetryAfter as e:
+                await asyncio.sleep(e.retry_after)
+                await callback.message.answer("⛔ Участников пока нет.")
             return
 
         buttons = [
@@ -119,7 +150,11 @@ async def handle_menu(callback: CallbackQuery, state: FSMContext):
             for uid, name in state_storage.participants.items()
         ]
         keyboard = types.InlineKeyboardMarkup(inline_keyboard=buttons)
-        await callback.message.answer("👤 Выберите участника для удаления:", reply_markup=keyboard)
+        try:
+            await callback.message.answer("👤 Выберите участника для удаления:", reply_markup=keyboard)
+        except TelegramRetryAfter as e:
+            await asyncio.sleep(e.retry_after)
+            await callback.message.answer("👤 Выберите участника для удаления:", reply_markup=keyboard)
 
 @router.callback_query(F.data.startswith("kick_user:"))
 async def kick_user(callback: CallbackQuery):
@@ -133,9 +168,17 @@ async def kick_user(callback: CallbackQuery):
     state_storage.votes.pop(uid, None)
 
     if name:
-        await callback.message.answer(f"🚫 Участник <b>{name}</b> удалён из сессии.", parse_mode="HTML")
+        try:
+            await callback.message.answer(f"🚫 Участник <b>{name}</b> удалён из сессии.", parse_mode="HTML")
+        except TelegramRetryAfter as e:
+            await asyncio.sleep(e.retry_after)
+            await callback.message.answer(f"🚫 Участник <b>{name}</b> удалён из сессии.", parse_mode="HTML")
     else:
-        await callback.message.answer("❌ Участник уже был удалён.")
+        try:
+            await callback.message.answer("❌ Участник уже был удалён.")
+        except TelegramRetryAfter as e:
+            await asyncio.sleep(e.retry_after)
+            await callback.message.answer("❌ Участник уже был удалён.")
 
 @router.message(PokerStates.waiting_for_task_text)
 async def receive_task_list(msg: types.Message, state: FSMContext):
@@ -159,7 +202,11 @@ async def vote_timeout(msg: types.Message):
     if state_storage.current_task_index >= len(state_storage.tasks_queue):
         return
 
-    await msg.answer("⏰ Время на голосование вышло. Показываю результаты...")
+    try:
+        await msg.answer("⏰ Время на голосование вышло. Показываю результаты...")
+    except TelegramRetryAfter as e:
+        await asyncio.sleep(e.retry_after)
+        await msg.answer("⏰ Время на голосование вышло. Показываю результаты...")
     await reveal_votes(msg)
 
 async def start_next_task(msg: types.Message):
@@ -188,7 +235,11 @@ async def start_next_task(msg: types.Message):
         f"⏳ Осталось: {_format_mmss(remaining)}"
     )
 
-    sent_msg = await msg.answer(text, reply_markup=_build_admin_keyboard(), disable_web_page_preview=True)
+    try:
+        sent_msg = await msg.answer(text, reply_markup=_build_admin_keyboard(), disable_web_page_preview=True)
+    except TelegramRetryAfter as e:
+        await asyncio.sleep(e.retry_after)
+        sent_msg = await msg.answer(text, reply_markup=_build_admin_keyboard(), disable_web_page_preview=True)
 
     active_vote_message_id = sent_msg.message_id
 
@@ -217,7 +268,11 @@ async def update_timer(msg: types.Message):
                 # упоминаем по user_id через HTML-ссылки
                 mentions = [f'<a href="tg://user?id={uid}">{state_storage.participants.get(uid, "user")}</a>' for uid in not_voted]
                 try:
-                    await msg.answer("⏳ Осталось 10 сек. Ждём: " + ", ".join(mentions), parse_mode="HTML")
+                    try:
+                        await msg.answer("⏳ Осталось 10 сек. Ждём: " + ", ".join(mentions), parse_mode="HTML")
+                    except TelegramRetryAfter as e:
+                        await asyncio.sleep(e.retry_after)
+                        await msg.answer("⏳ Осталось 10 сек. Ждём: " + ", ".join(mentions), parse_mode="HTML")
                 except Exception:
                     pass
             t10_ping_sent = True
@@ -258,12 +313,20 @@ async def vote_handler(callback: CallbackQuery):
     user_id = callback.from_user.id
 
     if user_id not in state_storage.participants:
-        await callback.answer("❌ Вы не зарегистрированы через /join.")
+        try:
+            await callback.answer("❌ Вы не зарегистрированы через /join.")
+        except TelegramRetryAfter as e:
+            await asyncio.sleep(e.retry_after)
+            await callback.answer("❌ Вы не зарегистрированы через /join.")
         return
 
     already_voted = user_id in state_storage.votes
     state_storage.votes[user_id] = value
-    await callback.answer("✅ Голос учтён!" if not already_voted else "♻️ Обновлено")
+    try:
+        await callback.answer("✅ Голос учтён!" if not already_voted else "♻️ Обновлено")
+    except TelegramRetryAfter as e:
+        await asyncio.sleep(e.retry_after)
+        await callback.answer("✅ Голос учтён!" if not already_voted else "♻️ Обновлено")
 
     if len(state_storage.votes) == len(state_storage.participants):
         if active_vote_task and not active_vote_task.done():
@@ -281,26 +344,46 @@ async def timer_control(callback: CallbackQuery):
     if callback.message.chat.id != ALLOWED_CHAT_ID or callback.message.message_thread_id != ALLOWED_TOPIC_ID:
         return
     if not is_admin(callback.from_user):
-        await callback.answer("Только админ.", show_alert=True)
+        try:
+            await callback.answer("Только админ.", show_alert=True)
+        except TelegramRetryAfter as e:
+            await asyncio.sleep(e.retry_after)
+            await callback.answer("Только админ.", show_alert=True)
         return
     if callback.message.message_id != active_vote_message_id:
-        await callback.answer("Это уже неактивное голосование.")
+        try:
+            await callback.answer("Это уже неактивное голосование.")
+        except TelegramRetryAfter as e:
+            await asyncio.sleep(e.retry_after)
+            await callback.answer("Это уже неактивное голосование.")
         return
 
     now = datetime.now()
     action = callback.data.split(":")[1]
     if action == "+30":
         state_storage.vote_deadline = (getattr(state_storage, 'vote_deadline', now) or now) + timedelta(seconds=30)
-        await callback.answer("⏱ +30 сек")
+        try:
+            await callback.answer("⏱ +30 сек")
+        except TelegramRetryAfter as e:
+            await asyncio.sleep(e.retry_after)
+            await callback.answer("⏱ +30 сек")
     elif action == "-30":
         state_storage.vote_deadline = max(now, (getattr(state_storage, 'vote_deadline', now) or now) - timedelta(seconds=30))
-        await callback.answer("⏱ −30 сек")
+        try:
+            await callback.answer("⏱ −30 сек")
+        except TelegramRetryAfter as e:
+            await asyncio.sleep(e.retry_after)
+            await callback.answer("⏱ −30 сек")
     elif action == "finish":
         if active_vote_task and not active_vote_task.done():
             active_vote_task.cancel()
         if active_timer_task and not active_timer_task.done():
             active_timer_task.cancel()
-        await callback.answer("Завершено")
+        try:
+            await callback.answer("Завершено")
+        except TelegramRetryAfter as e:
+            await asyncio.sleep(e.retry_after)
+            await callback.answer("Завершено")
         await reveal_votes(callback.message)
         return
 
@@ -326,7 +409,11 @@ async def reveal_votes(msg: types.Message):
     global active_vote_message_id, active_vote_task
 
     if not state_storage.votes:
-        await msg.answer("❌ Нет голосов.")
+        try:
+            await msg.answer("❌ Нет голосов.")
+        except TelegramRetryAfter as e:
+            await asyncio.sleep(e.retry_after)
+            await msg.answer("❌ Нет голосов.")
         return
 
     # останавливаем таймер
@@ -338,7 +425,11 @@ async def reveal_votes(msg: types.Message):
 
     total_tasks = len(state_storage.tasks_queue)
     remaining_tasks = max(0, total_tasks - (state_storage.current_task_index + 1))
-    await msg.answer(f"✅ Задача оценена. Осталось {remaining_tasks} из {total_tasks} задач.")
+    try:
+        await msg.answer(f"✅ Задача оценена. Осталось {remaining_tasks} из {total_tasks} задач.")
+    except TelegramRetryAfter as e:
+        await asyncio.sleep(e.retry_after)
+        await msg.answer(f"✅ Задача оценена. Осталось {remaining_tasks} из {total_tasks} задач.")
     active_vote_message_id = None
     if active_vote_task and not active_vote_task.done():
         active_vote_task.cancel()
@@ -358,7 +449,11 @@ async def reveal_votes(msg: types.Message):
 
 async def show_summary(msg: types.Message):
     if not state_storage.last_batch:
-        await msg.answer("📭 Сессия ещё не проводилась.")
+        try:
+            await msg.answer("📭 Сессия ещё не проводилась.")
+        except TelegramRetryAfter as e:
+            await asyncio.sleep(e.retry_after)
+            await msg.answer("📭 Сессия ещё не проводилась.")
         return
 
     output_path = "summary_report.txt"
@@ -372,13 +467,25 @@ async def show_summary(msg: types.Message):
             f.write("\n")
 
     file = FSInputFile(output_path)
-    await msg.answer_document(file, caption="📄 Отчет по последнему банчу")
+    try:
+        await msg.answer_document(file, caption="📄 Отчет по последнему банчу")
+    except TelegramRetryAfter as e:
+        await asyncio.sleep(e.retry_after)
+        await msg.answer_document(file, caption="📄 Отчет по последнему банчу")
     os.remove(output_path)
-    await msg.answer("📌 Главное меню:", reply_markup=get_main_menu())
+    try:
+        await msg.answer("📌 Главное меню:", reply_markup=get_main_menu())
+    except TelegramRetryAfter as e:
+        await asyncio.sleep(e.retry_after)
+        await msg.answer("📌 Главное меню:", reply_markup=get_main_menu())
 
 async def show_full_day_summary(msg: types.Message):
     if not state_storage.history:
-        await msg.answer("📭 За сегодня ещё не было задач.")
+        try:
+            await msg.answer("📭 За сегодня ещё не было задач.")
+        except TelegramRetryAfter as e:
+            await asyncio.sleep(e.retry_after)
+            await msg.answer("📭 За сегодня ещё не было задач.")
         return
 
     output_path = "day_summary.txt"
@@ -400,7 +507,11 @@ async def show_full_day_summary(msg: types.Message):
         f.write(f"Всего SP за день: {total}\n")
 
     file = FSInputFile(output_path)
-    await msg.answer_document(file, caption="📊 Итоги дня")
+    try:
+        await msg.answer_document(file, caption="📊 Итоги дня")
+    except TelegramRetryAfter as e:
+        await asyncio.sleep(e.retry_after)
+        await msg.answer_document(file, caption="📊 Итоги дня")
     os.remove(output_path)
 
 @router.message(Command("start", "help"))
@@ -417,11 +528,19 @@ async def help_command(msg: types.Message):
         "— ♻️ Обнулить голоса\n"
         "— 🔚 Завершить вручную\n"
     )
-    await msg.answer(text, parse_mode="Markdown")
+    try:
+        await msg.answer(text, parse_mode="Markdown")
+    except TelegramRetryAfter as e:
+        await asyncio.sleep(e.retry_after)
+        await msg.answer(text, parse_mode="Markdown")
 
 @router.message()
 async def unknown_input(msg: types.Message):
     if msg.chat.id != ALLOWED_CHAT_ID or msg.message_thread_id != ALLOWED_TOPIC_ID:
         return
     if msg.from_user.id not in state_storage.participants:
-        await msg.answer("⚠️ Вы не авторизованы. Напишите <code>/join &lt;токен&gt;</code> или нажмите /start для инструкций.", parse_mode="HTML")
+        try:
+            await msg.answer("⚠️ Вы не авторизованы. Напишите <code>/join &lt;токен&gt;</code> или нажмите /start для инструкций.", parse_mode="HTML")
+        except TelegramRetryAfter as e:
+            await asyncio.sleep(e.retry_after)
+            await msg.answer("⚠️ Вы не авторизованы. Напишите <code>/join &lt;токен&gt;</code> или нажмите /start для инструкций.", parse_mode="HTML")
