@@ -2,6 +2,7 @@ from aiogram import types, Router, F
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, FSInputFile
+from aiogram.exceptions import TelegramBadRequest
 from config import HARD_ADMINS, ALLOWED_CHAT_ID, ALLOWED_TOPIC_ID
 import state as state_storage
 from state import PokerStates
@@ -16,6 +17,7 @@ vote_timeout_seconds = 90
 active_vote_message_id = None
 active_vote_task = None
 active_timer_task = None
+t10_ping_sent = False
 
 
 def is_admin(user):
@@ -44,6 +46,18 @@ def _build_vote_keyboard() -> types.InlineKeyboardMarkup:
         [types.InlineKeyboardButton(text=v, callback_data=f"vote:{v}") for v in fibonacci_values[i:i + 3]]
         for i in range(0, len(fibonacci_values), 3)
     ])
+
+def _build_admin_keyboard() -> types.InlineKeyboardMarkup:
+    rows = [
+        [types.InlineKeyboardButton(text=v, callback_data=f"vote:{v}") for v in fibonacci_values[i:i + 3]]
+        for i in range(0, len(fibonacci_values), 3)
+    ]
+    rows.append([
+        types.InlineKeyboardButton(text="＋30 сек", callback_data="timer:+30"),
+        types.InlineKeyboardButton(text="－30 сек", callback_data="timer:-30"),
+        types.InlineKeyboardButton(text="Завершить", callback_data="timer:finish"),
+    ])
+    return types.InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 @router.message(Command("join"))
@@ -149,7 +163,7 @@ async def vote_timeout(msg: types.Message):
     await reveal_votes(msg)
 
 async def start_next_task(msg: types.Message):
-    global active_vote_message_id, active_vote_task, active_timer_task
+    global active_vote_message_id, active_vote_task, active_timer_task, t10_ping_sent
 
     if getattr(state_storage, "batch_completed", False):
         return
@@ -164,6 +178,7 @@ async def start_next_task(msg: types.Message):
 
     # deadline для таймера
     state_storage.vote_deadline = datetime.now() + timedelta(seconds=vote_timeout_seconds)
+    t10_ping_sent = False
 
     remaining = (state_storage.vote_deadline - datetime.now()).total_seconds()
     text = (
@@ -173,8 +188,7 @@ async def start_next_task(msg: types.Message):
         f"⏳ Осталось: {_format_mmss(remaining)}"
     )
 
-    keyboard = _build_vote_keyboard()
-    sent_msg = await msg.answer(text, reply_markup=keyboard)
+    sent_msg = await msg.answer(text, reply_markup=_build_admin_keyboard(), disable_web_page_preview=True)
 
     active_vote_message_id = sent_msg.message_id
 
@@ -188,15 +202,26 @@ async def start_next_task(msg: types.Message):
     active_timer_task = asyncio.create_task(update_timer(msg))
 
 async def update_timer(msg: types.Message):
-    global active_vote_message_id, active_timer_task
-    # Обновляем раз в 5 секунд до нуля или пока голосование не завершится
+    global active_vote_message_id, active_timer_task, t10_ping_sent
     while True:
-        # если сообщение уже неактивно — выходим
         if active_vote_message_id is None:
             break
         remaining = int((state_storage.vote_deadline - datetime.now()).total_seconds())
         if remaining <= 0:
             break
+
+        # За 10 сек до конца — один раз пингануть непроголосовавших
+        if remaining <= 10 and not t10_ping_sent:
+            not_voted = [uid for uid in state_storage.participants.keys() if uid not in state_storage.votes]
+            if not_voted:
+                # упоминаем по user_id через HTML-ссылки
+                mentions = [f'<a href="tg://user?id={uid}">{state_storage.participants.get(uid, "user")}</a>' for uid in not_voted]
+                try:
+                    await msg.answer("⏳ Осталось 10 сек. Ждём: " + ", ".join(mentions), parse_mode="HTML")
+                except Exception:
+                    pass
+            t10_ping_sent = True
+
         try:
             await msg.bot.edit_message_text(
                 chat_id=msg.chat.id,
@@ -207,11 +232,15 @@ async def update_timer(msg: types.Message):
                     f"Выберите вашу оценку:\n\n"
                     f"⏳ Осталось: {_format_mmss(remaining)}"
                 ),
-                reply_markup=_build_vote_keyboard()
+                reply_markup=_build_admin_keyboard(),
+                disable_web_page_preview=True,
             )
-        except Exception:
-            # Игнорируем редкие гонки/ошибки Telegram при частых апдейтах
+        except TelegramBadRequest as e:
+            # Игнорируем частые «message is not modified» и другие косметические ошибки
             pass
+        except Exception:
+            pass
+
         await asyncio.sleep(5)
 
 @router.callback_query(F.data.startswith("vote:"))
@@ -245,6 +274,53 @@ async def vote_handler(callback: CallbackQuery):
         except Exception:
             pass
         await reveal_votes(callback.message)
+
+@router.callback_query(F.data.startswith("timer:"))
+async def timer_control(callback: CallbackQuery):
+    global active_vote_message_id, active_vote_task, active_timer_task
+    if callback.message.chat.id != ALLOWED_CHAT_ID or callback.message.message_thread_id != ALLOWED_TOPIC_ID:
+        return
+    if not is_admin(callback.from_user):
+        await callback.answer("Только админ.", show_alert=True)
+        return
+    if callback.message.message_id != active_vote_message_id:
+        await callback.answer("Это уже неактивное голосование.")
+        return
+
+    now = datetime.now()
+    action = callback.data.split(":")[1]
+    if action == "+30":
+        state_storage.vote_deadline = (getattr(state_storage, 'vote_deadline', now) or now) + timedelta(seconds=30)
+        await callback.answer("⏱ +30 сек")
+    elif action == "-30":
+        state_storage.vote_deadline = max(now, (getattr(state_storage, 'vote_deadline', now) or now) - timedelta(seconds=30))
+        await callback.answer("⏱ −30 сек")
+    elif action == "finish":
+        if active_vote_task and not active_vote_task.done():
+            active_vote_task.cancel()
+        if active_timer_task and not active_timer_task.done():
+            active_timer_task.cancel()
+        await callback.answer("Завершено")
+        await reveal_votes(callback.message)
+        return
+
+    # Форсим перерисовку карточки
+    try:
+        remaining = int((state_storage.vote_deadline - datetime.now()).total_seconds())
+        await callback.message.bot.edit_message_text(
+            chat_id=callback.message.chat.id,
+            message_id=active_vote_message_id,
+            text=(
+                f"📝 Оценка задачи:\n\n"
+                f"{state_storage.current_task}\n\n"
+                f"Выберите вашу оценку:\n\n"
+                f"⏳ Осталось: {_format_mmss(remaining)}"
+            ),
+            reply_markup=_build_admin_keyboard(),
+            disable_web_page_preview=True,
+        )
+    except Exception:
+        pass
 
 async def reveal_votes(msg: types.Message):
     global active_vote_message_id, active_vote_task
