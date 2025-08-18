@@ -15,6 +15,7 @@ fibonacci_values = ['1', '2', '3', '5', '8', '13']
 vote_timeout_seconds = 90
 active_vote_message_id = None
 active_vote_task = None
+active_timer_task = None
 
 HARD_ADMINS = {'@shults_shults_shults', '@naumov_egor'}
 
@@ -32,6 +33,17 @@ def get_main_menu():
             types.InlineKeyboardButton(text="🚪 Покинуть", callback_data="menu:leave"),
             types.InlineKeyboardButton(text="🗑️ Удалить участника", callback_data="menu:kick_participant")
         ]
+    ])
+
+def _format_mmss(seconds: int) -> str:
+    seconds = max(0, int(seconds))
+    m, s = divmod(seconds, 60)
+    return f"{m:02d}:{s:02d}"
+
+def _build_vote_keyboard() -> types.InlineKeyboardMarkup:
+    return types.InlineKeyboardMarkup(inline_keyboard=[
+        [types.InlineKeyboardButton(text=v, callback_data=f"vote:{v}") for v in fibonacci_values[i:i + 3]]
+        for i in range(0, len(fibonacci_values), 3)
     ])
 
 @router.message(Command("join"))
@@ -135,7 +147,7 @@ async def vote_timeout(msg: types.Message):
     await reveal_votes(msg)
 
 async def start_next_task(msg: types.Message):
-    global active_vote_message_id, active_vote_task
+    global active_vote_message_id, active_vote_task, active_timer_task
 
     if getattr(state_storage, "batch_completed", False):
         return
@@ -148,20 +160,57 @@ async def start_next_task(msg: types.Message):
     state_storage.current_task = state_storage.tasks_queue[state_storage.current_task_index]
     state_storage.votes.clear()
 
-    keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
-        [types.InlineKeyboardButton(text=v, callback_data=f"vote:{v}") for v in fibonacci_values[i:i + 3]]
-        for i in range(0, len(fibonacci_values), 3)
-    ])
+    # deadline для таймера
+    state_storage.vote_deadline = datetime.now() + timedelta(seconds=vote_timeout_seconds)
 
-    sent_msg = await msg.answer(
-        f"📝 Оценка задачи:\n\n{state_storage.current_task}\n\nВыберите вашу оценку:",
-        reply_markup=keyboard
+    remaining = (state_storage.vote_deadline - datetime.now()).total_seconds()
+    text = (
+        f"📝 Оценка задачи:\n\n"
+        f"{state_storage.current_task}\n\n"
+        f"Выберите вашу оценку:\n\n"
+        f"⏳ Осталось: {_format_mmss(remaining)}"
     )
 
+    keyboard = _build_vote_keyboard()
+    sent_msg = await msg.answer(text, reply_markup=keyboard)
+
     active_vote_message_id = sent_msg.message_id
+
+    # перезапускаем задачи таймаута и таймера
     if active_vote_task and not active_vote_task.done():
         active_vote_task.cancel()
+    if active_timer_task and not active_timer_task.done():
+        active_timer_task.cancel()
+
     active_vote_task = asyncio.create_task(vote_timeout(msg))
+    active_timer_task = asyncio.create_task(update_timer(msg))
+
+async def update_timer(msg: types.Message):
+    global active_vote_message_id, active_timer_task
+    # Обновляем раз в 5 секунд до нуля или пока голосование не завершится
+    while True:
+        # если сообщение уже неактивно — выходим
+        if active_vote_message_id is None:
+            break
+        remaining = int((state_storage.vote_deadline - datetime.now()).total_seconds())
+        if remaining <= 0:
+            break
+        try:
+            await msg.bot.edit_message_text(
+                chat_id=msg.chat.id,
+                message_id=active_vote_message_id,
+                text=(
+                    f"📝 Оценка задачи:\n\n"
+                    f"{state_storage.current_task}\n\n"
+                    f"Выберите вашу оценку:\n\n"
+                    f"⏳ Осталось: {_format_mmss(remaining)}"
+                ),
+                reply_markup=_build_vote_keyboard()
+            )
+        except Exception:
+            # Игнорируем редкие гонки/ошибки Telegram при частых апдейтах
+            pass
+        await asyncio.sleep(5)
 
 @router.callback_query(F.data.startswith("vote:"))
 async def vote_handler(callback: CallbackQuery):
@@ -188,6 +237,11 @@ async def vote_handler(callback: CallbackQuery):
     if len(state_storage.votes) == len(state_storage.participants):
         if active_vote_task and not active_vote_task.done():
             active_vote_task.cancel()
+        try:
+            if active_timer_task and not active_timer_task.done():
+                active_timer_task.cancel()
+        except Exception:
+            pass
         await reveal_votes(callback.message)
 
 async def reveal_votes(msg: types.Message):
@@ -196,6 +250,13 @@ async def reveal_votes(msg: types.Message):
     if not state_storage.votes:
         await msg.answer("❌ Нет голосов.")
         return
+
+    # останавливаем таймер
+    try:
+        if active_timer_task and not active_timer_task.done():
+            active_timer_task.cancel()
+    except Exception:
+        pass
 
     await msg.answer("✅ Задача оценена.")
     active_vote_message_id = None
