@@ -17,7 +17,6 @@ active_vote_message_id = None
 active_vote_task = None
 active_timer_task = None
 
-HARD_ADMINS = {'@shults_shults_shults', '@naumov_egor'}
 
 def is_admin(user):
     return user.username and ('@' + user.username) in HARD_ADMINS
