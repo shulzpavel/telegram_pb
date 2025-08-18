@@ -49,7 +49,8 @@ async def join(msg: types.Message):
         await msg.answer("📌 Главное меню:", reply_markup=get_main_menu())
 
 @router.callback_query(F.data.startswith("menu:"))
-async def handle_menu(callback: CallbackQuery, fsm_state: FSMContext, **kwargs):
+async def handle_menu(callback: CallbackQuery, **kwargs):
+    fsm_state: FSMContext = kwargs["state"]
 
     await callback.answer()
 
