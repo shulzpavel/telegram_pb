@@ -55,15 +55,35 @@ class JiraUpdateService:
         try:
             async with aiohttp.ClientSession() as session:
                 url = f"{self.jira_base_url}/rest/api/3/myself"
+                logger.info(f"Checking Jira availability at: {url}")
+                
                 async with session.get(url, auth=self.auth, timeout=10) as response:
+                    response_text = await response.text()
+                    
                     if response.status == 200:
-                        logger.info("Jira is available and accessible")
+                        logger.info("✅ Jira is available and accessible")
                         return True
-                    else:
-                        logger.warning(f"Jira returned status {response.status}")
+                    elif response.status == 401:
+                        logger.error("❌ Jira authentication failed - check email and token")
                         return False
+                    elif response.status == 403:
+                        logger.error("❌ Jira access forbidden - check permissions")
+                        return False
+                    elif response.status == 404:
+                        logger.error("❌ Jira endpoint not found - check base URL")
+                        return False
+                    else:
+                        logger.warning(f"❌ Jira returned status {response.status}: {response_text}")
+                        return False
+                        
+        except aiohttp.ClientTimeout:
+            logger.error("❌ Jira connection timeout - server may be down")
+            return False
+        except aiohttp.ClientConnectorError as e:
+            logger.error(f"❌ Cannot connect to Jira: {e}")
+            return False
         except Exception as e:
-            logger.error(f"Failed to check Jira availability: {e}")
+            logger.error(f"❌ Failed to check Jira availability: {e}")
             return False
     
     async def update_story_points(self, issue_key: str, story_points: int) -> UpdateResult:
@@ -98,12 +118,42 @@ class JiraUpdateService:
                     headers={"Content-Type": "application/json"}
                 ) as response:
                     
+                    response_text = await response.text()
+                    
                     if response.status == 204:  # No Content - successful update
-                        logger.info(f"Successfully updated {issue_key} to {story_points} SP")
+                        logger.info(f"✅ Successfully updated {issue_key} to {story_points} SP")
                         return UpdateResult(
                             issue_key=issue_key,
                             success=True,
                             story_points=story_points
+                        )
+                    elif response.status == 400:
+                        logger.error(f"❌ Bad request for {issue_key}: {response_text}")
+                        return UpdateResult(
+                            issue_key=issue_key,
+                            success=False,
+                            error=f"Bad request: {response_text}"
+                        )
+                    elif response.status == 401:
+                        logger.error(f"❌ Authentication failed for {issue_key}")
+                        return UpdateResult(
+                            issue_key=issue_key,
+                            success=False,
+                            error="Authentication failed"
+                        )
+                    elif response.status == 403:
+                        logger.error(f"❌ Permission denied for {issue_key}: {response_text}")
+                        return UpdateResult(
+                            issue_key=issue_key,
+                            success=False,
+                            error=f"Permission denied: {response_text}"
+                        )
+                    elif response.status == 404:
+                        logger.error(f"❌ Issue {issue_key} not found")
+                        return UpdateResult(
+                            issue_key=issue_key,
+                            success=False,
+                            error="Issue not found"
                         )
                     else:
                         error_text = await response.text()
@@ -115,21 +165,26 @@ class JiraUpdateService:
                             error_message=f"HTTP {response.status}: {error_text}"
                         )
                         
-        except asyncio.TimeoutError:
-            logger.error(f"Timeout updating {issue_key}")
+        except aiohttp.ClientTimeout:
+            logger.error(f"❌ Timeout updating {issue_key} - Jira server may be slow")
             return UpdateResult(
                 issue_key=issue_key,
                 success=False,
-                story_points=story_points,
-                error_message="Request timeout"
+                error="Request timeout - Jira server may be slow"
+            )
+        except aiohttp.ClientConnectorError as e:
+            logger.error(f"❌ Cannot connect to Jira for {issue_key}: {e}")
+            return UpdateResult(
+                issue_key=issue_key,
+                success=False,
+                error="Cannot connect to Jira server"
             )
         except Exception as e:
-            logger.error(f"Exception updating {issue_key}: {e}")
+            logger.error(f"❌ Unexpected error updating {issue_key}: {e}")
             return UpdateResult(
                 issue_key=issue_key,
                 success=False,
-                story_points=story_points,
-                error_message=str(e)
+                error=f"Unexpected error: {str(e)}"
             )
     
     async def update_multiple_story_points(self, updates: List[Tuple[str, int]]) -> List[UpdateResult]:

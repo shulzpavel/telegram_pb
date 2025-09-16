@@ -257,6 +257,22 @@ class TimerService(ITimerService):
                 # Start next task
                 logger.info(f"REVEAL_VOTES: Starting next task")
                 await self._start_next_task(chat_id, topic_id, message)
+            else:
+                # All tasks completed, show main menu
+                logger.info(f"REVEAL_VOTES: All tasks completed, showing main menu")
+                from utils import get_main_menu
+                from services.group_config_service import GroupConfigService
+                
+                # Check if user is admin to show admin menu
+                # Use existing group config service from timer service
+                user_is_admin = False
+                if message.from_user:
+                    user_is_admin = self._group_config_service.is_admin(chat_id, topic_id or 0, message.from_user)
+                
+                await message.edit_text(
+                    "🎉 Все задачи завершены!\n\n📊 Результаты голосования сохранены.",
+                    reply_markup=get_main_menu(is_admin=user_is_admin)
+                )
     
     def cancel_timers(self, chat_id: int, topic_id: int) -> None:
         """Cancel timers for session"""

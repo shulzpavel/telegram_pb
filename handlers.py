@@ -1136,19 +1136,35 @@ async def handle_update_story_points(callback: CallbackQuery):
             )
             return
         
-        # Проверяем, есть ли завершенные задачи
+        # Проверяем, есть ли завершенные задачи из всех банчей
         completed_tasks = []
         from utils import JiraLinkGenerator
         
         jira_generator = JiraLinkGenerator()
-        for task in session.tasks:
-            if task.is_completed() and task.votes:
+        
+        # Обрабатываем все задачи из истории (завершенные задачи)
+        for task_result in session.history:
+            task_text = task_result.get('task', '')
+            votes = task_result.get('votes', {})
+            
+            if task_text and votes:
                 # Извлекаем Jira key из текста задачи
-                task_keys = jira_generator.extract_task_keys(task.text.value)
+                task_keys = jira_generator.extract_task_keys(task_text)
                 if task_keys:
-                    # Находим максимальную оценку
-                    max_vote = max(int(vote.value.value) for vote in task.votes.values() if vote.value.value.isdigit())
-                    completed_tasks.append((task_keys[0], max_vote))
+                    # Находим максимальную оценку из голосов
+                    numeric_votes = []
+                    for vote_value in votes.values():
+                        try:
+                            numeric_votes.append(int(vote_value))
+                        except (ValueError, TypeError):
+                            continue
+                    
+                    if numeric_votes:
+                        max_vote = max(numeric_votes)
+                        completed_tasks.append((task_keys[0], max_vote))
+                        logger.info(f"Found completed task: {task_keys[0]} with max vote: {max_vote}")
+        
+        logger.info(f"Total completed tasks found: {len(completed_tasks)}")
         
         if not completed_tasks:
             await safe_answer_callback(
