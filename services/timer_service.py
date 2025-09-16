@@ -55,7 +55,7 @@ class TimerService(ITimerService):
         try:
             # Get timeout from group config
             group_config = self._group_config_service.get_group_config(chat_id, topic_id)
-            timeout_seconds = group_config.timeout if group_config else 90
+            timeout_seconds = group_config.timeout.value if group_config else 90  # type: ignore
             
             logger.info(f"VOTE_TIMEOUT: Sleeping for {timeout_seconds} seconds")
             await asyncio.sleep(timeout_seconds)
@@ -147,7 +147,7 @@ class TimerService(ITimerService):
         # Set deadline
         session = self._session_service.get_session(chat_id, topic_id)
         group_config = self._group_config_service.get_group_config(chat_id, topic_id)
-        timeout_seconds = group_config.timeout if group_config else 90
+        timeout_seconds = group_config.timeout.value if group_config else 90  # type: ignore
         
         session.vote_deadline = datetime.now() + timedelta(seconds=timeout_seconds)
         session.active_vote_message_id = message.message_id
