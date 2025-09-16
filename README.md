@@ -1,207 +1,244 @@
 # 🎯 Planning Poker Bot
 
-Профессиональный Telegram бот для проведения Planning Poker сессий с поддержкой множественных групп и топиков.
+Professional Telegram bot for conducting Planning Poker sessions with multi-group and multi-topic support.
 
-## ✨ Особенности
+## ✨ Features
 
-- 🎲 **Planning Poker** - классическая методика оценки задач
-- 👥 **Множественные группы** - поддержка нескольких чатов одновременно
-- 🧵 **Топики** - изолированные сессии в рамках одной группы
-- 🔗 **Jira интеграция** - автоматические ссылки на задачи
-- 📊 **Статистика** - детальные отчеты по голосованиям
-- ⏱️ **Таймеры** - автоматическое завершение голосований
-- 🎯 **JQL запросы** - импорт задач из Jira
+- **Multi-group Support**: Manage multiple chat groups and topics simultaneously
+- **JQL Integration**: Import tasks directly from Jira using JQL queries
+- **Flexible Voting**: Customizable voting scales and timeouts
+- **Real-time Results**: Live voting results and statistics
+- **Admin Controls**: Role-based access control and session management
+- **Data Persistence**: Automatic backup and restore of sessions
+- **Production Ready**: Docker support, systemd service, and CI/CD pipeline
 
-## 🚀 Быстрый старт
+## 🚀 Quick Start
 
-### Установка
+### Prerequisites
 
-```bash
-# Клонируем репозиторий
-git clone <repository-url>
-cd telegram_pb
+- Python 3.9+
+- Telegram Bot Token (from [@BotFather](https://t.me/BotFather))
+- Jira credentials (optional, for JQL integration)
 
-# Устанавливаем зависимости
-pip install -r requirements.txt
+### Installation
 
-# Настраиваем переменные окружения
-cp env.example .env
-# Отредактируйте .env файл с вашими настройками
-```
+1. **Clone the repository**
+   ```bash
+   git clone <repository-url>
+   cd planning-poker-bot
+   ```
 
-### Настройка
+2. **Install dependencies**
+   ```bash
+   pip install -r requirements.txt
+   ```
 
-Создайте файл `.env` на основе `env.example`:
+3. **Configure environment**
+   ```bash
+   cp env.example .env
+   # Edit .env with your configuration
+   ```
 
-```env
-# Telegram Bot
-BOT_TOKEN=your_bot_token_here
+4. **Run the bot**
+   ```bash
+   python bot.py
+   ```
 
-# Jira Integration
-JIRA_BASE_URL=https://your-domain.atlassian.net
-JIRA_EMAIL=your-email@domain.com
-JIRA_TOKEN=your_jira_api_token
-
-# Admin Configuration
-HARD_ADMIN=@your_username
-```
-
-### Запуск
+### Docker Installation
 
 ```bash
-python bot.py
-```
-
-## 🏗️ Архитектура
-
-Проект построен на принципах **Clean Architecture** с четким разделением слоев:
-
-```
-├── core/           # Ядро приложения (DI, интерфейсы)
-├── domain/         # Доменная логика (сущности, value objects)
-├── services/       # Бизнес-логика (сервисы)
-├── repositories/   # Слой данных (репозитории)
-├── handlers/       # Обработчики Telegram событий
-└── models.py       # Модели данных
-```
-
-### Основные компоненты
-
-- **SessionService** - управление сессиями голосования
-- **TimerService** - управление таймерами и уведомлениями
-- **GroupConfigService** - конфигурация групп
-- **MessageService** - отправка сообщений
-- **FileParserService** - парсинг задач
-
-## 🎮 Использование
-
-### Команды бота
-
-- `/start` - запуск бота
-- `/menu` - главное меню
-- `/help` - справка
-
-### Основной workflow
-
-1. **Создание сессии**: Админ создает новую сессию голосования
-2. **Добавление участников**: Участники присоединяются к сессии
-3. **Импорт задач**: Загрузка задач через JQL или текстом
-4. **Голосование**: Участники оценивают задачи по шкале Фибоначчи
-5. **Результаты**: Автоматическая генерация отчетов
-
-### Поддерживаемые форматы задач
-
-- **JQL запросы**: `project = FLEX AND status = 'To Do'`
-- **Текстовый формат**: `FLEX-123 - Описание задачи`
-
-## 🔧 Разработка
-
-### Структура проекта
-
-```
-telegram_pb/
-├── bot.py                 # Точка входа
-├── config.py             # Конфигурация
-├── handlers.py           # Обработчики команд
-├── utils.py              # Утилиты
-├── models.py             # Модели данных
-├── requirements.txt      # Зависимости
-├── docker-compose.yml    # Docker конфигурация
-├── Dockerfile           # Docker образ
-├── core/                # Ядро приложения
-│   ├── bootstrap.py     # DI контейнер
-│   ├── container.py     # Контейнер зависимостей
-│   ├── interfaces.py    # Интерфейсы
-│   └── exceptions.py    # Исключения
-├── domain/              # Доменная логика
-│   ├── entities.py      # Сущности
-│   ├── value_objects.py # Value objects
-│   └── enums.py         # Перечисления
-├── services/            # Сервисы
-│   ├── session_service.py
-│   ├── timer_service.py
-│   ├── group_config_service.py
-│   └── message_service.py
-├── repositories/        # Репозитории
-│   ├── session_repository.py
-│   ├── group_config_repository.py
-│   └── token_repository.py
-└── tests/              # Тесты
-    ├── test_core.py
-    ├── test_domain.py
-    └── test_models.py
-```
-
-### Запуск тестов
-
-```bash
-# Все тесты
-python -m pytest tests/
-
-# Конкретный тест
-python -m pytest tests/test_core.py -v
-
-# С покрытием
-python -m pytest tests/ --cov=. --cov-report=html
-```
-
-### Docker
-
-```bash
-# Сборка образа
-docker build -t planning-poker-bot .
-
-# Запуск с docker-compose
+# Build and run with Docker Compose
 docker-compose up -d
 
-# Просмотр логов
-docker-compose logs -f
+# Or build and run manually
+docker build -t planning-poker-bot .
+docker run -d --name planning-poker-bot \
+  -v $(pwd)/data:/app/data \
+  -v $(pwd)/.env:/app/.env \
+  planning-poker-bot
 ```
 
-## 📊 Мониторинг
+## ⚙️ Configuration
 
-Бот ведет подробные логи в файле `data/bot.log`:
+### Environment Variables
 
-- Старт/остановка бота
-- Создание сессий
-- Голосования участников
-- Ошибки и исключения
+```bash
+# Required
+BOT_TOKEN=your_bot_token_here
 
-## 🤝 Вклад в проект
+# Optional
+JIRA_BASE_URL=https://your-jira-instance.atlassian.net
+JIRA_EMAIL=your-email@example.com
+JIRA_TOKEN=your_jira_api_token
 
-1. Fork репозитория
-2. Создайте feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit изменения (`git commit -m 'Add amazing feature'`)
-4. Push в branch (`git push origin feature/amazing-feature`)
-5. Откройте Pull Request
+# Admin
+HARD_ADMIN=@your_username
 
-### Стандарты кода
+# Groups (JSON format)
+GROUPS_CONFIG='[{"chat_id": -1002718440199, "topic_id": 2, "admins": ["@admin1"], "timeout": 90, "scale": ["1", "2", "3", "5", "8", "13"], "is_active": true}]'
+```
 
-- **PEP 8** - стиль кода Python
-- **Type hints** - аннотации типов
-- **Docstrings** - документация функций
-- **Clean Architecture** - архитектурные принципы
+### Multiple Groups Configuration
 
-## 📝 Лицензия
+You can configure multiple groups using JSON format:
 
-Этот проект лицензирован под MIT License - см. файл [LICENSE](LICENSE) для деталей.
+```json
+[
+  {
+    "chat_id": -1002718440199,
+    "topic_id": 2,
+    "admins": ["@admin1", "@admin2"],
+    "timeout": 90,
+    "scale": ["1", "2", "3", "5", "8", "13"],
+    "is_active": true
+  },
+  {
+    "chat_id": -1002718440198,
+    "topic_id": 1,
+    "admins": ["@admin3"],
+    "timeout": 120,
+    "scale": ["1", "2", "3", "5", "8", "13", "21"],
+    "is_active": true
+  }
+]
+```
 
-## 🆘 Поддержка
+## 🎮 Usage
 
-Если у вас есть вопросы или проблемы:
+### Starting a Session
 
-1. Проверьте [Issues](https://github.com/your-repo/issues)
-2. Создайте новый Issue с подробным описанием
-3. Приложите логи и конфигурацию (без токенов!)
+1. **Send tasks** to the bot:
+   - JQL query: `project = FLEX AND status = 'To Do'`
+   - Plain text: `FLEX-123 - Create main page`
 
-## 🎯 Roadmap
+2. **Vote** on tasks using the provided buttons
 
-- [ ] Web интерфейс для администрирования
-- [ ] Интеграция с другими системами (Slack, Teams)
-- [ ] Расширенная аналитика и метрики
-- [ ] Поддержка кастомных шкал оценки
-- [ ] Экспорт результатов в различные форматы
+3. **View results** when voting is complete
+
+### Commands
+
+- `/start` - Start the bot
+- `/help` - Show help information
+- `/admin` - Admin panel (admin only)
+
+## 🛠️ Development
+
+### Setup Development Environment
+
+```bash
+# Install development dependencies
+make install-dev
+
+# Format code
+make format
+
+# Run linting
+make lint
+
+# Run tests
+make test
+
+# Run the bot
+make run
+```
+
+### Code Quality
+
+The project uses several tools for code quality:
+
+- **Black** - Code formatting
+- **isort** - Import sorting
+- **flake8** - Linting
+- **mypy** - Type checking
+- **pytest** - Testing
+- **pre-commit** - Git hooks
+
+### Running Tests
+
+```bash
+# Run all tests
+pytest
+
+# Run with coverage
+pytest --cov=.
+
+# Run specific test
+pytest tests/test_specific.py
+```
+
+## 🚀 Deployment
+
+### Production Deployment
+
+See [DEPLOYMENT.md](DEPLOYMENT.md) for detailed deployment instructions.
+
+### Quick Deployment
+
+```bash
+# Using systemd
+sudo cp planning-poker-bot.service /etc/systemd/system/
+sudo systemctl enable planning-poker-bot
+sudo systemctl start planning-poker-bot
+
+# Using Docker
+docker-compose up -d
+```
+
+## 📊 Monitoring
+
+### Logs
+
+```bash
+# Application logs
+tail -f data/bot.log
+
+# System logs (systemd)
+sudo journalctl -u planning-poker-bot -f
+
+# Docker logs
+docker logs -f planning-poker-bot
+```
+
+### Health Checks
+
+The bot includes health checks for monitoring:
+
+- Docker health check
+- Systemd service status
+- Log file monitoring
+
+## 🤝 Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Run tests and linting
+5. Submit a pull request
+
+### Development Guidelines
+
+- Follow PEP 8 style guidelines
+- Write tests for new features
+- Update documentation
+- Use type hints
+- Follow conventional commit messages
+
+## 📄 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## 🆘 Support
+
+- **Issues**: [GitHub Issues](https://github.com/your-org/planning-poker-bot/issues)
+- **Documentation**: [Wiki](https://github.com/your-org/planning-poker-bot/wiki)
+- **Discussions**: [GitHub Discussions](https://github.com/your-org/planning-poker-bot/discussions)
+
+## 🙏 Acknowledgments
+
+- [aiogram](https://github.com/aiogram/aiogram) - Telegram Bot API framework
+- [Jira](https://www.atlassian.com/software/jira) - Issue tracking
+- [Planning Poker](https://en.wikipedia.org/wiki/Planning_poker) - Estimation technique
 
 ---
 
-**Сделано с ❤️ для эффективного планирования**
+**Made with ❤️ for agile teams**

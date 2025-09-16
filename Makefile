@@ -1,71 +1,70 @@
-.PHONY: help install install-dev test test-cov lint format clean run docker-build docker-run
+.PHONY: help install install-dev format lint test run clean docker-build docker-run
 
-help: ## Show this help message
-	@echo "Planning Poker Bot - Development Commands"
-	@echo "=========================================="
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
+# Default target
+help:
+	@echo "Available commands:"
+	@echo "  install      Install production dependencies"
+	@echo "  install-dev  Install development dependencies"
+	@echo "  format       Format code with black and isort"
+	@echo "  lint         Run linting checks"
+	@echo "  test         Run tests"
+	@echo "  run          Run the bot"
+	@echo "  clean        Clean up temporary files"
+	@echo "  docker-build Build Docker image"
+	@echo "  docker-run   Run Docker container"
 
-install: ## Install production dependencies
+# Installation
+install:
 	pip install -r requirements.txt
 
-install-dev: ## Install development dependencies
+install-dev:
+	pip install -r requirements.txt
 	pip install -r requirements-dev.txt
 	pre-commit install
 
-test: ## Run tests
-	python -m pytest tests/ -v
+# Code formatting
+format:
+	black .
+	isort .
 
-test-cov: ## Run tests with coverage
-	python -m pytest tests/ --cov=. --cov-report=html --cov-report=term-missing
-
-lint: ## Run linting
-	flake8 .
-	mypy .
+# Linting
+lint:
+	flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+	flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+	mypy . --ignore-missing-imports
 	black --check .
 	isort --check-only .
 
-format: ## Format code
-	black .
-	isort .
-	pre-commit run --all-files
+# Testing
+test:
+	pytest --cov=. --cov-report=xml --cov-report=html
 
-clean: ## Clean up temporary files
+# Running
+run:
+	python bot.py
+
+# Cleaning
+clean:
 	find . -type f -name "*.pyc" -delete
 	find . -type d -name "__pycache__" -delete
 	find . -type d -name "*.egg-info" -exec rm -rf {} +
-	rm -rf build/
-	rm -rf dist/
-	rm -rf htmlcov/
+	rm -rf .pytest_cache
 	rm -rf .coverage
-	rm -rf .pytest_cache/
-	rm -rf .mypy_cache/
+	rm -rf htmlcov
+	rm -rf dist
+	rm -rf build
 
-run: ## Run the bot
-	python bot.py
-
-docker-build: ## Build Docker image
+# Docker
+docker-build:
 	docker build -t planning-poker-bot .
 
-docker-run: ## Run with Docker Compose
-	docker-compose up -d
+docker-run:
+	docker run --rm -v $(PWD)/data:/app/data -v $(PWD)/.env:/app/.env planning-poker-bot
 
-docker-logs: ## View Docker logs
-	docker-compose logs -f
-
-docker-stop: ## Stop Docker containers
-	docker-compose down
-
-setup: install-dev ## Setup development environment
-	@echo "Setting up development environment..."
-	@echo "✅ Dependencies installed"
-	@echo "✅ Pre-commit hooks installed"
-	@echo "✅ Ready for development!"
-
-check: lint test ## Run all checks (lint + test)
-
-ci: ## Run CI pipeline
-	@echo "Running CI pipeline..."
-	make format
-	make lint
-	make test-cov
-	@echo "✅ CI pipeline completed successfully!"
+# Development
+dev-setup: install-dev
+	@echo "Development environment setup complete!"
+	@echo "Run 'make format' to format code"
+	@echo "Run 'make lint' to check code quality"
+	@echo "Run 'make test' to run tests"
+	@echo "Run 'make run' to start the bot"
