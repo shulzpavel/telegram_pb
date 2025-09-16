@@ -1,197 +1,244 @@
-# 🃏 Telegram Poker Planning Bot
+# 🎯 Planning Poker Bot
 
-Бот для планирования задач по методу **Planning Poker**. Поддерживает голосование в групповых чатах Telegram с использованием инлайн-кнопок, авторизацией по токену, подсчётом средней оценки и автоматическим выводом итогов сессии.
----
+Professional Telegram bot for conducting Planning Poker sessions with multi-group and multi-topic support.
 
-## 📦 Последние изменения
+## ✨ Features
 
-### 2025-08-18
-- ⏳ Живой таймер на карточке голосования, обновляется каждые 5 секунд.
-- ⌚ Управление временем прямо с карточки (только для админов): `＋30 сек`, `－30 сек`, `Завершить`.
-- 🔔 За 10 секунд до конца — пинг непроголосовавших с упоминаниями (tg://user?id=...).
-- ✅ После закрытия задачи бот пишет: «Задача оценена ✅. Осталось N из M задач».
-- 👑 Админ исключен из голосования: не добавляется в участники, не пингуется и не ждется; `/join` для админа сразу открывает меню.
-- 🧵 Антифлуд: троттлинг `sendMessage` ~1.3 сек на чат + автоматический `retry_after` при лимитах, меньше лишних сообщений (меню пришивается к документам).
-- 🧼 Навели порядок: `state.py` содержит только FSM и общий стор; логика осталась в `handlers.py`.
-- 🔐 Конфиг админов берется из окружения (`HARD_ADMINS`), удален локальный хардкод.
-- 🛡️ Мелкие устойчивые правки: отключение превью ссылок при редактировании карточки, игнор «message is not modified».
-- 🚫 JQL/Jira: следы отключены, интеграция пока не используется.
----
+- **Multi-group Support**: Manage multiple chat groups and topics simultaneously
+- **JQL Integration**: Import tasks directly from Jira using JQL queries
+- **Flexible Voting**: Customizable voting scales and timeouts
+- **Real-time Results**: Live voting results and statistics
+- **Admin Controls**: Role-based access control and session management
+- **Data Persistence**: Automatic backup and restore of sessions
+- **Production Ready**: Docker support, systemd service, and CI/CD pipeline
 
-### 2025-08-15
-	•	✅ Итоги голосования теперь выводятся просто: “Задача оценена ✅”, без подробного вывода голосов.
-	•	📄 Итог голосования за весь день выводится одной цифрой — сумма всех средних значений (SP).
-	•	📁 Добавлен экспорт summary_report.txt с полными результатами за последний банч:
-	•	задачи, оценки участников, ссылки.
-	•	🧠 Исправлена ошибка с повторным голосованием (state сохранял active_vote_message_id, теперь сбрасывается).
-	•	🧹 Удалён вывод имен и оценок в середине сессии.
-	•	🧼 Удалены неиспользуемые кнопки (“♻️ Обнулить”, “🔚 Завершить”).
+## 🚀 Quick Start
 
-### 2025-05-29
--	🔧 Вывод Главного меню после завершения банча (show_summary()).
--	🧹 Отключены кнопки ♻️ Обнулить голоса и 🔚 Завершить голосование (закомментированы в коде и в get_main_menu()).
--	🧍‍♂️ Добавлена логика самостоятельного выхода (🚪 Покинуть) участником.
-- 👤 Удаление участников админом через кнопку 🗑 Удалить участника:
-- отображается список участников
-- админ может удалить любого вручную
-- 📋 Кнопка 👥 Участники теперь только отображает список, без действий.
-- 🧠 Полностью разделена логика: покинуть, показать, удалить.
----
+### Prerequisites
 
-## 🚀 Возможности
+- Python 3.9+
+- Telegram Bot Token (from [@BotFather](https://t.me/BotFather))
+- Jira credentials (optional, for JQL integration)
 
-- Поддержка **групповых Telegram-чатов с топиками**
-- Авторизация участников по `/join <токен>`
-- Оценка задач по шкале **Fibonacci (1, 2, 3, 5, 8, 13)**
-- Поддержка **пакетной отправки задач** (batch mode)
-- Автоматический переход к следующей задаче
-- Автоматическое отображение итогов по банчу
-- Поддержка нескольких администраторов
-- Проверка доступа по `chat_id` и `topic_id`
+### Installation
 
----
-
-## ⚙️ Установка
-
-### 1. Клонировать репозиторий
-
-```bash
-git clone https://github.com/shulzpavel/telegram_pb.git
-cd poker-bot
-```
-
-### 2. Подготовить окружение
-
-```bash
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-```
-
----
-
-## 🔐 Настройка `.env`
-
-Создайте `.env` в корне проекта:
-
-```dotenv
-BOT_TOKEN=токен_от_botfather
-DEFAULT_JOIN_TOKEN=magic_token
-ADMINS=@example
-ALLOWED_CHAT_ID='-token'
-ALLOWED_TOPIC_ID='token'
-```
-
----
-
-## ▶️ Запуск вручную
-
-```bash
-source venv/bin/activate
-python bot.py
-```
-
----
-
-## 🖥️ Автозапуск через systemd
-
-Создайте файл:
-
-```bash
-sudo nano /etc/systemd/system/pokerbot.service
-```
-
-Пример содержимого:
-
-```ini
-[Unit]
-Description=Telegram Poker Bot
-After=network.target
-
-[Service]
-User=root
-WorkingDirectory=/root/telegram_pb
-ExecStart=/root/telegram_pb/venv/bin/python /root/telegram_pb/bot.py
-Restart=always
-
-[Install]
-WantedBy=multi-user.target
-```
-
-Примените и запустите:
-
-```bash
-sudo systemctl daemon-reexec
-sudo systemctl enable pokerbot
-sudo systemctl start pokerbot
-```
-
-Проверить лог:
-
-```bash
-journalctl -u pokerbot -f
-```
-
----
-
-## 📌 Как пользоваться
-
-### Подключение
-
-1. Участник пишет:  
-   ```
-   /join magic_token
+1. **Clone the repository**
+   ```bash
+   git clone <repository-url>
+   cd planning-poker-bot
    ```
 
-2. Админ получает главное меню с кнопками:
-   - 🆕 Список задач
-   - 📋 Итоги
-   - ♻️ Обнулить голоса
-   - 🔚 Завершить
-   - 👥 Участники
-   - 🚪 Покинуть
+2. **Install dependencies**
+   ```bash
+   pip install -r requirements.txt
+   ```
 
----
+3. **Configure environment**
+   ```bash
+   cp env.example .env
+   # Edit .env with your configuration
+   ```
 
-### Пакет задач
+4. **Run the bot**
+   ```bash
+   python bot.py
+   ```
 
-Админ нажимает «🆕 Список задач» и отправляет:
-
-```
-1. Сделать интеграцию с X https://jira.link/BT-1
-2. Добавить логотип https://jira.link/BT-2
-```
-
-Бот:
-- запускает голосование по задачам по очереди
-- ждёт голосов от всех участников
-- после последней задачи — автоматически присылает `summary`
-
----
-
-## 🧠 Особенности
-
-- Участники голосуют через инлайн-кнопки
-- Оценка считается средней по задаче
-- Итоговая сумма — сумма всех **средних** по задачам
-- Поддерживается только **один топик** (указан в `ALLOWED_TOPIC_ID`)
-- Голоса не считаются, если пользователь не авторизован
-
----
-
-## 🧪 Проверка
-
-Чтобы убедиться, что всё работает:
+### Docker Installation
 
 ```bash
-sudo systemctl status pokerbot
-journalctl -u pokerbot -f
+# Build and run with Docker Compose
+docker-compose up -d
+
+# Or build and run manually
+docker build -t planning-poker-bot .
+docker run -d --name planning-poker-bot \
+  -v $(pwd)/data:/app/data \
+  -v $(pwd)/.env:/app/.env \
+  planning-poker-bot
 ```
+
+## ⚙️ Configuration
+
+### Environment Variables
+
+```bash
+# Required
+BOT_TOKEN=your_bot_token_here
+
+# Optional
+JIRA_BASE_URL=https://your-jira-instance.atlassian.net
+JIRA_EMAIL=your-email@example.com
+JIRA_TOKEN=your_jira_api_token
+
+# Admin
+HARD_ADMIN=@your_username
+
+# Groups (JSON format)
+GROUPS_CONFIG='[{"chat_id": -1002718440199, "topic_id": 2, "admins": ["@admin1"], "timeout": 90, "scale": ["1", "2", "3", "5", "8", "13"], "is_active": true}]'
+```
+
+### Multiple Groups Configuration
+
+You can configure multiple groups using JSON format:
+
+```json
+[
+  {
+    "chat_id": -1002718440199,
+    "topic_id": 2,
+    "admins": ["@admin1", "@admin2"],
+    "timeout": 90,
+    "scale": ["1", "2", "3", "5", "8", "13"],
+    "is_active": true
+  },
+  {
+    "chat_id": -1002718440198,
+    "topic_id": 1,
+    "admins": ["@admin3"],
+    "timeout": 120,
+    "scale": ["1", "2", "3", "5", "8", "13", "21"],
+    "is_active": true
+  }
+]
+```
+
+## 🎮 Usage
+
+### Starting a Session
+
+1. **Send tasks** to the bot:
+   - JQL query: `project = FLEX AND status = 'To Do'`
+   - Plain text: `FLEX-123 - Create main page`
+
+2. **Vote** on tasks using the provided buttons
+
+3. **View results** when voting is complete
+
+### Commands
+
+- `/start` - Start the bot
+- `/help` - Show help information
+- `/admin` - Admin panel (admin only)
+
+## 🛠️ Development
+
+### Setup Development Environment
+
+```bash
+# Install development dependencies
+make install-dev
+
+# Format code
+make format
+
+# Run linting
+make lint
+
+# Run tests
+make test
+
+# Run the bot
+make run
+```
+
+### Code Quality
+
+The project uses several tools for code quality:
+
+- **Black** - Code formatting
+- **isort** - Import sorting
+- **flake8** - Linting
+- **mypy** - Type checking
+- **pytest** - Testing
+- **pre-commit** - Git hooks
+
+### Running Tests
+
+```bash
+# Run all tests
+pytest
+
+# Run with coverage
+pytest --cov=.
+
+# Run specific test
+pytest tests/test_specific.py
+```
+
+## 🚀 Deployment
+
+### Production Deployment
+
+See [DEPLOYMENT.md](DEPLOYMENT.md) for detailed deployment instructions.
+
+### Quick Deployment
+
+```bash
+# Using systemd
+sudo cp planning-poker-bot.service /etc/systemd/system/
+sudo systemctl enable planning-poker-bot
+sudo systemctl start planning-poker-bot
+
+# Using Docker
+docker-compose up -d
+```
+
+## 📊 Monitoring
+
+### Logs
+
+```bash
+# Application logs
+tail -f data/bot.log
+
+# System logs (systemd)
+sudo journalctl -u planning-poker-bot -f
+
+# Docker logs
+docker logs -f planning-poker-bot
+```
+
+### Health Checks
+
+The bot includes health checks for monitoring:
+
+- Docker health check
+- Systemd service status
+- Log file monitoring
+
+## 🤝 Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Run tests and linting
+5. Submit a pull request
+
+### Development Guidelines
+
+- Follow PEP 8 style guidelines
+- Write tests for new features
+- Update documentation
+- Use type hints
+- Follow conventional commit messages
+
+## 📄 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## 🆘 Support
+
+- **Issues**: [GitHub Issues](https://github.com/your-org/planning-poker-bot/issues)
+- **Documentation**: [Wiki](https://github.com/your-org/planning-poker-bot/wiki)
+- **Discussions**: [GitHub Discussions](https://github.com/your-org/planning-poker-bot/discussions)
+
+## 🙏 Acknowledgments
+
+- [aiogram](https://github.com/aiogram/aiogram) - Telegram Bot API framework
+- [Jira](https://www.atlassian.com/software/jira) - Issue tracking
+- [Planning Poker](https://en.wikipedia.org/wiki/Planning_poker) - Estimation technique
 
 ---
 
-## ✨ Идеи для расширения
-
-- Интеграция с Jira API (создание и обновление тикетов)
-- Поддержка `/history` по всем сессиям
-- Разделение по спринтам
+**Made with ❤️ for agile teams**

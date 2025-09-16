@@ -1,0 +1,177 @@
+{
+  "-1002718440199_2": {
+    "chat_id": -1002718440199,
+    "topic_id": 2,
+    "participants": {
+      "5482082959": {
+        "user_id": 5482082959,
+        "username": "im2busy2talk",
+        "full_name": "Paul Shults",
+        "is_admin": false
+      }
+    },
+    "tasks": [
+      {
+        "text": "FLEX-1192 - Метод activateGamblerBalance падает при передаче в параметр balanceId нецелого числа",
+        "index": 0,
+        "votes": {
+          "5482082959": {
+            "user_id": 5482082959,
+            "value": "3",
+            "timestamp": "2025-09-16T10:49:57.810840"
+          }
+        },
+        "result": "completed",
+        "deadline": null
+      },
+      {
+        "text": "FLEX-945 - Bug. Не архивируются балансы для отчетов Бразилии",
+        "index": 1,
+        "votes": {
+          "5482082959": {
+            "user_id": 5482082959,
+            "value": "5",
+            "timestamp": "2025-09-16T10:50:12.206065"
+          }
+        },
+        "result": "completed",
+        "deadline": null
+      },
+      {
+        "text": "FLEX-915 - Bug. При переключении валюты, перестаёт отправляться запрос на одну из валют ",
+        "index": 2,
+        "votes": {
+          "5482082959": {
+            "user_id": 5482082959,
+            "value": "13",
+            "timestamp": "2025-09-16T10:50:22.846125"
+          }
+        },
+        "result": "completed",
+        "deadline": null
+      },
+      {
+        "text": "FLEX-362 - BUG. Дубликаты игр при пагинации",
+        "index": 3,
+        "votes": {
+          "5482082959": {
+            "user_id": 5482082959,
+            "value": "8",
+            "timestamp": "2025-09-16T10:50:28.136081"
+          }
+        },
+        "result": "completed",
+        "deadline": null
+      }
+    ],
+    "current_task_index": 4,
+    "current_batch_index": 0,
+    "batch_size": 10,
+    "history": [
+      {
+        "task": "FLEX-1192 - Метод activateGamblerBalance падает при передаче в параметр balanceId нецелого числа",
+        "votes": {
+          "5482082959": "3"
+        },
+        "timestamp": "2025-09-16T10:49:57.918123"
+      },
+      {
+        "task": "FLEX-945 - Bug. Не архивируются балансы для отчетов Бразилии",
+        "votes": {
+          "5482082959": "5"
+        },
+        "timestamp": "2025-09-16T10:50:12.318453"
+      },
+      {
+        "task": "FLEX-915 - Bug. При переключении валюты, перестаёт отправляться запрос на одну из валют ",
+        "votes": {
+          "5482082959": "13"
+        },
+        "timestamp": "2025-09-16T10:50:23.229154"
+      },
+      {
+        "task": "FLEX-362 - BUG. Дубликаты игр при пагинации",
+        "votes": {
+          "5482082959": "8"
+        },
+        "timestamp": "2025-09-16T10:50:28.261827"
+      }
+    ],
+    "last_batch": [
+      {
+        "task": "FLEX-1192 - Метод activateGamblerBalance падает при передаче в параметр balanceId нецелого числа",
+        "votes": {
+          "5482082959": "3"
+        },
+        "timestamp": "2025-09-16T10:49:57.918123"
+      },
+      {
+        "task": "FLEX-945 - Bug. Не архивируются балансы для отчетов Бразилии",
+        "votes": {
+          "5482082959": "5"
+        },
+        "timestamp": "2025-09-16T10:50:12.318453"
+      },
+      {
+        "task": "FLEX-915 - Bug. При переключении валюты, перестаёт отправляться запрос на одну из валют ",
+        "votes": {
+          "5482082959": "13"
+        },
+        "timestamp": "2025-09-16T10:50:23.229154"
+      },
+      {
+        "task": "FLEX-362 - BUG. Дубликаты игр при пагинации",
+        "votes": {
+          "5482082959": "8"
+        },
+        "timestamp": "2025-09-16T10:50:28.261827"
+      }
+    ],
+    "status": "completed",
+    "active_vote_message_id": null,
+    "vote_deadline": null,
+    "default_timeout": 90,
+    "scale": [
+      "1",
+      "2",
+      "3",
+      "5",
+      "8",
+      "13"
+    ],
+    "created_at": "2025-09-14T14:42:36.807383",
+    "updated_at": "2025-09-16T10:50:28.263115"
+  },
+  "-1002718440199_595": {
+    "chat_id": -1002718440199,
+    "topic_id": 595,
+    "participants": {
+      "5482082959": {
+        "user_id": 5482082959,
+        "username": "im2busy2talk",
+        "full_name": "Paul Shults",
+        "is_admin": false
+      }
+    },
+    "tasks": [],
+    "current_task_index": 0,
+    "current_batch_index": 0,
+    "batch_size": 10,
+    "history": [],
+    "last_batch": [],
+    "status": "idle",
+    "active_vote_message_id": null,
+    "vote_deadline": null,
+    "default_timeout": 90,
+    "scale": [
+      "1",
+      "2",
+      "3",
+      "5",
+      "8",
+      "13"
+    ],
+    "created_at": "2025-09-14T14:42:36.807383",
+    "updated_at": "2025-09-15T16:25:00"
+  }
+}
