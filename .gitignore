@@ -190,6 +190,12 @@ data/
 backups/
 scripts/
 
+# Story Points Integration Test
+test_story_points_integration.py
+
+# Documentation
+STORY_POINTS_INTEGRATION.md
+
 # IDE
 .vscode/
 .idea/

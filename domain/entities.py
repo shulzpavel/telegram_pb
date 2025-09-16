@@ -161,6 +161,7 @@ class DomainSession:
         self.vote_deadline: Optional[datetime] = None
         self.default_timeout: TimeoutSeconds = TimeoutSeconds(90)
         self.scale: List[str] = ['1', '2', '3', '5', '8', '13']
+        self.t10_ping_sent: bool = False
         self.created_at: datetime = datetime.now()
         self.updated_at: datetime = datetime.now()
         # New fields for pause and revoting functionality

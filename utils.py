@@ -46,9 +46,9 @@ def build_admin_keyboard(scale: List[str]) -> types.InlineKeyboardMarkup:
     return types.InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def get_main_menu() -> types.InlineKeyboardMarkup:
+def get_main_menu(is_admin: bool = False) -> types.InlineKeyboardMarkup:
     """Получить главное меню"""
-    return types.InlineKeyboardMarkup(inline_keyboard=[
+    keyboard = [
         [
             types.InlineKeyboardButton(text="🆕 Список задач", callback_data="menu:new_task"),
             types.InlineKeyboardButton(text="📋 Итоги дня", callback_data="menu:summary")
@@ -60,7 +60,15 @@ def get_main_menu() -> types.InlineKeyboardMarkup:
         [
             types.InlineKeyboardButton(text="🗑️ Удалить участника", callback_data="menu:kick_participant")
         ]
-    ])
+    ]
+    
+    # Добавляем админские кнопки
+    if is_admin:
+        keyboard.append([
+            types.InlineKeyboardButton(text="🔄 Обновить Story Points", callback_data="admin:update_story_points")
+        ])
+    
+    return types.InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
 def get_settings_menu() -> types.InlineKeyboardMarkup:

@@ -95,7 +95,7 @@ async def menu_command(msg: types.Message):
         await safe_send_message(
             msg.answer,
             "📌 Главное меню:",
-            reply_markup=get_main_menu()
+            reply_markup=get_main_menu(is_admin=is_admin(msg.from_user, msg.chat.id, msg.message_thread_id or 0))
         )
     except Exception as e:
         logger.error(f"Error in menu command: {e}")
@@ -161,7 +161,7 @@ async def join_command(msg: types.Message):
         await safe_send_message(
             msg.answer,
             "👑 Добро пожаловать в панель управления!",
-            reply_markup=get_main_menu()
+            reply_markup=get_main_menu(is_admin=True)
         )
         logger.info(f"JOIN: Admin menu sent successfully")
         return
@@ -308,7 +308,7 @@ async def handle_menu(callback: CallbackQuery, state: FSMContext):
         try:
             await callback.message.edit_text(
                 "📌 Главное меню:",
-                reply_markup=get_main_menu()
+                reply_markup=get_main_menu(is_admin=is_admin(callback.from_user, callback.message.chat.id, callback.message.message_thread_id or 0))
             )
         except Exception as e:
             logger.warning(f"Failed to edit message: {e}")
@@ -316,7 +316,7 @@ async def handle_menu(callback: CallbackQuery, state: FSMContext):
             await safe_send_message(
                 callback.message.answer,
                 "📌 Главное меню:",
-                reply_markup=get_main_menu()
+                reply_markup=get_main_menu(is_admin=is_admin(callback.from_user, callback.message.chat.id, callback.message.message_thread_id or 0))
             )
 
 
@@ -711,7 +711,7 @@ async def handle_settings(callback: CallbackQuery):
         try:
             await callback.message.edit_text(
                 "📌 Главное меню:",
-                reply_markup=get_main_menu()
+                reply_markup=get_main_menu(is_admin=is_admin(callback.from_user, callback.message.chat.id, callback.message.message_thread_id or 0))
             )
         except Exception as e:
             logger.warning(f"Failed to edit message: {e}")
@@ -719,7 +719,7 @@ async def handle_settings(callback: CallbackQuery):
             await safe_send_message(
                 callback.message.answer,
                 "📌 Главное меню:",
-                reply_markup=get_main_menu()
+                reply_markup=get_main_menu(is_admin=is_admin(callback.from_user, callback.message.chat.id, callback.message.message_thread_id or 0))
             )
 
 
@@ -1094,5 +1094,122 @@ async def unknown_input(msg: types.Message):
         await safe_send_message(
             msg.answer,
             "⚠️ Вы не авторизованы. Напишите `/join magic_token` или нажмите /start для инструкций.",
+            parse_mode="Markdown"
+        )
+
+
+# =============================================================================
+# ADMIN HANDLERS - Story Points Update
+# =============================================================================
+
+@router.callback_query(F.data == "admin:update_story_points")
+async def handle_update_story_points(callback: CallbackQuery):
+    """Обработчик обновления Story Points в Jira"""
+    try:
+        if not callback.message:
+            await safe_answer_callback(
+                callback,
+                "❌ Ошибка: сообщение не найдено",
+                show_alert=True
+            )
+            return
+            
+        chat_id = callback.message.chat.id
+        topic_id = callback.message.message_thread_id
+        
+        # Проверяем права админа
+        if not is_admin(callback.from_user, chat_id, topic_id or 0):
+            await safe_answer_callback(
+                callback,
+                "❌ У вас нет прав для обновления Story Points",
+                show_alert=True
+            )
+            return
+        
+        # Получаем текущую сессию
+        session = session_service.get_session(chat_id, topic_id or 0)
+        if not session:
+            await safe_answer_callback(
+                callback,
+                "❌ Нет активной сессии для обновления",
+                show_alert=True
+            )
+            return
+        
+        # Проверяем, есть ли завершенные задачи
+        completed_tasks = []
+        from utils import JiraLinkGenerator
+        
+        jira_generator = JiraLinkGenerator()
+        for task in session.tasks:
+            if task.is_completed() and task.votes:
+                # Извлекаем Jira key из текста задачи
+                task_keys = jira_generator.extract_task_keys(task.text.value)
+                if task_keys:
+                    # Находим максимальную оценку
+                    max_vote = max(int(vote.value.value) for vote in task.votes.values() if vote.value.value.isdigit())
+                    completed_tasks.append((task_keys[0], max_vote))
+        
+        if not completed_tasks:
+            await safe_answer_callback(
+                callback,
+                "❌ Нет завершенных задач для обновления Story Points",
+                show_alert=True
+            )
+            return
+        
+        # Показываем сообщение о начале обновления
+        if callback.message:
+            await callback.message.edit_text(
+            f"🔄 **Обновление Story Points...**\n\n"
+            f"📊 Найдено {len(completed_tasks)} завершенных задач\n"
+            f"⏳ Подключение к Jira...",
+            parse_mode="Markdown"
+        )
+        
+        # Инициализируем Jira сервис
+        from services.jira_update_service import JiraUpdateService
+        from config import JIRA_BASE_URL, JIRA_EMAIL, JIRA_TOKEN, JIRA_STORY_POINTS_FIELD_ID
+        
+        jira_service = JiraUpdateService(
+            jira_base_url=JIRA_BASE_URL,
+            jira_email=JIRA_EMAIL,
+            jira_token=JIRA_TOKEN,
+            story_points_field_id=JIRA_STORY_POINTS_FIELD_ID
+        )
+        
+        # Проверяем доступность Jira
+        if not await jira_service.is_jira_available():
+            if callback.message:
+                await callback.message.edit_text(
+                "❌ **Ошибка обновления Story Points**\n\n"
+                "🔴 Jira недоступна или неверные учетные данные\n"
+                "📞 Обратитесь к администратору",
+                parse_mode="Markdown"
+            )
+            return
+        
+        # Обновляем Story Points
+        results = await jira_service.update_multiple_story_points(completed_tasks)
+        
+        # Генерируем отчет
+        report = jira_service.generate_update_report(results)
+        
+        # Отправляем отчет
+        if callback.message:
+            await callback.message.edit_text(
+            report,
+            parse_mode="Markdown"
+        )
+        
+        logger.info(f"Story Points update completed for session {chat_id}_{topic_id}: {len(results)} tasks processed")
+        
+    except Exception as e:
+        logger.error(f"Error updating Story Points: {e}")
+        if callback.message:
+            await callback.message.edit_text(
+            "❌ **Ошибка обновления Story Points**\n\n"
+            f"🔴 Произошла ошибка: {str(e)}\n"
+            "📞 Обратитесь к администратору",
             parse_mode="Markdown"
         )

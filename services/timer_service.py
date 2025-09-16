@@ -55,7 +55,7 @@ class TimerService(ITimerService):
         try:
             # Get timeout from group config
             group_config = self._group_config_service.get_group_config(chat_id, topic_id)
-            timeout_seconds = group_config.timeout.value if group_config else 90
+            timeout_seconds = group_config.timeout if group_config else 90
             
             logger.info(f"VOTE_TIMEOUT: Sleeping for {timeout_seconds} seconds")
             await asyncio.sleep(timeout_seconds)
@@ -80,7 +80,7 @@ class TimerService(ITimerService):
         logger.info(f"UPDATE_TIMER: Starting timer for chat_id={chat_id}, topic_id={topic_id}")
         
         # Store original message text to avoid adding timer text multiple times
-        original_text = message.text
+        original_text = message.text or ""
         if "⏰ Осталось:" in original_text:
             # Remove existing timer text
             original_text = original_text.split("\n\n⏰ Осталось:")[0]
@@ -99,7 +99,7 @@ class TimerService(ITimerService):
                 logger.info(f"UPDATE_TIMER: Remaining time: {int(remaining)} seconds")
                 
                 # Check for 10-second ping
-                if remaining <= 10 and not getattr(session, 't10_ping_sent', False):
+                if remaining <= 10 and not session.t10_ping_sent:
                     logger.info(f"UPDATE_TIMER: Sending 10-second ping for {chat_id}_{topic_id}")
                     try:
                         await message.answer("⚠️ Осталось 10 секунд!")
@@ -147,7 +147,7 @@ class TimerService(ITimerService):
         # Set deadline
         session = self._session_service.get_session(chat_id, topic_id)
         group_config = self._group_config_service.get_group_config(chat_id, topic_id)
-        timeout_seconds = group_config.timeout.value if group_config else 90
+        timeout_seconds = group_config.timeout if group_config else 90
         
         session.vote_deadline = datetime.now() + timedelta(seconds=timeout_seconds)
         session.active_vote_message_id = message.message_id
