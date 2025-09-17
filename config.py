@@ -46,6 +46,11 @@ JIRA_PROJECT_KEYS: str = os.getenv('JIRA_PROJECT_KEYS', 'FLEX')
 # Для обратной совместимости
 JIRA_PROJECT_KEY: str = os.getenv('JIRA_PROJECT_KEY', 'FLEX')
 
+# Jira Project Field Mapping
+# Маппинг проектов на их поля Story Points (JSON формат)
+# Пример: {"FLEX": "customfield_10022", "IBO2": "customfield_10023"}
+JIRA_PROJECT_FIELD_MAPPING: str = os.getenv('JIRA_PROJECT_FIELD_MAPPING', '{}')
+
 # Groups Configuration
 try:
     from config_parser import GROUPS_CONFIG

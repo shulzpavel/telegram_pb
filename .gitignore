@@ -190,13 +190,16 @@ tests/
 examples/
 data/
 backups/
+# Scripts (except find_story_points_field.py)
 scripts/
+!scripts/find_story_points_field.py
 
 # Story Points Integration Test
 test_story_points_integration.py
 
 # Documentation
 STORY_POINTS_INTEGRATION.md
+STORY_POINTS_FIELD_MAPPING.md
 
 # IDE
 .vscode/

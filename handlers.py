@@ -37,11 +37,18 @@ timer_service = bootstrap.get_timer_service()
 
 def is_allowed_chat(chat_id: int, topic_id: int) -> bool:
     """Проверить, разрешен ли чат"""
+    logger.info(f"IS_ALLOWED_CHAT: Checking chat_id={chat_id}, topic_id={topic_id}")
+    logger.info(f"IS_ALLOWED_CHAT: GROUPS_CONFIG has {len(GROUPS_CONFIG)} groups")
+    
     for group_config in GROUPS_CONFIG:
+        logger.info(f"IS_ALLOWED_CHAT: Checking group {group_config.get('chat_id')}_{group_config.get('topic_id')}")
         if (group_config['chat_id'] == chat_id and 
             group_config['topic_id'] == topic_id and 
             group_config.get('is_active', True)):
+            logger.info(f"IS_ALLOWED_CHAT: ✅ Chat {chat_id}_{topic_id} is allowed")
             return True
+    
+    logger.info(f"IS_ALLOWED_CHAT: ❌ Chat {chat_id}_{topic_id} is NOT allowed")
     return False
 
 
@@ -1183,20 +1190,29 @@ async def handle_update_story_points(callback: CallbackQuery):
             parse_mode="Markdown"
         )
         
-        # Инициализируем Jira сервис
-        from services.jira_update_service import JiraUpdateService
-        from config import JIRA_BASE_URL, JIRA_EMAIL, JIRA_TOKEN, JIRA_STORY_POINTS_FIELD_ID, JIRA_PROJECT_KEYS
-        
-        # Парсим список разрешенных проектов
-        allowed_projects = [p.strip().upper() for p in JIRA_PROJECT_KEYS.split(',') if p.strip()]
-        
-        jira_service = JiraUpdateService(
-            jira_base_url=JIRA_BASE_URL,
-            jira_email=JIRA_EMAIL,
-            jira_token=JIRA_TOKEN,
-            story_points_field_id=JIRA_STORY_POINTS_FIELD_ID,
-            allowed_projects=allowed_projects
-        )
+            # Инициализируем Jira сервис
+            from services.jira_update_service import JiraUpdateService
+            from config import JIRA_BASE_URL, JIRA_EMAIL, JIRA_TOKEN, JIRA_STORY_POINTS_FIELD_ID, JIRA_PROJECT_KEYS, JIRA_PROJECT_FIELD_MAPPING
+            import json
+            
+            # Парсим список разрешенных проектов
+            allowed_projects = [p.strip().upper() for p in JIRA_PROJECT_KEYS.split(',') if p.strip()]
+            
+            # Парсим маппинг полей для проектов
+            try:
+                project_field_mapping = json.loads(JIRA_PROJECT_FIELD_MAPPING) if JIRA_PROJECT_FIELD_MAPPING else {}
+            except json.JSONDecodeError:
+                logger.warning(f"Invalid JIRA_PROJECT_FIELD_MAPPING JSON: {JIRA_PROJECT_FIELD_MAPPING}")
+                project_field_mapping = {}
+            
+            jira_service = JiraUpdateService(
+                jira_base_url=JIRA_BASE_URL,
+                jira_email=JIRA_EMAIL,
+                jira_token=JIRA_TOKEN,
+                story_points_field_id=JIRA_STORY_POINTS_FIELD_ID,
+                allowed_projects=allowed_projects,
+                project_field_mapping=project_field_mapping
+            )
         
         # Проверяем доступность Jira
         if not await jira_service.is_jira_available():
