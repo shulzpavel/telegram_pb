@@ -125,6 +125,8 @@ class DomainGroupConfig:
     scale: List[str] = field(default_factory=lambda: ['1', '2', '3', '5', '8', '13'])
     is_active: bool = True
     created_at: datetime = field(default_factory=datetime.now)
+    jira_email: Optional[str] = None
+    jira_token: Optional[str] = None
     
     def is_admin(self, username: Username) -> bool:
         """Check if username is admin"""

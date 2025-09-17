@@ -68,7 +68,9 @@ class GroupConfigRepository(IGroupConfigRepository):
             'timeout': config.timeout.value,
             'scale': config.scale,
             'is_active': config.is_active,
-            'created_at': config.created_at.isoformat()
+            'created_at': config.created_at.isoformat(),
+            'jira_email': config.jira_email,
+            'jira_token': config.jira_token
         }
         
         # Update existing or add new

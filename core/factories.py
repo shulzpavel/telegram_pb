@@ -212,7 +212,9 @@ class GroupConfigFactory:
                 admins=[Username(admin) for admin in validator.admins],
                 timeout=TimeoutSeconds(validator.timeout),
                 scale=validator.scale,
-                is_active=validator.is_active
+                is_active=validator.is_active,
+                jira_email=getattr(validator, 'jira_email', None),
+                jira_token=getattr(validator, 'jira_token', None)
             )
         except Exception as e:
             raise ValidationError(f"Invalid group config data: {e}")
@@ -229,7 +231,9 @@ class GroupConfigFactory:
                 admins=[Username(admin) for admin in validator.admins],
                 timeout=TimeoutSeconds(validator.timeout),
                 scale=validator.scale,
-                is_active=validator.is_active
+                is_active=validator.is_active,
+                jira_email=getattr(validator, 'jira_email', None),
+                jira_token=getattr(validator, 'jira_token', None)
             )
         except Exception as e:
             raise ValidationError(f"Invalid group config data: {e}")
