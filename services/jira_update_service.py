@@ -27,8 +27,7 @@ class JiraUpdateService:
     
     def __init__(self, jira_base_url: str, jira_email: str, jira_token: str, 
                  story_points_field_id: str = "customfield_10022", 
-                 allowed_projects: Optional[List[str]] = None,
-                 project_field_mapping: Optional[Dict[str, str]] = None):
+                 allowed_projects: Optional[List[str]] = None):
         """
         Initialize Jira Update Service
         
@@ -36,48 +35,19 @@ class JiraUpdateService:
             jira_base_url: Base URL of Jira instance
             jira_email: Email for Jira authentication
             jira_token: API token for Jira authentication
-            story_points_field_id: Default ID of Story Points field in Jira
+            story_points_field_id: ID of Story Points field in Jira (same for all projects)
             allowed_projects: List of allowed project keys (e.g., ['FLEX', 'DEV', 'TASK'])
-            project_field_mapping: Mapping of project keys to their Story Points field IDs
         """
         self.jira_base_url = jira_base_url.rstrip('/')
         self.jira_email = jira_email
         self.jira_token = jira_token
-        self.default_story_points_field_id = story_points_field_id
+        self.story_points_field_id = story_points_field_id
         self.allowed_projects = allowed_projects if allowed_projects is not None else ['FLEX']
-        self.project_field_mapping = project_field_mapping if project_field_mapping is not None else {}
         self.auth = aiohttp.BasicAuth(jira_email, jira_token)
         
         logger.info(f"JiraUpdateService initialized for {jira_base_url}")
-        logger.info(f"Default Story Points field ID: {story_points_field_id}")
+        logger.info(f"Story Points field ID: {story_points_field_id}")
         logger.info(f"Allowed projects: {', '.join(self.allowed_projects)}")
-        if self.project_field_mapping:
-            logger.info(f"Project field mapping: {self.project_field_mapping}")
-    
-    def get_story_points_field_id(self, issue_key: str) -> str:
-        """
-        Get the Story Points field ID for a specific issue
-        
-        Args:
-            issue_key: Jira issue key (e.g., "FLEX-123", "IBO2-456")
-            
-        Returns:
-            str: Story Points field ID for the project
-        """
-        if not issue_key or '-' not in issue_key:
-            return self.default_story_points_field_id
-        
-        project_key = issue_key.split('-')[0]
-        
-        # Check if we have a specific field ID for this project
-        if project_key in self.project_field_mapping:
-            field_id = self.project_field_mapping[project_key]
-            logger.info(f"Using field ID {field_id} for project {project_key}")
-            return field_id
-        
-        # Use default field ID
-        logger.info(f"Using default field ID {self.default_story_points_field_id} for project {project_key}")
-        return self.default_story_points_field_id
     
     def is_project_allowed(self, issue_key: str) -> bool:
         """
@@ -164,13 +134,10 @@ class JiraUpdateService:
             )
         
         try:
-            # Get the correct field ID for this project
-            field_id = self.get_story_points_field_id(issue_key)
-            
             # Prepare the update payload
             payload = {
                 "fields": {
-                    field_id: story_points
+                    self.story_points_field_id: story_points
                 }
             }
             
