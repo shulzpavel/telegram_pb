@@ -208,6 +208,8 @@ class GroupConfigValidator(BaseModel):
     timeout: int = 90
     scale: List[str] = Field(default_factory=lambda: ['1', '2', '3', '5', '8', '13'])
     is_active: bool = True
+    jira_email: Optional[str] = None
+    jira_token: Optional[str] = None
     
     @field_validator('chat_id')
     @classmethod
