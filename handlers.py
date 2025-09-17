@@ -1183,15 +1183,29 @@ async def handle_update_story_points(callback: CallbackQuery):
             parse_mode="Markdown"
         )
         
-            # Инициализируем Jira сервис
+            # Инициализируем Jira сервис для группы
             from services.jira_update_service import JiraUpdateService
-            from config import JIRA_BASE_URL, JIRA_EMAIL, JIRA_TOKEN, JIRA_STORY_POINTS_FIELD_ID
+            from config import JIRA_BASE_URL, JIRA_STORY_POINTS_FIELD_ID, DEFAULT_JIRA_EMAIL, DEFAULT_JIRA_TOKEN
             
-            jira_service = JiraUpdateService(
+            # Получаем конфигурацию группы
+            from services.group_config_service import GroupConfigService
+            group_config_service = GroupConfigService()
+            group_config = group_config_service.get_group_config(chat_id, topic_id)
+            if not group_config:
+                logger.error(f"Group config not found for {chat_id}_{topic_id}")
+                return
+            
+            # Извлекаем Jira токены для группы (если есть)
+            group_jira_email = getattr(group_config, 'jira_email', None)
+            group_jira_token = getattr(group_config, 'jira_token', None)
+            
+            jira_service = JiraUpdateService.create_for_group(
                 jira_base_url=JIRA_BASE_URL,
-                jira_email=JIRA_EMAIL,
-                jira_token=JIRA_TOKEN,
-                story_points_field_id=JIRA_STORY_POINTS_FIELD_ID
+                story_points_field_id=JIRA_STORY_POINTS_FIELD_ID,
+                group_jira_email=group_jira_email,
+                group_jira_token=group_jira_token,
+                default_jira_email=DEFAULT_JIRA_EMAIL,
+                default_jira_token=DEFAULT_JIRA_TOKEN
             )
         
         # Проверяем доступность Jira

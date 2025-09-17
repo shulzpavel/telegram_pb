@@ -40,6 +40,10 @@ JIRA_EMAIL: str = os.getenv('JIRA_EMAIL', '')
 JIRA_TOKEN: str = os.getenv('JIRA_TOKEN', '')
 JIRA_STORY_POINTS_FIELD_ID: str = os.getenv('JIRA_STORY_POINTS_FIELD_ID', 'customfield_10022')
 
+# Default Jira credentials (used as fallback)
+DEFAULT_JIRA_EMAIL: str = os.getenv('DEFAULT_JIRA_EMAIL', JIRA_EMAIL)
+DEFAULT_JIRA_TOKEN: str = os.getenv('DEFAULT_JIRA_TOKEN', JIRA_TOKEN)
+
 # Jira Project Configuration - УДАЛЕНО
 # Теперь бот обрабатывает любые проекты без ограничений
 

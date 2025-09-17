@@ -44,8 +44,41 @@ class JiraUpdateService:
         
         logger.info(f"JiraUpdateService initialized for {jira_base_url}")
         logger.info(f"Story Points field ID: {story_points_field_id}")
+        logger.info(f"Using Jira account: {jira_email}")
     
-    
+    @classmethod
+    def create_for_group(cls, jira_base_url: str, story_points_field_id: str, 
+                        group_jira_email: Optional[str] = None, group_jira_token: Optional[str] = None,
+                        default_jira_email: Optional[str] = None, default_jira_token: Optional[str] = None):
+        """
+        Create JiraUpdateService instance for a specific group
+        
+        Args:
+            jira_base_url: Base URL of Jira instance
+            story_points_field_id: ID of Story Points field in Jira
+            group_jira_email: Group-specific Jira email (optional)
+            group_jira_token: Group-specific Jira token (optional)
+            default_jira_email: Default Jira email (fallback)
+            default_jira_token: Default Jira token (fallback)
+            
+        Returns:
+            JiraUpdateService: Configured service instance
+        """
+        # Use group-specific credentials if provided, otherwise use defaults
+        email = group_jira_email or default_jira_email
+        token = group_jira_token or default_jira_token
+        
+        if not email or not token:
+            logger.warning("No Jira credentials provided for group, using defaults")
+            email = default_jira_email or ""
+            token = default_jira_token or ""
+        
+        return cls(
+            jira_base_url=jira_base_url,
+            jira_email=email,
+            jira_token=token,
+            story_points_field_id=story_points_field_id
+        )
     
     async def is_jira_available(self) -> bool:
         """
