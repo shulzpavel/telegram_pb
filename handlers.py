@@ -1185,17 +1185,13 @@ async def handle_update_story_points(callback: CallbackQuery):
         
             # Инициализируем Jira сервис
             from services.jira_update_service import JiraUpdateService
-            from config import JIRA_BASE_URL, JIRA_EMAIL, JIRA_TOKEN, JIRA_STORY_POINTS_FIELD_ID, JIRA_PROJECT_KEYS
-            
-            # Парсим список разрешенных проектов
-            allowed_projects = [p.strip().upper() for p in JIRA_PROJECT_KEYS.split(',') if p.strip()]
+            from config import JIRA_BASE_URL, JIRA_EMAIL, JIRA_TOKEN, JIRA_STORY_POINTS_FIELD_ID
             
             jira_service = JiraUpdateService(
                 jira_base_url=JIRA_BASE_URL,
                 jira_email=JIRA_EMAIL,
                 jira_token=JIRA_TOKEN,
-                story_points_field_id=JIRA_STORY_POINTS_FIELD_ID,
-                allowed_projects=allowed_projects
+                story_points_field_id=JIRA_STORY_POINTS_FIELD_ID
             )
         
         # Проверяем доступность Jira

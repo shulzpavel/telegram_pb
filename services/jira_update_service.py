@@ -26,8 +26,7 @@ class JiraUpdateService:
     """Service for updating Story Points in Jira tasks"""
     
     def __init__(self, jira_base_url: str, jira_email: str, jira_token: str, 
-                 story_points_field_id: str = "customfield_10022", 
-                 allowed_projects: Optional[List[str]] = None):
+                 story_points_field_id: str = "customfield_10022"):
         """
         Initialize Jira Update Service
         
@@ -35,40 +34,18 @@ class JiraUpdateService:
             jira_base_url: Base URL of Jira instance
             jira_email: Email for Jira authentication
             jira_token: API token for Jira authentication
-            story_points_field_id: ID of Story Points field in Jira (same for all projects)
-            allowed_projects: List of allowed project keys (e.g., ['FLEX', 'DEV', 'TASK'])
+            story_points_field_id: ID of Story Points field in Jira
         """
         self.jira_base_url = jira_base_url.rstrip('/')
         self.jira_email = jira_email
         self.jira_token = jira_token
         self.story_points_field_id = story_points_field_id
-        self.allowed_projects = allowed_projects if allowed_projects is not None else ['FLEX']
         self.auth = aiohttp.BasicAuth(jira_email, jira_token)
         
         logger.info(f"JiraUpdateService initialized for {jira_base_url}")
         logger.info(f"Story Points field ID: {story_points_field_id}")
-        logger.info(f"Allowed projects: {', '.join(self.allowed_projects)}")
     
-    def is_project_allowed(self, issue_key: str) -> bool:
-        """
-        Check if the issue belongs to an allowed project
-        
-        Args:
-            issue_key: Jira issue key (e.g., "FLEX-123", "DEV-456")
-            
-        Returns:
-            bool: True if project is allowed, False otherwise
-        """
-        if not issue_key or '-' not in issue_key:
-            return False
-        
-        project_key = issue_key.split('-')[0]
-        is_allowed = project_key.upper() in [p.upper() for p in self.allowed_projects]
-        
-        if not is_allowed:
-            logger.warning(f"❌ Project {project_key} is not in allowed projects: {', '.join(self.allowed_projects)}")
-        
-        return is_allowed
+    
     
     async def is_jira_available(self) -> bool:
         """
@@ -116,22 +93,13 @@ class JiraUpdateService:
         Update Story Points for a specific Jira issue
         
         Args:
-            issue_key: Jira issue key (e.g., "FLEX-123")
+            issue_key: Jira issue key (e.g., "FLEX-123", "IBO2-456", "ANY-789")
             story_points: Story Points value to set
             
         Returns:
             UpdateResult: Result of the update operation
         """
         logger.info(f"Updating Story Points for {issue_key} to {story_points}")
-        
-        # Check if project is allowed
-        if not self.is_project_allowed(issue_key):
-            logger.warning(f"❌ Skipping {issue_key} - project not allowed")
-            return UpdateResult(
-                issue_key=issue_key,
-                success=False,
-                error=f"Project not allowed. Allowed projects: {', '.join(self.allowed_projects)}"
-            )
         
         try:
             # Prepare the update payload

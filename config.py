@@ -40,11 +40,8 @@ JIRA_EMAIL: str = os.getenv('JIRA_EMAIL', '')
 JIRA_TOKEN: str = os.getenv('JIRA_TOKEN', '')
 JIRA_STORY_POINTS_FIELD_ID: str = os.getenv('JIRA_STORY_POINTS_FIELD_ID', 'customfield_10022')
 
-# Jira Project Configuration
-# Поддерживаемые проекты (через запятую): FLEX,DEV,TASK
-JIRA_PROJECT_KEYS: str = os.getenv('JIRA_PROJECT_KEYS', 'FLEX')
-# Для обратной совместимости
-JIRA_PROJECT_KEY: str = os.getenv('JIRA_PROJECT_KEY', 'FLEX')
+# Jira Project Configuration - УДАЛЕНО
+# Теперь бот обрабатывает любые проекты без ограничений
 
 # Jira Project Field Mapping - УДАЛЕНО (единое поле для всех проектов)
 
