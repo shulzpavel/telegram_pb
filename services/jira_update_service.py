@@ -18,15 +18,15 @@ class UpdateResult:
     """Result of Story Points update operation"""
     issue_key: str
     success: bool
-    story_points: int
-    error_message: Optional[str] = None
+    story_points: Optional[int] = None
+    error: Optional[str] = None
 
 
 class JiraUpdateService:
     """Service for updating Story Points in Jira tasks"""
     
     def __init__(self, jira_base_url: str, jira_email: str, jira_token: str, 
-                 story_points_field_id: str = "customfield_10022"):
+                 story_points_field_id: str = "customfield_10022", allowed_projects: Optional[List[str]] = None):
         """
         Initialize Jira Update Service
         
@@ -35,15 +35,39 @@ class JiraUpdateService:
             jira_email: Email for Jira authentication
             jira_token: API token for Jira authentication
             story_points_field_id: ID of Story Points field in Jira
+            allowed_projects: List of allowed project keys (e.g., ['FLEX', 'DEV', 'TASK'])
         """
         self.jira_base_url = jira_base_url.rstrip('/')
         self.jira_email = jira_email
         self.jira_token = jira_token
         self.story_points_field_id = story_points_field_id
+        self.allowed_projects = allowed_projects if allowed_projects is not None else ['FLEX']  # Default to FLEX for backward compatibility
         self.auth = aiohttp.BasicAuth(jira_email, jira_token)
         
         logger.info(f"JiraUpdateService initialized for {jira_base_url}")
         logger.info(f"Story Points field ID: {story_points_field_id}")
+        logger.info(f"Allowed projects: {', '.join(self.allowed_projects)}")
+    
+    def is_project_allowed(self, issue_key: str) -> bool:
+        """
+        Check if the issue belongs to an allowed project
+        
+        Args:
+            issue_key: Jira issue key (e.g., "FLEX-123", "DEV-456")
+            
+        Returns:
+            bool: True if project is allowed, False otherwise
+        """
+        if not issue_key or '-' not in issue_key:
+            return False
+        
+        project_key = issue_key.split('-')[0]
+        is_allowed = project_key.upper() in [p.upper() for p in self.allowed_projects]
+        
+        if not is_allowed:
+            logger.warning(f"❌ Project {project_key} is not in allowed projects: {', '.join(self.allowed_projects)}")
+        
+        return is_allowed
     
     async def is_jira_available(self) -> bool:
         """
@@ -76,7 +100,7 @@ class JiraUpdateService:
                         logger.warning(f"❌ Jira returned status {response.status}: {response_text}")
                         return False
                         
-        except aiohttp.ClientTimeout:
+        except asyncio.TimeoutError:
             logger.error("❌ Jira connection timeout - server may be down")
             return False
         except aiohttp.ClientConnectorError as e:
@@ -98,6 +122,15 @@ class JiraUpdateService:
             UpdateResult: Result of the update operation
         """
         logger.info(f"Updating Story Points for {issue_key} to {story_points}")
+        
+        # Check if project is allowed
+        if not self.is_project_allowed(issue_key):
+            logger.warning(f"❌ Skipping {issue_key} - project not allowed")
+            return UpdateResult(
+                issue_key=issue_key,
+                success=False,
+                error=f"Project not allowed. Allowed projects: {', '.join(self.allowed_projects)}"
+            )
         
         try:
             # Prepare the update payload
@@ -162,10 +195,10 @@ class JiraUpdateService:
                             issue_key=issue_key,
                             success=False,
                             story_points=story_points,
-                            error_message=f"HTTP {response.status}: {error_text}"
+                            error=f"HTTP {response.status}: {error_text}"
                         )
                         
-        except aiohttp.ClientTimeout:
+        except asyncio.TimeoutError:
             logger.error(f"❌ Timeout updating {issue_key} - Jira server may be slow")
             return UpdateResult(
                 issue_key=issue_key,
@@ -207,7 +240,7 @@ class JiraUpdateService:
                     issue_key=issue_key,
                     success=False,
                     story_points=story_points,
-                    error_message="Jira is not available"
+                    error="Jira is not available"
                 )
                 for issue_key, story_points in updates
             ]
@@ -252,7 +285,7 @@ class JiraUpdateService:
         if failed:
             report += f"❌ **Ошибки: {len(failed)} задач**\n"
             for result in failed:
-                report += f"• {result.issue_key}: {result.error_message}\n"
+                report += f"• {result.issue_key}: {result.error}\n"
             report += "\n"
         
         report += f"📊 **Итого: {len(results)} задач обработано**"
