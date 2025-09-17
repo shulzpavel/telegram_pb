@@ -1189,8 +1189,7 @@ async def handle_update_story_points(callback: CallbackQuery):
             
             # Получаем конфигурацию группы
             from core.bootstrap import bootstrap
-            container = bootstrap()
-            group_config_service = container.get_group_config_service()
+            group_config_service = bootstrap.get_group_config_service()
             group_config = group_config_service.get_group_config(chat_id, topic_id)
             if not group_config:
                 logger.error(f"Group config not found for {chat_id}_{topic_id}")
