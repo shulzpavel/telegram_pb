@@ -272,13 +272,19 @@ def format_vote_results(session: Session) -> str:
 
 
 def calculate_task_estimate(session: Session) -> Optional[str]:
-    """Вычислить оценку задачи"""
+    """Вычислить оценку задачи (исключая голоса админов)"""
     if not session.current_task or not session.current_task.votes:
         return None
     
     votes = []
     for vote in session.current_task.votes.values():
         try:
+            # Исключаем голоса админов из итогового подсчета
+            if hasattr(vote, 'user_id') and vote.user_id in session.participants:
+                participant = session.participants[vote.user_id]
+                if hasattr(participant, 'role') and participant.role.value in ['admin', 'super_admin']:
+                    continue  # Пропускаем голос админа
+            
             votes.append(int(vote.value.value))
         except (ValueError, AttributeError):
             continue
@@ -724,22 +730,7 @@ def create_jira_link_generator(jira_base_url: Optional[str] = None) -> JiraLinkG
 # UI CONTROLS FOR SESSION CONTROL
 # ============================================================================
 
-def create_batch_completion_keyboard() -> types.InlineKeyboardMarkup:
-    """Create keyboard for batch completion decision"""
-    return types.InlineKeyboardMarkup(inline_keyboard=[
-        [
-            types.InlineKeyboardButton(
-                text="🔄 Продолжить оценку",
-                callback_data="batch:continue"
-            )
-        ],
-        [
-            types.InlineKeyboardButton(
-                text="⏸️ Передохнуть",
-                callback_data="batch:pause"
-            )
-        ]
-    ])
+# REMOVED: create_batch_completion_keyboard - replaced with get_batch_summary_menu
 
 
 def create_pause_management_keyboard() -> types.InlineKeyboardMarkup:

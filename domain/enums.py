@@ -32,6 +32,7 @@ class SessionStatus(Enum):
 class ParticipantRole(Enum):
     """Participant role enumeration"""
     PARTICIPANT = "participant"
+    LEAD = "lead"
     ADMIN = "admin"
     SUPER_ADMIN = "super_admin"
 

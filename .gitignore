@@ -127,16 +127,34 @@ dmypy.json
 # Pyre type checker
 .pyre/
 
-# Project specific
-data/
+# Project specific - PRODUCTION READY
+# Data files (keep structure but ignore content)
+data/*.json
+data/*.log
+data/sessions.json
+data/tokens.json
+data/group_configs.json
+!data/.gitkeep
+
+# Logs
 *.log
+logs/
+bot.log
+error.log
+access.log
+
+# Temporary files
 temp_*
 test_*
 debug_*
 comprehensive_*
 simple_*
+tmp/
+temp/
+*.tmp
+*.temp
 
-# Test files and directories
+# Test files and directories (exclude from production)
 tests/
 test_*.py
 *_test.py
@@ -144,15 +162,27 @@ test_*.csv
 test_*.xlsx
 test_*.json
 test_negative_scenarios.py
-scripts/add_group.py
+test_story_points_integration.py
+test_comprehensive_scenarios.py
+test_edge_cases.py
+test_integration_scenarios.py
+test_stress_performance.py
+test_security.py
+run_comprehensive_tests.py
 
 # Example files
 examples/
 example_*
 *_example.*
 
-# Environment files
-env.example
+# Environment files (keep example, ignore actual)
+.env
+.env.local
+.env.production
+.env.staging
+.env.development
+.env.backup
+!env.example
 
 # Backup files
 backups/
@@ -160,21 +190,18 @@ backups/
 *.bak
 *_backup_*
 
-# Temporary files
-tmp/
-temp/
-*.tmp
-*.temp
-
-# Configuration files
+# Configuration files (keep essential, ignore generated)
 config_parser.py
 *.service
+!planning-poker-bot.service
 
 # Virtual environments
 .venv/
 venv/
 env/
 ENV/
+env.bak/
+venv.bak/
 
 # Git
 .git/
@@ -185,21 +212,20 @@ ENV/
 # Docker
 .dockerignore
 
-# Project directories to exclude
-tests/
-examples/
-data/
-backups/
-# Scripts (except find_story_points_field.py)
-scripts/
+# Scripts (keep essential deployment scripts)
+scripts/add_group.py
+scripts/backup_data.py
+scripts/check_config.py
 !scripts/find_story_points_field.py
+!scripts/update.sh
 
-# Story Points Integration Test
-test_story_points_integration.py
-
-# Documentation
+# Documentation (keep essential, ignore test docs)
 STORY_POINTS_INTEGRATION.md
 STORY_POINTS_FIELD_MAPPING.md
+STORY_POINTS_SETUP.md
+TEST_INSTRUCTIONS.md
+DEPLOYMENT_CHECKLIST.md
+DEVOPS_GUIDE.md
 
 # IDE
 .vscode/
@@ -217,5 +243,48 @@ STORY_POINTS_FIELD_MAPPING.md
 ehthumbs.db
 Thumbs.db
 
-# Docker
-.dockerignore
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+
+# Coverage reports
+htmlcov/
+.coverage
+.coverage.*
+.pytest_cache/
+.tox/
+.nox/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pyre
+.pyre/
+
+# Deployment artifacts
+deploy/
+dist/
+build/
+*.egg-info/
+
+# Runtime files
+*.pid
+*.sock
+*.lock
+
+# Security - never commit these
+*.pem
+*.key
+*.crt
+*.p12
+secrets/
+.secrets/

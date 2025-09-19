@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 import logging
 
 from core.interfaces import ISessionRepository
+from core.file_locks import file_lock
 from domain.entities import DomainSession, DomainParticipant
 from domain.value_objects import ChatId, TopicId, SessionKey, UserId, Username, FullName
 from domain.enums import SessionStatus
@@ -28,19 +29,19 @@ class SessionRepository(ISessionRepository):
         os.makedirs(self.data_dir, exist_ok=True)
     
     def _load_sessions(self) -> Dict[str, Dict[str, Any]]:
-        """Load sessions from file"""
+        """Load sessions from file with file locking"""
         try:
             if os.path.exists(self.sessions_file):
-                with open(self.sessions_file, 'r', encoding='utf-8') as f:
+                with file_lock(self.sessions_file, 'r') as f:
                     return json.load(f)
         except Exception as e:
             logger.error(f"Error loading sessions: {e}")
         return {}
     
     def _save_sessions(self, sessions: Dict[str, Dict[str, Any]]) -> None:
-        """Save sessions to file"""
+        """Save sessions to file with file locking"""
         try:
-            with open(self.sessions_file, 'w', encoding='utf-8') as f:
+            with file_lock(self.sessions_file, 'w') as f:
                 json.dump(sessions, f, ensure_ascii=False, indent=2)
         except Exception as e:
             logger.error(f"Error saving sessions: {e}")

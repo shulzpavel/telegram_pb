@@ -13,7 +13,7 @@ from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
 
 from config import BOT_TOKEN, DATA_DIR, LOG_LEVEL, GROUPS_CONFIG
-from handlers import router
+from handlers import main_router
 from handlers_modules.session_control_handlers import router as session_control_router
 from core.bootstrap import bootstrap
 
@@ -41,7 +41,7 @@ async def main() -> None:
     # Initialize bot and dispatcher
     bot = Bot(token=BOT_TOKEN, parse_mode="HTML")
     dp = Dispatcher(storage=MemoryStorage())
-    dp.include_router(router)
+    dp.include_router(main_router)
     dp.include_router(session_control_router)
     
     # Initialize group configurations

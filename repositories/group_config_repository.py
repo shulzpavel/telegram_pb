@@ -7,6 +7,7 @@ from typing import Optional, List
 import logging
 
 from core.interfaces import IGroupConfigRepository
+from core.file_locks import file_lock
 from domain.entities import DomainGroupConfig
 from domain.value_objects import ChatId, TopicId, Username, TimeoutSeconds
 from core.factories import GroupConfigFactory
@@ -27,19 +28,19 @@ class GroupConfigRepository(IGroupConfigRepository):
         os.makedirs(self.data_dir, exist_ok=True)
     
     def _load_configs(self) -> List[dict]:
-        """Load configurations from file"""
+        """Load configurations from file with file locking"""
         try:
             if os.path.exists(self.config_file):
-                with open(self.config_file, 'r', encoding='utf-8') as f:
+                with file_lock(self.config_file, 'r') as f:
                     return json.load(f)
         except Exception as e:
             logger.error(f"Error loading group configs: {e}")
         return []
     
     def _save_configs(self, configs: List[dict]) -> None:
-        """Save configurations to file"""
+        """Save configurations to file with file locking"""
         try:
-            with open(self.config_file, 'w', encoding='utf-8') as f:
+            with file_lock(self.config_file, 'w') as f:
                 json.dump(configs, f, ensure_ascii=False, indent=2)
         except Exception as e:
             logger.error(f"Error saving group configs: {e}")
@@ -87,3 +88,17 @@ class GroupConfigRepository(IGroupConfigRepository):
         
         self._save_configs(configs)
         logger.debug(f"Saved group config: {config.chat_id.value}_{config.topic_id.value}")
+    
+    def get_all_group_configs(self) -> List[DomainGroupConfig]:
+        """Get all group configurations"""
+        configs = self._load_configs()
+        result = []
+        
+        for config_data in configs:
+            try:
+                result.append(GroupConfigFactory.from_dict(config_data))
+            except Exception as e:
+                logger.error(f"Error loading group config: {e}")
+                continue
+        
+        return result

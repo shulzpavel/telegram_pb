@@ -12,7 +12,7 @@ from core.bootstrap import bootstrap
 from core.interfaces import ISessionControlService, ISessionService, IGroupConfigService
 from domain.enums import PauseReason, SessionStatus
 from utils import (
-    create_batch_completion_keyboard, create_pause_management_keyboard,
+    get_batch_summary_menu, create_pause_management_keyboard,
     create_revoting_keyboard, create_discrepancy_analysis_keyboard,
     format_batch_completion_message, format_pause_message, format_revoting_message,
     format_discrepancy_analysis, format_batch_progress

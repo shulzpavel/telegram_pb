@@ -8,11 +8,12 @@ from .container import Container
 from .interfaces import (
     ISessionRepository, IGroupConfigRepository, ITokenRepository,
     ISessionService, ITimerService, IGroupConfigService, IMessageService, IFileParser,
-    ISessionControlService
+    ISessionControlService, IRoleService
 )
 from repositories import SessionRepository, GroupConfigRepository, TokenRepository
 from services import SessionService, TimerService, GroupConfigService, MessageService, FileParserService
 from services.session_control_service import SessionControlService
+from services.role_service import RoleService
 
 logger = logging.getLogger(__name__)
 
@@ -83,6 +84,11 @@ class Bootstrap:
             )
         )
         
+        self.container.register_factory(
+            IRoleService,
+            lambda: RoleService(data_dir)
+        )
+        
         logger.info("Services configured successfully")
     
     def get_session_service(self) -> ISessionService:
@@ -120,6 +126,10 @@ class Bootstrap:
     def get_token_repository(self) -> ITokenRepository:
         """Get token repository"""
         return self.container.get(ITokenRepository)
+    
+    def get_role_service(self) -> IRoleService:
+        """Get role service"""
+        return self.container.get(IRoleService)
 
 
 # Global bootstrap instance

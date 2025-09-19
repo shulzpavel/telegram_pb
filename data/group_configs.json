@@ -39,7 +39,9 @@
     "chat_id": -1002718440199,
     "topic_id": 1578,
     "admins": [
-      "@shults_shults_shults"
+      "@shults_shults_shults",
+      "@naumov_egor",
+      "@sdssdfsd"
     ],
     "timeout": 90,
     "scale": [
@@ -51,6 +53,29 @@
       "13"
     ],
     "is_active": true,
-    "created_at": "2025-09-17T10:28:00.000000"
+    "created_at": "2025-09-17T17:59:38.043454",
+    "jira_email": null,
+    "jira_token": null
+  },
+  {
+    "chat_id": -1002580698052,
+    "topic_id": 3382,
+    "admins": [
+      "@shults_shults_shults",
+      "@naumov_egor"
+    ],
+    "timeout": 90,
+    "scale": [
+      "1",
+      "2",
+      "3",
+      "5",
+      "8",
+      "13"
+    ],
+    "is_active": true,
+    "created_at": "2025-09-17T17:59:38.044640",
+    "jira_email": null,
+    "jira_token": null
   }
 ]

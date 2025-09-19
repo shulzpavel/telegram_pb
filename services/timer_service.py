@@ -237,13 +237,13 @@ class TimerService(ITimerService):
                 needs_action = session_control_service.check_batch_completion(chat_id, topic_id)
                 
                 if needs_action:
-                    # Show batch completion UI
-                    from utils import create_batch_completion_keyboard, format_batch_completion_message
+                    # Show batch completion UI with proper menu
+                    from utils import get_batch_summary_menu, format_batch_completion_message
                     batch_info = session_control_service.get_batch_progress(chat_id, topic_id)
                     
                     await message.edit_text(
                         format_batch_completion_message(batch_info),
-                        reply_markup=create_batch_completion_keyboard()
+                        reply_markup=get_batch_summary_menu()
                     )
                     return
                 else:
@@ -261,10 +261,8 @@ class TimerService(ITimerService):
                 # All tasks completed, show main menu
                 logger.info(f"REVEAL_VOTES: All tasks completed, showing main menu")
                 from utils import get_main_menu
-                from services.group_config_service import GroupConfigService
                 
                 # Check if user is admin to show admin menu
-                # Use existing group config service from timer service
                 user_is_admin = False
                 if message.from_user:
                     user_is_admin = self._group_config_service.is_admin(chat_id, topic_id or 0, message.from_user)

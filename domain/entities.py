@@ -236,33 +236,41 @@ class DomainSession:
         return True
     
     def is_all_voted(self) -> bool:
-        """Check if all participants voted"""
+        """Check if all voting participants voted (excluding admins)"""
         import logging
         logger = logging.getLogger(__name__)
         
         if not self.current_task:
             logger.info(f"DOMAIN_IS_ALL_VOTED: No current task")
             return False
-            
-        votes_count = len(self.current_task.votes)
-        participants_count = len(self.participants)
-        result = votes_count == participants_count
         
-        logger.info(f"DOMAIN_IS_ALL_VOTED: votes_count={votes_count}, participants_count={participants_count}, result={result}")
+        # Считаем только участников, которые должны голосовать (исключаем админов)
+        voting_participants = [
+            p for p in self.participants.values() 
+            if p.role.value in ['participant', 'lead']
+        ]
+        
+        votes_count = len(self.current_task.votes)
+        voting_participants_count = len(voting_participants)
+        result = votes_count == voting_participants_count
+        
+        logger.info(f"DOMAIN_IS_ALL_VOTED: votes_count={votes_count}, voting_participants_count={voting_participants_count}, result={result}")
         logger.info(f"DOMAIN_IS_ALL_VOTED: voted_users: {list(self.current_task.votes.keys())}")
-        logger.info(f"DOMAIN_IS_ALL_VOTED: all_participants: {list(self.participants.keys())}")
+        logger.info(f"DOMAIN_IS_ALL_VOTED: voting_participants: {[p.user_id.value for p in voting_participants]}")
         
         return result
     
     def get_not_voted_participants(self) -> List[DomainParticipant]:
-        """Get participants who haven't voted"""
+        """Get participants who haven't voted (excluding admins)"""
         if not self.current_task:
             return []
         
         voted_user_ids = set(self.current_task.votes.keys())
+        # Возвращаем только участников, которые должны голосовать
         return [
             participant for participant in self.participants.values()
-            if participant.user_id not in voted_user_ids
+            if (participant.user_id not in voted_user_ids and 
+                participant.role.value in ['participant', 'lead'])
         ]
     
     def complete_current_task(self) -> bool:
