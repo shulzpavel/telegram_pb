@@ -1,5 +1,11 @@
 from aiogram.fsm.state import State, StatesGroup
 from typing import Dict, Tuple, Any
+from enum import Enum
+
+class UserRole(Enum):
+    PARTICIPANT = "participant"
+    LEAD = "lead" 
+    ADMIN = "admin"
 
 class PokerStates(StatesGroup):
     idle = State()
@@ -9,8 +15,18 @@ class PokerStates(StatesGroup):
     showing_results = State()
     waiting_for_task_text = State()
 
-# Токен для /join
-current_token = 'magic_token'
+# Токены для подключения
+BOT_TOKEN = "YOUR_TELEGRAM_BOT_TOKEN"
+ALLOWED_CHAT_ID = -1003087077812
+ALLOWED_TOPIC_ID = None  # Для обычных групп без топиков
+
+# Токены для ролей
+USER_TOKEN = "user_token"
+LEAD_TOKEN = "lead_token" 
+ADMIN_TOKEN = "admin_token"
+
+# Хардкод админов (можно расширить)
+HARD_ADMINS = ["@admin1", "@admin2"]  # Замените на реальные username
 
 # Сессионное хранилище по (chat_id, topic_id)
 sessions: Dict[Tuple[int, int], Dict[str, Any]] = {}
@@ -27,7 +43,7 @@ def get_session(chat_id: int, topic_id: int) -> Dict[str, Any]:
     s = sessions.get(key)
     if s is None:
         s = {
-            'participants': {},          # user_id -> full_name
+            'participants': {},          # user_id -> {'name': str, 'role': UserRole}
             'votes': {},                 # user_id -> value (str)
             'history': [],               # список завершенных задач банча
             'current_task': None,        # текст текущей задачи
