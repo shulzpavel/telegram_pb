@@ -28,6 +28,12 @@ ADMIN_TOKEN = "admin_token"
 # Хардкод админов (можно расширить)
 HARD_ADMINS = ["@admin1", "@admin2"]  # Замените на реальные username
 
+# Jira конфигурация
+JIRA_URL = "https://your-domain.atlassian.net"
+JIRA_USERNAME = "your-email@domain.com"
+JIRA_API_TOKEN = "YOUR_JIRA_API_TOKEN_HERE"  # Замените на реальный токен
+STORY_POINTS_FIELD = "customfield_10022"  # ID поля Story Points в Jira
+
 # Сессионное хранилище по (chat_id, topic_id)
 sessions: Dict[Tuple[int, int], Dict[str, Any]] = {}
 
