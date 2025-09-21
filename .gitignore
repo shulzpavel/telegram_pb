@@ -288,3 +288,27 @@ build/
 *.p12
 secrets/
 .secrets/
+
+# Bot specific files
+run_local.py
+run_new_bot.py
+.cursor/
+
+# Data files with sensitive information
+data/user_roles.json
+data/tokens.json
+data/sessions.json
+data/group_configs.json
+data/bot.log
+data/*.log
+
+# Keep example files
+!data/*.example
+
+# Environment files
+.env
+.env.local
+.env.production
+.env.staging
+.env.development
+.env.backup

@@ -6,9 +6,8 @@ from aiogram import types, Router
 from aiogram.filters import Command
 
 from core.bootstrap import bootstrap
-from core.error_handler import safe_send_message, safe_handler
-from services.group_config_service import GroupConfigService
-from services.role_service import RoleService
+from utils import safe_send_message, get_main_menu
+from core.error_handler import safe_handler
 
 logger = logging.getLogger(__name__)
 
@@ -38,12 +37,23 @@ def is_allowed_chat(chat_id: int, topic_id: int) -> bool:
 
 def is_admin(user: types.User, chat_id: int, topic_id: int) -> bool:
     """Проверить, является ли пользователь админом"""
+    logger.info(f"IS_ADMIN: Checking user {user.id} ({user.username}) in chat {chat_id}_{topic_id}")
+    
     # Сначала проверяем новую систему ролей
-    if role_service.can_manage_session(user):
+    role_can_manage = role_service.can_manage_session(user)
+    logger.info(f"IS_ADMIN: Role service result: {role_can_manage}")
+    
+    if role_can_manage:
+        logger.info(f"IS_ADMIN: User {user.id} is admin via role service")
         return True
     
     # Fallback на старую систему для обратной совместимости
-    return group_config_service.is_admin(chat_id, topic_id, user)
+    group_config_admin = group_config_service.is_admin(chat_id, topic_id, user)
+    logger.info(f"IS_ADMIN: Group config service result: {group_config_admin}")
+    
+    final_result = group_config_admin
+    logger.info(f"IS_ADMIN: Final result for user {user.id}: {final_result}")
+    return final_result
 
 
 @router.message(Command("start", "help"))
@@ -53,18 +63,17 @@ async def help_command(msg: types.Message):
     if not is_allowed_chat(msg.chat.id, msg.message_thread_id or 0):
         return
     
-    text = (
-        "🤖 Привет! Я бот для планирования задач Planning Poker.\n\n"
-        "📋 Основные команды:\n"
-        "• `/join + токен` - присоединиться к сессии\n"
-        "• `/menu` - показать главное меню\n"
-        "• `/start` - показать это меню\n\n"
-        "🎯 Функции:\n"
-        "• 🆕 Создание списка задач\n"
-        "• 📊 Голосование по задачам\n"
-        "• 📈 Подсчет Story Points\n"
-        "• 📋 Отчеты по сессиям\n"
-        "• 📊 Итоги дня\n\n"
-    )
+    if not msg.from_user:
+        return
     
-    await safe_send_message(msg.answer, text, parse_mode="Markdown")
+    # Проверяем права пользователя
+    user_is_admin = is_admin(msg.from_user, msg.chat.id, msg.message_thread_id or 0)
+    
+    # Показываем меню
+    keyboard = get_main_menu(is_admin=user_is_admin)
+    await safe_send_message(
+        msg.answer,
+        "🎯 **Главное меню**\n\nВыберите действие:",
+        reply_markup=keyboard,
+        parse_mode="Markdown"
+    )

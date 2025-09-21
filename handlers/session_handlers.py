@@ -21,58 +21,6 @@ group_config_service = bootstrap.get_group_config_service()
 role_service = bootstrap.get_role_service()
 
 
-@router.message(Command("join"))
-async def join_command(msg: types.Message):
-    """Команда присоединения к сессии"""
-    if not is_allowed_chat(msg.chat.id, msg.message_thread_id or 0):
-        return
-    
-    if not msg.from_user:
-        return
-    
-    # Парсим токен
-    if not msg.text or len(msg.text.split()) < 2:
-        await safe_send_message(
-            msg.answer,
-            "❌ Неверный формат команды. Используйте: `/join magic_token`",
-            parse_mode="Markdown"
-        )
-        return
-    
-    token = msg.text.split()[1]
-    chat_id = msg.chat.id
-    topic_id = msg.message_thread_id or 0
-    
-    try:
-        # Проверяем токен
-        if not group_config_service.verify_token(chat_id, topic_id, token):
-            await safe_send_message(
-                msg.answer,
-                "❌ Неверный токен. Обратитесь к администратору."
-            )
-            return
-        
-        # Добавляем участника
-        success = session_service.add_participant(chat_id, topic_id, msg.from_user)
-        
-        if success:
-            await safe_send_message(
-                msg.answer,
-                f"✅ Вы успешно присоединились к сессии!\n"
-                f"Ваша роль: {role_service.get_user_role(msg.from_user).value}"
-            )
-        else:
-            await safe_send_message(
-                msg.answer,
-                "❌ Ошибка при присоединении к сессии."
-            )
-            
-    except Exception as e:
-        logger.error(f"Error in join command: {e}")
-        await safe_send_message(
-            msg.answer,
-            "❌ Произошла ошибка при присоединении к сессии."
-        )
 
 
 @router.message(Command("leave"))
@@ -127,10 +75,18 @@ async def menu_command(msg: types.Message):
             return
         
         # Проверяем права пользователя
+        logger.info(f"MENU_COMMAND: About to check admin status for user {msg.from_user.id}")
         user_is_admin = is_admin(msg.from_user, msg.chat.id, msg.message_thread_id or 0)
+        logger.info(f"MENU_COMMAND: Admin status result: {user_is_admin}")
         
         # Показываем меню
+        logger.info(f"MENU_COMMAND: About to get main menu with is_admin={user_is_admin}")
         keyboard = get_main_menu(is_admin=user_is_admin)
+        logger.info(f"MENU_COMMAND: Got keyboard, about to send message")
+        logger.info(f"MENU_COMMAND: Keyboard has {len(keyboard.inline_keyboard)} rows")
+        for i, row in enumerate(keyboard.inline_keyboard):
+            logger.info(f"MENU_COMMAND: Row {i}: {[btn.text for btn in row]}")
+        
         await safe_send_message(
             msg.answer,
             "🎯 **Главное меню**\n\nВыберите действие:",

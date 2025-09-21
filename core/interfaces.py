@@ -143,6 +143,10 @@ class IGroupConfigService(ABC):
         pass
     
     @abstractmethod
+    def verify_token(self, chat_id: int, topic_id: int, token: str) -> bool:
+        pass
+    
+    @abstractmethod
     def get_today_history(self, chat_id: int, topic_id: int) -> List[Dict[str, Any]]:
         pass
 
@@ -246,4 +250,12 @@ class IRoleService(ABC):
     
     @abstractmethod
     def get_users_by_role(self, role: ParticipantRole) -> List[str]:
+        pass
+    
+    @abstractmethod
+    def set_user_role_by_username(self, chat_id: int, topic_id: int, username: str, role: ParticipantRole) -> bool:
+        pass
+    
+    @abstractmethod
+    def get_user_role_by_username(self, chat_id: int, topic_id: int, username: str) -> ParticipantRole:
         pass

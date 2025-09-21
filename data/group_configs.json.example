@@ -1,0 +1,11 @@
+{
+  "chat_id_topic_id": {
+    "chat_id": "chat_id",
+    "topic_id": "topic_id",
+    "jira_url": "https://your-domain.atlassian.net",
+    "jira_username": "your-email@domain.com",
+    "jira_token": "your-jira-token",
+    "story_points_field": "customfield_10022",
+    "created_at": "2025-01-01T00:00:00Z"
+  }
+}

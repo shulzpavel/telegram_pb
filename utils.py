@@ -2,11 +2,14 @@
 Утилиты для Telegram Poker Bot
 """
 import asyncio
+import logging
 import re
 from typing import List, Optional, Dict, Any, Tuple
 from datetime import datetime, timedelta
 from aiogram import types
 from aiogram.exceptions import TelegramRetryAfter
+
+logger = logging.getLogger(__name__)
 from domain.entities import DomainSession as Session, DomainParticipant as Participant
 
 
@@ -48,6 +51,8 @@ def build_admin_keyboard(scale: List[str]) -> types.InlineKeyboardMarkup:
 
 def get_main_menu(is_admin: bool = False) -> types.InlineKeyboardMarkup:
     """Получить главное меню"""
+    logger.info(f"GET_MAIN_MENU: is_admin={is_admin}")
+    
     keyboard = [
         [
             types.InlineKeyboardButton(text="🆕 Список задач", callback_data="menu:new_task"),
@@ -64,9 +69,17 @@ def get_main_menu(is_admin: bool = False) -> types.InlineKeyboardMarkup:
     
     # Добавляем админские кнопки
     if is_admin:
+        logger.info("GET_MAIN_MENU: Adding admin button")
         keyboard.append([
             types.InlineKeyboardButton(text="🔄 Обновить Story Points", callback_data="admin:update_story_points")
         ])
+    else:
+        logger.info("GET_MAIN_MENU: User is not admin, not adding admin button")
+    
+    # Добавляем кнопку "Назад" везде
+    keyboard.append([
+        types.InlineKeyboardButton(text="🔙 Назад", callback_data="menu:back")
+    ])
     
     return types.InlineKeyboardMarkup(inline_keyboard=keyboard)
 
@@ -236,7 +249,7 @@ async def safe_answer_callback(
 
 
 def format_participants_list(participants: List[Participant]) -> str:
-    """Форматировать список участников"""
+    """Форматировать список участников (старая версия)"""
     if not participants:
         return "⛔ Участников пока нет."
     
@@ -246,6 +259,49 @@ def format_participants_list(participants: List[Participant]) -> str:
         lines.append(f"{admin_mark} {participant.full_name.value}")
     
     return "\n".join(lines)
+
+
+def format_participants_list_with_roles(participants: List[Participant], chat_id: int, topic_id: int) -> str:
+    """Форматировать список участников с ролями"""
+    if not participants:
+        return "⛔ Участников пока нет."
+    
+    try:
+        from core.bootstrap import bootstrap
+        from domain.enums import ParticipantRole
+        
+        role_service = bootstrap.get_role_service()
+        
+        lines = ["👥 Участники:"]
+        for participant in participants:
+            # Получаем роль участника
+            username = participant.username or str(participant.user_id)
+            role = role_service.get_user_role_by_username(chat_id, topic_id, username)
+            
+            # Определяем эмодзи для роли
+            role_emoji = {
+                ParticipantRole.PARTICIPANT: "👤",
+                ParticipantRole.LEAD: "👑", 
+                ParticipantRole.ADMIN: "⚡",
+                ParticipantRole.SUPER_ADMIN: "🔧"
+            }.get(role, "👤")
+            
+            # Определяем название роли
+            role_name = {
+                ParticipantRole.PARTICIPANT: "Участник",
+                ParticipantRole.LEAD: "Лид", 
+                ParticipantRole.ADMIN: "Админ",
+                ParticipantRole.SUPER_ADMIN: "Супер-админ"
+            }.get(role, "Участник")
+            
+            lines.append(f"{role_emoji} **{participant.full_name.value}** ({role_name})")
+        
+        return "\n".join(lines)
+        
+    except Exception as e:
+        logger.error(f"Error formatting participants with roles: {e}")
+        # Fallback к старой логике
+        return format_participants_list(participants)
 
 
 def format_vote_results(session: Session) -> str:
@@ -329,7 +385,7 @@ def generate_summary_report(session: Session, is_daily: bool = False) -> str:
         from domain.value_objects import UserId, Username, FullName
         sorted_votes = sorted(
             h['votes'].items(), 
-            key=lambda x: session.participants.get(UserId(int(x[0])), Participant(UserId(0), Username(""), FullName(""))).full_name.value
+            key=lambda x: session.participants.get(UserId(int(x[0])), Participant(UserId(1), Username("unknown"), FullName("Unknown User"))).full_name.value
         )
         
         max_vote = 0
@@ -583,17 +639,8 @@ def generate_voting_results_file(session: Session) -> Optional[str]:
 
 
 def get_batch_summary_menu() -> types.InlineKeyboardMarkup:
-    """Получить меню после завершения банча"""
-    return types.InlineKeyboardMarkup(inline_keyboard=[
-        [
-            types.InlineKeyboardButton(text="📊 Статистика за день", callback_data="stats:today"),
-            types.InlineKeyboardButton(text="📈 За последний банч", callback_data="stats:last_session")
-        ],
-        [
-            types.InlineKeyboardButton(text="🔄 Следующий банч", callback_data="menu:next_batch"),
-            types.InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:back")
-        ]
-    ])
+    """Получить главное меню после завершения банча"""
+    return get_main_menu(is_admin=True)
 
 
 def parse_task_list(text: str) -> List[str]:
@@ -669,7 +716,7 @@ class JiraLinkGenerator:
         return f"{self.jira_base_url}/browse/{task_key}"
     
     def process_task_text(self, task_text: str) -> str:
-        """Process task text and add separate Jira link"""
+        """Process task text and add clickable Jira link"""
         if not task_text:
             return task_text
         
@@ -688,8 +735,8 @@ class JiraLinkGenerator:
         pattern = rf'^{re.escape(first_task_key)}\s*-\s*'
         description_only = re.sub(pattern, '', task_text).strip()
         
-        # Add link as separate line as plain text
-        return f"{description_only}\n\n🔗 {jira_link}"
+        # Add clickable link using Markdown format
+        return f"{description_only}\n\n🔗 [Открыть в Jira]({jira_link})"
     
     def parse_task_from_text(self, task_text: str) -> Tuple[Optional[str], str]:
         """Parse task key and description from text"""
@@ -859,7 +906,7 @@ def create_discrepancy_analysis_keyboard(tasks_with_discrepancies: List[dict]) -
 
 
 def format_batch_completion_message(batch_info: dict) -> str:
-    """Format batch completion message"""
+    """Format batch completion message with detailed statistics"""
     return f"""
 🎯 **Банч завершен!**
 
@@ -1022,6 +1069,80 @@ def parse_jira_jql(jql_query: str) -> List[str]:
         
         # Отправляем запрос
         response = requests.get(search_url, headers=headers, params=params, timeout=30)
+        
+        if response.status_code != 200:
+            print(f"JIRA_PARSER: Ошибка API: {response.status_code} - {response.text}")
+            return []
+        
+        data = response.json()
+        issues = data.get('issues', [])
+        
+        print(f"JIRA_PARSER: Найдено {len(issues)} задач")
+        
+        tasks = []
+        for issue in issues:
+            key = issue.get('key', '')
+            summary = issue.get('fields', {}).get('summary', '')
+            
+            if key and summary:
+                # Формируем задачу в формате: КЛЮЧ - Описание
+                task_text = f"{key} - {summary}"
+                tasks.append(task_text)
+                print(f"JIRA_PARSER: Добавлена задача: {task_text}")
+        
+        print(f"JIRA_PARSER: Парсинг завершен, найдено {len(tasks)} задач")
+        return tasks
+        
+    except Exception as e:
+        print(f"JIRA_PARSER: Ошибка при парсинге JQL: {e}")
+        return []
+
+
+def parse_jira_jql_with_config(jql_query: str, group_config) -> List[str]:
+    """Парсить список задач из Jira по JQL запросу с конфигурацией группы"""
+    try:
+        import requests
+        import base64
+        from config import JIRA_BASE_URL
+        
+        # Получаем настройки Jira из конфигурации группы
+        jira_base_url = JIRA_BASE_URL
+        jira_email = group_config.jira_email
+        jira_token = group_config.jira_token
+        
+        if not jira_email or not jira_token:
+            print(f"JIRA_PARSER: Не настроены jira_email или jira_token для группы")
+            return []
+        
+        print(f"JIRA_PARSER: Начинаем парсинг JQL запроса: {jql_query}")
+        print(f"JIRA_PARSER: Используем email: {jira_email}")
+        
+        # URL для поиска задач
+        search_url = f"{jira_base_url}/rest/api/3/search"
+        
+        # Заголовки для авторизации
+        auth_string = f"{jira_email}:{jira_token}"
+        auth_bytes = auth_string.encode('ascii')
+        auth_b64 = base64.b64encode(auth_bytes).decode('ascii')
+        
+        headers = {
+            'Authorization': f'Basic {auth_b64}',
+            'Content-Type': 'application/json'
+        }
+        
+        # Параметры запроса
+        params = {
+            'jql': jql_query,
+            'fields': 'key,summary',
+            'maxResults': 100  # Максимум 100 задач за раз
+        }
+        
+        print(f"JIRA_PARSER: Отправляем запрос к {search_url}")
+        
+        # Отправляем запрос
+        response = requests.get(search_url, headers=headers, params=params, timeout=30)
+        
+        print(f"JIRA_PARSER: Ответ API: {response.status_code}")
         
         if response.status_code != 200:
             print(f"JIRA_PARSER: Ошибка API: {response.status_code} - {response.text}")

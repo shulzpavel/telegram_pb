@@ -100,3 +100,21 @@ class RoleService(IRoleService):
     def get_users_by_role(self, role: ParticipantRole) -> List[str]:
         """Get all users with specific role"""
         return [user_id for user_id, user_role in self._roles_cache.items() if user_role == role]
+    
+    def set_user_role_by_username(self, chat_id: int, topic_id: int, username: str, role: ParticipantRole) -> bool:
+        """Set user role by username (for token-based role assignment)"""
+        try:
+            # For token-based role assignment, we store by username
+            user_key = f"{chat_id}_{topic_id}_{username}"
+            self._roles_cache[user_key] = role
+            self._save_roles()
+            logger.info(f"Set role {role.value} for user {username} in {chat_id}_{topic_id}")
+            return True
+        except Exception as e:
+            logger.error(f"Error setting role by username: {e}")
+            return False
+    
+    def get_user_role_by_username(self, chat_id: int, topic_id: int, username: str) -> ParticipantRole:
+        """Get user role by username"""
+        user_key = f"{chat_id}_{topic_id}_{username}"
+        return self._roles_cache.get(user_key, ParticipantRole.PARTICIPANT)

@@ -32,21 +32,25 @@ def file_lock(file_path: Union[str, Path], mode: str = 'r+') -> Generator[TextIO
     file_path = Path(file_path)
     file_path.parent.mkdir(parents=True, exist_ok=True)
     
+    f = None
     try:
-        with open(file_path, mode, encoding='utf-8') as f:
-            # Acquire exclusive lock
-            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
-            logger.debug(f"Acquired lock for {file_path}")
-            yield f
+        f = open(file_path, mode, encoding='utf-8')
+        # Acquire exclusive lock
+        fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+        logger.debug(f"Acquired lock for {file_path}")
+        yield f
     except (OSError, IOError) as e:
         logger.error(f"Failed to acquire lock for {file_path}: {e}")
         raise
     finally:
-        try:
-            fcntl.flock(f.fileno(), fcntl.LOCK_UN)
-            logger.debug(f"Released lock for {file_path}")
-        except (OSError, IOError) as e:
-            logger.error(f"Failed to release lock for {file_path}: {e}")
+        if f is not None:
+            try:
+                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+                logger.debug(f"Released lock for {file_path}")
+            except (OSError, IOError) as e:
+                logger.error(f"Failed to release lock for {file_path}: {e}")
+            finally:
+                f.close()
 
 
 @contextlib.contextmanager
@@ -63,21 +67,25 @@ def shared_file_lock(file_path: Union[str, Path], mode: str = 'r') -> Generator[
     """
     file_path = Path(file_path)
     
+    f = None
     try:
-        with open(file_path, mode, encoding='utf-8') as f:
-            # Acquire shared lock
-            fcntl.flock(f.fileno(), fcntl.LOCK_SH)
-            logger.debug(f"Acquired shared lock for {file_path}")
-            yield f
+        f = open(file_path, mode, encoding='utf-8')
+        # Acquire shared lock
+        fcntl.flock(f.fileno(), fcntl.LOCK_SH)
+        logger.debug(f"Acquired shared lock for {file_path}")
+        yield f
     except (OSError, IOError) as e:
         logger.error(f"Failed to acquire shared lock for {file_path}: {e}")
         raise
     finally:
-        try:
-            fcntl.flock(f.fileno(), fcntl.LOCK_UN)
-            logger.debug(f"Released shared lock for {file_path}")
-        except (OSError, IOError) as e:
-            logger.error(f"Failed to release shared lock for {file_path}: {e}")
+        if f is not None:
+            try:
+                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+                logger.debug(f"Released shared lock for {file_path}")
+            except (OSError, IOError) as e:
+                logger.error(f"Failed to release shared lock for {file_path}: {e}")
+            finally:
+                f.close()
 
 
 class FileLockManager:

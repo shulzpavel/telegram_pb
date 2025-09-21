@@ -127,3 +127,38 @@ async def finish_voting_handler(callback: CallbackQuery):
     except Exception as e:
         logger.error(f"Error in finish voting handler: {e}")
         await safe_answer_callback(callback, "❌ Произошла ошибка при завершении голосования", show_alert=True)
+
+
+@router.callback_query(F.data.startswith("timer:"))
+async def timer_control_handler(callback: CallbackQuery):
+    """Обработчик управления таймером"""
+    try:
+        if not callback.from_user or not callback.message:
+            return
+        
+        chat_id = callback.message.chat.id
+        topic_id = callback.message.message_thread_id or 0
+        
+        if not is_allowed_chat(chat_id, topic_id):
+            return
+        
+        # Проверяем права администратора
+        if not is_admin(callback.from_user, chat_id, topic_id):
+            await safe_answer_callback(callback, "❌ Только администраторы могут управлять таймером", show_alert=True)
+            return
+        
+        # Извлекаем действие
+        action = callback.data.split(":", 1)[1]
+        
+        if action == "+30":
+            timer_service.extend_timer(chat_id, topic_id, 30)
+            await safe_answer_callback(callback, "⏰ Таймер продлен на 30 секунд")
+        elif action == "-30":
+            timer_service.extend_timer(chat_id, topic_id, -30)
+            await safe_answer_callback(callback, "⏰ Таймер сокращен на 30 секунд")
+        else:
+            await safe_answer_callback(callback, "❌ Неизвестное действие с таймером", show_alert=True)
+        
+    except Exception as e:
+        logger.error(f"Error in timer control handler: {e}")
+        await safe_answer_callback(callback, "❌ Произошла ошибка при управлении таймером", show_alert=True)

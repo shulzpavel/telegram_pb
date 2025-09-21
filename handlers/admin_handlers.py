@@ -22,7 +22,10 @@ group_config_service = bootstrap.get_group_config_service()
 async def handle_update_story_points(callback: CallbackQuery):
     """Обработчик обновления Story Points"""
     try:
+        logger.info(f"ADMIN_UPDATE_SP: User {callback.from_user.id if callback.from_user else 'unknown'} clicked update SP")
+        
         if not callback.from_user or not callback.message:
+            logger.error("ADMIN_UPDATE_SP: Missing callback data")
             return
         
         chat_id = callback.message.chat.id
@@ -51,9 +54,89 @@ async def handle_update_story_points(callback: CallbackQuery):
             )
             return
         
-        # Здесь должна быть логика обновления Story Points
-        # Пока просто подтверждаем
-        await safe_answer_callback(callback, "✅ Story Points обновлены в Jira")
+        # Получаем сессию и результаты голосования
+        session = session_service.get_session(chat_id, topic_id)
+        if not session:
+            await safe_answer_callback(callback, "❌ Сессия не найдена", show_alert=True)
+            return
+        
+        # Получаем результаты голосования
+        results = session.get_voting_results()
+        logger.info(f"ADMIN_UPDATE_SP: Voting results: {results}")
+        if not results:
+            logger.warning("ADMIN_UPDATE_SP: No voting results found")
+            await safe_answer_callback(callback, "❌ Нет результатов голосования для обновления", show_alert=True)
+            return
+        
+        # Обновляем Story Points в Jira
+        from services.jira_update_service import JiraUpdateService
+        from config import JIRA_BASE_URL, JIRA_STORY_POINTS_FIELD_ID
+        
+        jira_service = JiraUpdateService(
+            jira_base_url=JIRA_BASE_URL,
+            jira_email=group_config.jira_email,
+            jira_token=group_config.jira_token,
+            story_points_field_id=JIRA_STORY_POINTS_FIELD_ID
+        )
+        
+        updated_tasks = []
+        failed_tasks = []
+        
+        for task_key, story_points in results.items():
+            try:
+                # Преобразуем story_points в int
+                story_points_int = int(story_points)
+                
+                # Вызываем асинхронный метод
+                result = await jira_service.update_story_points(
+                    issue_key=task_key,
+                    story_points=story_points_int
+                )
+                
+                if result.success:
+                    updated_tasks.append(f"✅ {task_key}: {story_points} SP")
+                    logger.info(f"Updated SP for {task_key}: {story_points}")
+                else:
+                    failed_tasks.append(f"❌ {task_key}: {result.error}")
+                    logger.error(f"Failed to update SP for {task_key}: {result.error}")
+            except Exception as e:
+                failed_tasks.append(f"❌ {task_key}: {str(e)}")
+                logger.error(f"Error updating SP for {task_key}: {e}")
+        
+        # Формируем детальный отчет
+        report_lines = ["🔄 **Результаты обновления Story Points**\n"]
+        
+        if updated_tasks:
+            report_lines.append("✅ **Успешно обновлено:**")
+            report_lines.extend(updated_tasks)
+            report_lines.append("")
+        
+        if failed_tasks:
+            report_lines.append("❌ **Ошибки обновления:**")
+            report_lines.extend(failed_tasks)
+            report_lines.append("")
+        
+        # Добавляем итоговую статистику
+        total_tasks = len(results)
+        success_count = len(updated_tasks)
+        failed_count = len(failed_tasks)
+        
+        report_lines.append(f"📊 **Итого:** {success_count}/{total_tasks} задач обновлено")
+        
+        if failed_count > 0:
+            report_lines.append(f"⚠️ {failed_count} задач не удалось обновить")
+        
+        report_text = "\n".join(report_lines)
+        
+        # Показываем результат с кнопкой "Назад"
+        from utils import get_main_menu
+        
+        await safe_send_message(
+            callback.message.edit_text,
+            report_text,
+            reply_markup=get_main_menu(is_admin=True),
+            parse_mode="Markdown"
+        )
         
     except Exception as e:
         logger.error(f"Error in update story points handler: {e}")

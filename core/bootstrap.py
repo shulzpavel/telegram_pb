@@ -86,7 +86,7 @@ class Bootstrap:
         
         self.container.register_factory(
             IRoleService,
-            lambda: RoleService(data_dir)
+            lambda: RoleService()
         )
         
         logger.info("Services configured successfully")

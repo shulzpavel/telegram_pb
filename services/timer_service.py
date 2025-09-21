@@ -206,6 +206,19 @@ class TimerService(ITimerService):
                 results_text = generate_voting_results_file(session)
                 logger.info(f"REVEAL_VOTES: Generated results text length: {len(results_text) if results_text else 0}")
                 
+                # Show final results with menu
+                from utils import get_batch_summary_menu, format_batch_completion_message
+                from core.bootstrap import bootstrap
+                session_control_service = bootstrap.get_session_control_service()
+                
+                batch_info = session_control_service.get_batch_progress(chat_id, topic_id)
+                
+                await message.edit_text(
+                    format_batch_completion_message(batch_info),
+                    reply_markup=get_batch_summary_menu()
+                )
+                
+                # Also send results file if available
                 if results_text:
                     # Create temporary file
                     with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', suffix='.txt', delete=False) as f:
@@ -215,14 +228,10 @@ class TimerService(ITimerService):
                     try:
                         # Send file
                         file_input = FSInputFile(temp_file_path, filename=f"voting_results_{datetime.now().strftime('%Y%m%d_%H%M')}.txt")
-                        await message.answer_document(file_input, caption="🎉 Все задачи завершены!\n\n📊 Результаты голосования:")
+                        await message.answer_document(file_input, caption="📊 Детальные результаты голосования:")
                     finally:
                         # Delete temporary file
                         os.unlink(temp_file_path)
-                else:
-                    await message.edit_text(
-                        "🎉 Все задачи завершены!\n\n📊 Результаты будут доступны в статистике."
-                    )
                 return
             
             # Check if batch is complete
@@ -315,10 +324,18 @@ class TimerService(ITimerService):
             
             logger.info(f"START_NEXT_TASK: Generated voting text: {voting_text[:100]}...")
             
-            # Use admin keyboard for all users (since we can't determine admin status here)
-            # The admin check will be done in the callback handlers
-            voting_keyboard = build_admin_keyboard(scale)
-            logger.info(f"START_NEXT_TASK: Generated admin voting keyboard")
+            # Check if user is admin to show timer controls
+            user_is_admin = False
+            if message.from_user:
+                user_is_admin = self._group_config_service.is_admin(chat_id, topic_id or 0, message.from_user)
+            
+            # Use appropriate keyboard based on admin status
+            if user_is_admin:
+                voting_keyboard = build_admin_keyboard(scale)
+                logger.info(f"START_NEXT_TASK: Generated admin voting keyboard with timer controls")
+            else:
+                voting_keyboard = build_vote_keyboard(scale)
+                logger.info(f"START_NEXT_TASK: Generated regular voting keyboard")
             
             # Send voting message
             from utils import safe_send_message

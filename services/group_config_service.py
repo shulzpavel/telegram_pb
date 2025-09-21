@@ -124,7 +124,9 @@ class GroupConfigService(IGroupConfigService):
         admins: list = None,
         timeout: int = 90,
         scale: list = None,
-        is_active: bool = True
+        is_active: bool = True,
+        jira_email: str = None,
+        jira_token: str = None
     ) -> DomainGroupConfig:
         """Create group configuration"""
         try:
@@ -136,7 +138,9 @@ class GroupConfigService(IGroupConfigService):
                 admins=admins or [],
                 timeout=timeout,
                 scale=scale or ['1', '2', '3', '5', '8', '13'],
-                is_active=is_active
+                is_active=is_active,
+                jira_email=jira_email,
+                jira_token=jira_token
             )
             
             self._group_config_repo.save_group_config(config)
@@ -210,3 +214,23 @@ class GroupConfigService(IGroupConfigService):
         """Get timeout for group"""
         config = self.get_group_config(chat_id, topic_id)
         return config.timeout.value if config else 90
+    
+    def verify_token(self, chat_id: int, topic_id: int, token: str) -> bool:
+        """Verify token for group"""
+        try:
+            logger.info(f"VERIFY_TOKEN: Checking token for {chat_id}_{topic_id}")
+            
+            # Get stored token
+            stored_token = self._token_repo.get_token(chat_id, topic_id)
+            logger.info(f"VERIFY_TOKEN: Stored token: {stored_token}")
+            logger.info(f"VERIFY_TOKEN: Provided token: {token}")
+            
+            # Compare tokens
+            is_valid = stored_token == token
+            logger.info(f"VERIFY_TOKEN: Token valid: {is_valid}")
+            
+            return is_valid
+            
+        except Exception as e:
+            logger.error(f"VERIFY_TOKEN: Error verifying token: {e}")
+            return False

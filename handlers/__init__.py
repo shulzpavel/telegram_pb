@@ -10,6 +10,9 @@ from .role_handlers import router as role_router
 
 # Combine all routers
 from aiogram import Router
+import logging
+
+logger = logging.getLogger(__name__)
 
 main_router = Router()
 main_router.include_router(base_router)
@@ -18,5 +21,8 @@ main_router.include_router(voting_router)
 main_router.include_router(admin_router)
 main_router.include_router(menu_router)
 main_router.include_router(role_router)
+
+logger.info("HANDLERS: All routers included successfully")
+logger.info("HANDLERS: Role router included successfully")
 
 __all__ = ['main_router']

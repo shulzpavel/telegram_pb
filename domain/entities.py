@@ -433,3 +433,21 @@ class DomainSession:
         if not current_task:
             return False
         return len(current_task.votes) == len(self.participants)
+    
+    def get_voting_results(self) -> Dict[str, str]:
+        """Get voting results for Jira update"""
+        results = {}
+        for task in self.tasks:
+            if task.is_completed() and task.votes:
+                # Получаем максимальный голос как результат
+                max_vote = task.get_max_vote()
+                if max_vote:
+                    # Извлекаем ключ задачи из текста (предполагаем формат "KEY - Description")
+                    task_text = task.text.value
+                    if " - " in task_text:
+                        task_key = task_text.split(" - ")[0].strip()
+                        results[task_key] = max_vote.value
+                    else:
+                        # Если нет ключа, используем весь текст
+                        results[task_text] = max_vote.value
+        return results
