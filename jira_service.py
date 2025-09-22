@@ -57,7 +57,11 @@ class JiraService:
                 # Если API-версия недоступна (например, 410), пробуем следующую
                 if status in {301, 302, 303, 307, 308, 404, 410} and version != versions[-1]:
                     continue
-                print(f"Jira API error: {error}")
+                try:
+                    body = error.response.text
+                except Exception:
+                    body = "<no body>"
+                print(f"Jira API error {status}: {body}")
             except requests.exceptions.RequestException as error:
                 print(f"Jira API error: {error}")
                 break
@@ -69,18 +73,6 @@ class JiraService:
 
     def search_issues(self, jql: str, max_results: int = 50) -> Optional[Dict[str, Any]]:
         """Выполнить поиск задач по произвольному JQL."""
-        search_payload = {
-            "jql": jql,
-            "startAt": 0,
-            "maxResults": max_results,
-            "fields": ["summary", self.story_points_field],
-        }
-
-        search_result = self._make_request("POST", "search", search_payload, api_versions=["3"])
-        if search_result is not None and "issues" in search_result:
-            return search_result
-
-        # Atlassian jql/search API (возвращает ограниченный набор полей)
         jql_payload = {
             "queries": [
                 {
@@ -91,14 +83,11 @@ class JiraService:
                 }
             ]
         }
-        jql_result = self._make_request("POST", "jql/search", jql_payload, api_versions=["3"])
-        if jql_result and "queries" in jql_result:
+        result = self._make_request("POST", "search/jql", jql_payload, api_versions=["3"])
+        if result and "queries" in result:
             aggregated: List[Dict[str, Any]] = []
-            for query_payload in jql_result.get("queries", []):
-                for entry in query_payload.get("results", []):
-                    issue = entry.get("issue")
-                    if not issue:
-                        continue
+            for query_payload in result.get("queries", []):
+                for issue in query_payload.get("issues", []):
                     key = issue.get("key")
                     if not key:
                         continue
@@ -106,22 +95,19 @@ class JiraService:
                     aggregated.append(
                         {
                             "key": key,
-                            "fields": {
-                                "summary": fields.get("summary"),
-                                self.story_points_field: fields.get(self.story_points_field),
-                            },
+                            "fields": fields,
                         }
                     )
             if aggregated:
                 return {"issues": aggregated}
 
-        # Fallback для старых Jira: GET с параметрами
+        # Fallback для старых Jira (должен сработать только если включен)
         encoded_jql = quote(jql)
         endpoint = (
             f"search?jql={encoded_jql}&startAt=0&maxResults={max_results}"
             f"&fields=summary,{self.story_points_field}"
         )
-        return self._make_request("GET", endpoint, api_versions=["3"])
+        return self._make_request("GET", endpoint, api_versions=["2"])
 
     def get_issue_url(self, issue_key: str) -> str:
         return f"{self.base_url}/browse/{issue_key}"
