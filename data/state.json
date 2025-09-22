@@ -1,0 +1,15 @@
+{
+  "participants": {
+    "128847264": {
+      "name": "Paul Shults",
+      "role": "lead"
+    }
+  },
+  "votes": {},
+  "history": [],
+  "current_task": null,
+  "tasks_queue": [],
+  "current_task_index": 0,
+  "last_batch": [],
+  "batch_completed": false
+}
