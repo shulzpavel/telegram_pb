@@ -45,6 +45,9 @@ class JiraService:
 
                 response.raise_for_status()
 
+                if not response.encoding:
+                    response.encoding = response.apparent_encoding or "utf-8"
+
                 if response.status_code == 204 or not response.content:
                     return {"success": True}
 
@@ -59,8 +62,8 @@ class JiraService:
                 print(f"Jira API error: {error}")
                 break
             except ValueError as error:
-                print(f"JSON parsing error: {error}")
-                break
+                print(f"JSON parsing error: {error!r}")
+                continue
 
         return None
 
