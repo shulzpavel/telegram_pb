@@ -71,43 +71,47 @@ class JiraService:
 
         return None
 
-    def search_issues(self, jql: str, max_results: int = 50) -> Optional[Dict[str, Any]]:
+    def search_issues(self, jql: str, max_results: int = 100) -> Optional[Dict[str, Any]]:
         """Выполнить поиск задач по произвольному JQL."""
+        print(f"Searching with JQL: {jql}")
+        
+        # Сначала пробуем новый API v3 search
+        search_payload = {
+            "jql": jql,
+            "startAt": 0,
+            "maxResults": max_results,
+            "fields": ["summary", self.story_points_field]
+        }
+        result = self._make_request("POST", "search", search_payload, api_versions=["3"])
+        if result and "issues" in result:
+            print(f"Found {len(result['issues'])} issues via POST /search")
+            return result
+
+        # Fallback: пробуем search/jql с правильным payload
         jql_payload = {
-            "queries": [
-                {
-                    "query": jql,
-                    "startAt": 0,
-                    "maxResults": max_results,
-                    "fields": ["summary", self.story_points_field],
-                }
-            ]
+            "jql": jql,
+            "startAt": 0,
+            "maxResults": max_results,
+            "fields": ["summary", self.story_points_field]
         }
         result = self._make_request("POST", "search/jql", jql_payload, api_versions=["3"])
-        if result and "queries" in result:
-            aggregated: List[Dict[str, Any]] = []
-            for query_payload in result.get("queries", []):
-                for issue in query_payload.get("issues", []):
-                    key = issue.get("key")
-                    if not key:
-                        continue
-                    fields = issue.get("fields", {})
-                    aggregated.append(
-                        {
-                            "key": key,
-                            "fields": fields,
-                        }
-                    )
-            if aggregated:
-                return {"issues": aggregated}
+        if result and "issues" in result:
+            print(f"Found {len(result['issues'])} issues via POST /search/jql")
+            return result
 
-        # Fallback для старых Jira (должен сработать только если включен)
+        # Fallback: GET с параметрами (для совместимости)
         encoded_jql = quote(jql)
         endpoint = (
             f"search?jql={encoded_jql}&startAt=0&maxResults={max_results}"
             f"&fields=summary,{self.story_points_field}"
         )
-        return self._make_request("GET", endpoint, api_versions=["2"])
+        result = self._make_request("GET", endpoint, api_versions=["3"])
+        if result and "issues" in result:
+            print(f"Found {len(result['issues'])} issues via GET /search")
+            return result
+        
+        print("No issues found with any method")
+        return None
 
     def get_issue_url(self, issue_key: str) -> str:
         return f"{self.base_url}/browse/{issue_key}"
@@ -129,7 +133,14 @@ class JiraService:
         try:
             response = self.search_issues(jql)
             if not response or "issues" not in response:
-                raise ValueError("No issues from search")
+                print("No issues from search")
+                # Fallback: если поиск не сработал, пробуем получить задачи по ключам из JQL
+                fallback_issues: List[Dict[str, Any]] = []
+                for key in self._key_pattern.findall(text):
+                    details = self._fetch_issue_by_key(key)
+                    if details:
+                        fallback_issues.append(details)
+                return fallback_issues or None
 
             issues: List[Dict[str, Any]] = []
             for issue in response.get("issues", []):
@@ -154,6 +165,7 @@ class JiraService:
             return issues or None
         except Exception as error:
             print(f"Error processing Jira request: {error}")
+            # Fallback: если поиск не сработал, пробуем получить задачи по ключам из JQL
             fallback_issues: List[Dict[str, Any]] = []
             for key in self._key_pattern.findall(text):
                 details = self._fetch_issue_by_key(key)
