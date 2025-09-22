@@ -1,9 +1,6 @@
 #!/usr/bin/env python3
-"""
-Тесты для Jira интеграции
-"""
+"""Тесты для Jira интеграции"""
 
-import pytest
 from unittest.mock import Mock, patch
 from jira_service import JiraService
 
@@ -63,20 +60,23 @@ def test_parse_jira_request():
 
 @patch.object(JiraService, '_make_request')
 def test_search_issues(mock_request):
-    """Тест формирования запроса search"""
+    """Тест формирования payload для search"""
     mock_request.return_value = {"issues": []}
     service = JiraService()
 
     jql = 'key IN ("FLEX-362", "FLEX-363")'
-    result = service.search_issues(jql)
+    result = service.search_issues(jql, max_results=10)
 
     assert result == {"issues": []}
     mock_request.assert_called_once()
 
-    # Проверяем, что вызывается GET запрос с правильным endpoint
-    call_args = mock_request.call_args
-    assert call_args[0][0] == "GET"  # method
-    assert "search/jql" in call_args[0][1]  # endpoint
+    method, endpoint, payload = mock_request.call_args[0]
+    assert method == "POST"
+    assert endpoint == "search"
+    assert payload["jql"] == jql
+    assert payload["maxResults"] == 10
+    assert service.story_points_field in payload["fields"]
+    assert mock_request.call_args.kwargs.get("api_versions") == ["3"]
 
 def test_get_issue_url():
     """Тест генерации URL задачи"""

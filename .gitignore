@@ -42,6 +42,35 @@ Thumbs.db
 
 # Logs
 *.log
+bot_debug.log
 
 # PID files
 *.pid
+
+# Runtime data
+data/
+.pytest_cache/
+
+# Temporary files
+*.tmp
+*.temp
+
+# Documentation files (keep only README.md)
+*.md
+!README.md
+
+# Setup and demo files
+setup_config.py
+quick_setup.py
+test_bot_ui.py
+demo_instructions.md
+SETUP_GUIDE.md
+REAL_CONFIG.md
+FINAL_STATUS.md
+RESTART_SUCCESS.md
+SUCCESS_REPORT.md
+SUMMARY.md
+
+# Shell scripts (keep only telegram-pb-bot.service)
+*.sh
+!telegram-pb-bot.service
