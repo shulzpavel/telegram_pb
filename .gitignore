@@ -1,6 +1,7 @@
-# Logs
-*.log
-data/bot.log
+# Environment variables
+.env
+.env.local
+.env.production
 
 # Python
 __pycache__/
@@ -39,6 +40,8 @@ ENV/
 .DS_Store
 Thumbs.db
 
-# Secrets
-.env
-config_local.py
+# Logs
+*.log
+
+# PID files
+*.pid

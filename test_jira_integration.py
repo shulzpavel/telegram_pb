@@ -15,26 +15,68 @@ def test_jira_service_initialization():
     assert service.story_points_field == "customfield_10022"
 
 def test_parse_jira_request():
-    """Тест парсинга запроса из Jira"""
+    """Тест парсинга произвольного JQL запроса"""
     service = JiraService()
-    
-    # Тест с валидным запросом
-    with patch.object(service, 'get_issue_summary') as mock_summary:
-        mock_summary.return_value = "Test Task Summary"
-        
-        result = service.parse_jira_request("key=FLEX-365")
+
+    mock_response = {
+        "issues": [
+            {
+                "key": "FLEX-365",
+                "fields": {
+                    "summary": "Test Task Summary",
+                    service.story_points_field: 8
+                }
+            },
+            {
+                "key": "FLEX-366",
+                "fields": {
+                    "summary": "Another Task",
+                    service.story_points_field: None
+                }
+            }
+        ]
+    }
+
+    with patch.object(service, 'search_issues') as mock_search:
+        mock_search.return_value = mock_response
+
+        result = service.parse_jira_request('key IN ("FLEX-365", "FLEX-366")')
+
         assert result is not None
-        assert result['key'] == "FLEX-365"
-        assert result['summary'] == "Test Task Summary"
-        assert "FLEX-365" in result['url']
-    
-    # Тест с невалидным запросом
-    result = service.parse_jira_request("invalid request")
-    assert result is None
-    
-    # Тест с пустым запросом
+        assert isinstance(result, list)
+        assert len(result) == 2
+
+        first = result[0]
+        assert first['key'] == "FLEX-365"
+        assert first['summary'] == "Test Task Summary"
+        assert first['story_points'] == 8
+        assert first['url'].endswith("/FLEX-365")
+
+    with patch.object(service, 'search_issues') as mock_search_empty:
+        mock_search_empty.return_value = {"issues": []}
+        result = service.parse_jira_request('project = FLEX AND statusCategory = "To Do"')
+        assert result is None
+
     result = service.parse_jira_request("")
     assert result is None
+
+
+@patch.object(JiraService, '_make_request')
+def test_search_issues(mock_request):
+    """Тест формирования запроса search"""
+    mock_request.return_value = {"issues": []}
+    service = JiraService()
+
+    jql = 'key IN ("FLEX-362", "FLEX-363")'
+    result = service.search_issues(jql)
+
+    assert result == {"issues": []}
+    mock_request.assert_called_once()
+
+    # Проверяем, что вызывается GET запрос с правильным endpoint
+    call_args = mock_request.call_args
+    assert call_args[0][0] == "GET"  # method
+    assert "search/jql" in call_args[0][1]  # endpoint
 
 def test_get_issue_url():
     """Тест генерации URL задачи"""
@@ -47,10 +89,11 @@ def test_update_story_points(mock_put):
     """Тест обновления Story Points"""
     service = JiraService()
     
-    # Мокаем успешный ответ
+    # Мокаем успешный ответ (204 No Content без тела)
     mock_response = Mock()
     mock_response.raise_for_status.return_value = None
-    mock_response.json.return_value = {"success": True}
+    mock_response.status_code = 204
+    mock_response.content = b''  # Пустое тело ответа
     mock_put.return_value = mock_response
     
     result = service.update_story_points("FLEX-365", 5)
