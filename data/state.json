@@ -1,15 +1,104 @@
-{
-  "participants": {
-    "128847264": {
-      "name": "Paul Shults",
-      "role": "lead"
-    }
-  },
-  "votes": {},
-  "history": [],
-  "current_task": null,
-  "tasks_queue": [],
-  "current_task_index": 0,
-  "last_batch": [],
-  "batch_completed": false
-}
+[
+  {
+    "chat_id": -1003087077812,
+    "topic_id": null,
+    "participants": {
+      "128847264": {
+        "name": "Paul Shults",
+        "role": "lead"
+      }
+    },
+    "votes": {},
+    "tasks_queue": [
+      {
+        "text": "Отображение статуса валидации номера и почты  https://media-life.atlassian.net/browse/IBO2-1302",
+        "jira_key": "IBO2-1302",
+        "summary": "Отображение статуса валидации номера и почты ",
+        "url": "https://media-life.atlassian.net/browse/IBO2-1302",
+        "votes": {
+          "128847264": "13"
+        },
+        "story_points": 1.0
+      }
+    ],
+    "pending_tasks": [],
+    "current_task_index": 0,
+    "history": [
+      {
+        "text": "Bug. TypeError: Cannot read properties of null (reading 'query')  https://media-life.atlassian.net/browse/FLEX-363",
+        "jira_key": "FLEX-363",
+        "summary": "Bug. TypeError: Cannot read properties of null (reading 'query') ",
+        "url": "https://media-life.atlassian.net/browse/FLEX-363",
+        "votes": {},
+        "story_points": 13.0,
+        "completed_at": "2025-09-22T09:34:24.731825"
+      },
+      {
+        "text": "BUG. Дубликаты игр при пагинации https://media-life.atlassian.net/browse/FLEX-362",
+        "jira_key": "FLEX-362",
+        "summary": "BUG. Дубликаты игр при пагинации",
+        "url": "https://media-life.atlassian.net/browse/FLEX-362",
+        "votes": {},
+        "story_points": 13.0,
+        "completed_at": "2025-09-22T09:34:24.731825"
+      },
+      {
+        "text": "BUG. Дубликаты игр при пагинации https://media-life.atlassian.net/browse/FLEX-362",
+        "jira_key": "FLEX-362",
+        "summary": "BUG. Дубликаты игр при пагинации",
+        "url": "https://media-life.atlassian.net/browse/FLEX-362",
+        "votes": {},
+        "story_points": 13,
+        "completed_at": "2025-09-22T13:49:47.035081"
+      },
+      {
+        "text": "Bug. TypeError: Cannot read properties of null (reading 'query')  https://media-life.atlassian.net/browse/FLEX-363",
+        "jira_key": "FLEX-363",
+        "summary": "Bug. TypeError: Cannot read properties of null (reading 'query') ",
+        "url": "https://media-life.atlassian.net/browse/FLEX-363",
+        "votes": {},
+        "story_points": 13,
+        "completed_at": "2025-09-22T13:52:35.262642"
+      },
+      {
+        "text": "BUG. Дубликаты игр при пагинации https://media-life.atlassian.net/browse/FLEX-362",
+        "jira_key": "FLEX-362",
+        "summary": "BUG. Дубликаты игр при пагинации",
+        "url": "https://media-life.atlassian.net/browse/FLEX-362",
+        "votes": {},
+        "story_points": 1,
+        "completed_at": "2025-09-22T14:04:04.550570"
+      },
+      {
+        "text": "Bug. TypeError: Cannot read properties of null (reading 'query')  https://media-life.atlassian.net/browse/FLEX-363",
+        "jira_key": "FLEX-363",
+        "summary": "Bug. TypeError: Cannot read properties of null (reading 'query') ",
+        "url": "https://media-life.atlassian.net/browse/FLEX-363",
+        "votes": {},
+        "story_points": 1,
+        "completed_at": "2025-09-22T14:04:10.472684"
+      },
+      {
+        "text": "Bug. TypeError: Cannot read properties of null (reading 'query')  https://media-life.atlassian.net/browse/FLEX-363",
+        "jira_key": "FLEX-363",
+        "summary": "Bug. TypeError: Cannot read properties of null (reading 'query') ",
+        "url": "https://media-life.atlassian.net/browse/FLEX-363",
+        "votes": {},
+        "story_points": 3,
+        "completed_at": "2025-09-22T14:12:12.828948"
+      },
+      {
+        "text": "Bug. TypeError: Cannot read properties of null (reading 'query')  https://media-life.atlassian.net/browse/FLEX-363",
+        "jira_key": "FLEX-363",
+        "summary": "Bug. TypeError: Cannot read properties of null (reading 'query') ",
+        "url": "https://media-life.atlassian.net/browse/FLEX-363",
+        "votes": {},
+        "story_points": 13,
+        "completed_at": "2025-09-22T14:27:07.642489"
+      }
+    ],
+    "last_batch": [],
+    "batch_completed": false,
+    "active_vote_message_id": null
+  }
+]
