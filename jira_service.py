@@ -5,7 +5,8 @@
 
 import requests
 import json
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
+from urllib.parse import quote
 from config import JIRA_URL, JIRA_USERNAME, JIRA_API_TOKEN, STORY_POINTS_FIELD
 
 class JiraService:
@@ -29,18 +30,40 @@ class JiraService:
         }
         
         try:
-            if method.upper() == "GET":
+            method = method.upper()
+            if method == "GET":
                 response = requests.get(url, auth=auth, headers=headers)
-            elif method.upper() == "PUT":
+            elif method == "PUT":
                 response = requests.put(url, auth=auth, headers=headers, json=data)
+            elif method == "POST":
+                response = requests.post(url, auth=auth, headers=headers, json=data)
             else:
                 return None
                 
             response.raise_for_status()
+            
+            # Handle responses without body (like 204 No Content)
+            if response.status_code == 204 or not response.content:
+                return {"success": True}  # Return a success indicator for empty responses
+
             return response.json()
         except requests.exceptions.RequestException as e:
             print(f"Jira API error: {e}")
             return None
+        except ValueError as e:
+            # Handle JSON parsing errors for responses that should be JSON but aren't
+            print(f"JSON parsing error: {e}")
+            return None
+
+    def search_issues(self, jql: str, max_results: int = 50) -> Optional[Dict[str, Any]]:
+        """Выполнить поиск задач по произвольному JQL"""
+        payload = {
+            "jql": jql,
+            "startAt": 0,
+            "maxResults": max_results,
+            "fields": ["summary", self.story_points_field]
+        }
+        return self._make_request("POST", "search", payload)
     
     def get_issue(self, issue_key: str) -> Optional[Dict]:
         """Получить информацию о задаче"""
@@ -58,6 +81,12 @@ class JiraService:
         """Получить ссылку на задачу"""
         return f"{self.base_url}/browse/{issue_key}"
     
+    def search_issues(self, jql: str) -> Optional[Dict]:
+        """Выполнить поиск задач по JQL запросу"""
+        encoded_jql = quote(jql)
+        endpoint = f"search/jql?jql={encoded_jql}&fields=summary,{self.story_points_field}"
+        return self._make_request("GET", endpoint)
+    
     def update_story_points(self, issue_key: str, story_points: int) -> bool:
         """Обновить Story Points для задачи"""
         endpoint = f"issue/{issue_key}"
@@ -70,36 +99,41 @@ class JiraService:
         result = self._make_request("PUT", endpoint, data)
         return result is not None
     
-    def parse_jira_request(self, text: str) -> Optional[Dict[str, str]]:
-        """Парсить запрос из Jira (например: key=FLEX-365)"""
-        if not text or 'key=' not in text:
+    def parse_jira_request(self, text: str) -> Optional[List[Dict[str, Any]]]:
+        """Обработать произвольный JQL запрос и вернуть список задач"""
+        if not text:
             return None
-            
+
+        jql = text.strip()
+        if not jql:
+            return None
+
         try:
-            # Ищем key= в тексте
-            key_start = text.find('key=') + 4
-            key_end = text.find(' ', key_start)
-            if key_end == -1:
-                key_end = len(text)
-            
-            issue_key = text[key_start:key_end].strip()
-            if not issue_key:
+            search_result = self.search_issues(jql)
+            if not search_result or 'issues' not in search_result:
                 return None
-                
-            # Получаем информацию о задаче
-            summary = self.get_issue_summary(issue_key)
-            url = self.get_issue_url(issue_key)
-            
-            if summary:
-                return {
+
+            issues = []
+            for issue in search_result.get('issues', []):
+                issue_key = issue.get('key')
+                if not issue_key:
+                    continue
+
+                fields = issue.get('fields', {})
+                summary = fields.get('summary', issue_key)
+                story_points = fields.get(self.story_points_field)
+
+                issues.append({
                     'key': issue_key,
                     'summary': summary,
-                    'url': url
-                }
+                    'url': self.get_issue_url(issue_key),
+                    'story_points': story_points
+                })
+
+            return issues or None
         except Exception as e:
-            print(f"Error parsing Jira request: {e}")
-            
-        return None
+            print(f"Error processing Jira request: {e}")
+            return None
 
 # Глобальный экземпляр сервиса
 jira_service = JiraService()
