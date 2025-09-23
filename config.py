@@ -65,15 +65,16 @@ def is_supported_thread(chat_id: int, topic_id: Optional[int]) -> bool:
     """Проверить, может ли бот работать в данном чате/топике."""
     constraint = SUPPORTED_TOPICS.get(chat_id)
 
-    # Группа без топиков — работаем всегда
-    if topic_id is None:
-        return True
-
-    # Если чат не сконфигурирован, топики игнорируем
+    # Если чат не сконфигурирован — запрещаем
     if constraint is None:
         return False
 
+    # Разрешаем любые треды, включая общий, только если явно указано ALL/пустой список
     if constraint["allow_all"]:
         return True
+
+    # "Главный" чат без темы запрещён, если нет allow_all
+    if topic_id is None:
+        return False
 
     return topic_id in constraint["topics"]
