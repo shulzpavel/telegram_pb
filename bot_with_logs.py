@@ -814,6 +814,12 @@ async def cb_day_summary(callback: types.CallbackQuery):
         return
 
     try:
+        await _safe_call_async(
+            callback.message.edit_text,
+            "⏳ Формирую отчёт, пожалуйста подождите...",
+            reply_markup=get_back_keyboard(),
+        )
+
         today_date = datetime.now(timezone.utc).astimezone().date()
         jql = "updated >= startOfDay() ORDER BY updated DESC"
         issues = jira_service.parse_jira_request(jql) or []
@@ -857,9 +863,12 @@ async def cb_day_summary(callback: types.CallbackQuery):
 
         report_text += f"\n📈 Всего Story Points: {total_story_points}"
 
-        logger.info(f"Day summary: {len(issues)} issues, {total_story_points} total SP")
+        report_length = len(report_text)
+        logger.info(
+            f"Day summary: {len(issues)} issues, {total_story_points} total SP, {report_length} chars"
+        )
 
-        if len(report_text) <= 4000:
+        if report_length <= 4000:
             await _safe_call_async(
                 callback.message.edit_text,
                 report_text,
@@ -868,9 +877,33 @@ async def cb_day_summary(callback: types.CallbackQuery):
         else:
             await _safe_call_async(
                 callback.message.edit_text,
-                "📊 Итоги дня слишком объёмные — отправляю файл с отчётом.",
+                "📊 Итоги дня слишком объёмные — отправляю данные отдельными сообщениями и файлом.",
                 reply_markup=get_back_keyboard(),
             )
+
+            def _iter_chunks(text: str, limit: int = 3500):
+                chunk = ""
+                for line in text.splitlines():
+                    addition = f"{line}\n"
+                    if len(chunk) + len(addition) > limit and chunk:
+                        yield chunk.rstrip()
+                        chunk = addition
+                    else:
+                        chunk += addition
+                if chunk:
+                    yield chunk.rstrip()
+
+            chunks = list(_iter_chunks(report_text))
+            total_chunks = len(chunks)
+
+            for index, chunk in enumerate(chunks, start=1):
+                header = (
+                    f"📄 Итоги дня {today_date.isoformat()} — часть {index}/{total_chunks}\n\n"
+                )
+                await _safe_call_async(
+                    callback.message.answer,
+                    header + chunk,
+                )
 
             reports_dir = Path("data")
             reports_dir.mkdir(parents=True, exist_ok=True)
