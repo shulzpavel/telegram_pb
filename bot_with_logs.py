@@ -858,7 +858,34 @@ async def cb_day_summary(callback: types.CallbackQuery):
         report_text += f"\n📈 Всего Story Points: {total_story_points}"
 
         logger.info(f"Day summary: {len(issues)} issues, {total_story_points} total SP")
-        await _safe_call_async(callback.message.edit_text, report_text, reply_markup=get_back_keyboard())
+
+        if len(report_text) <= 4000:
+            await _safe_call_async(
+                callback.message.edit_text,
+                report_text,
+                reply_markup=get_back_keyboard(),
+            )
+        else:
+            await _safe_call_async(
+                callback.message.edit_text,
+                "📊 Итоги дня слишком объёмные — отправляю файл с отчётом.",
+                reply_markup=get_back_keyboard(),
+            )
+
+            reports_dir = Path("data")
+            reports_dir.mkdir(parents=True, exist_ok=True)
+
+            report_path = reports_dir / f"day_summary_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+            report_path.write_text(report_text, encoding="utf-8")
+
+            document = types.FSInputFile(str(report_path))
+            await _safe_call_async(
+                callback.message.answer_document,
+                document,
+                caption=f"📊 Итоги дня ({today_date.isoformat()})",
+            )
+
+            report_path.unlink(missing_ok=True)
 
     except Exception as e:
         logger.error(f"Error generating day summary: {e}")
