@@ -510,7 +510,12 @@ async def handle_text(message: types.Message):
     if session.active_vote_message_id == -1:
         logger.info(f"Processing JQL query: {message.text}")
         session.active_vote_message_id = None  # Сбрасываем флаг
-        
+
+        status_message = await _safe_call_async(
+            message.answer,
+            "⏳ Ищу задачи в Jira, пожалуйста подождите...",
+        )
+
         try:
             issues = jira_service.parse_jira_request(message.text)
             if issues:
@@ -532,24 +537,75 @@ async def handle_text(message: types.Message):
                     session.last_batch = []
                 store.save_session(session)
 
-                issues_text = "\n".join([f"• {item['key']}: {item['summary']}" for item in pending])
                 confirm_keyboard = types.InlineKeyboardMarkup(
                     inline_keyboard=[
                         [types.InlineKeyboardButton(text="✅ Да", callback_data="confirm_tasks")],
                         [types.InlineKeyboardButton(text="❌ Нет", callback_data="cancel_tasks")],
                     ]
                 )
-                await _safe_call_async(
-                    message.answer,
-                    f"✅ Найдено задач ({len(pending)}):\n{issues_text}\n\nНачать голосование?",
-                    reply_markup=confirm_keyboard,
-                )
+
+                lines = [f"• {item['key']}: {item['summary']}" for item in pending]
+                base_header = f"✅ Найдено задач ({len(pending)}):"
+
+                def _iter_chunks(text_lines: List[str], limit: int = 3500) -> List[str]:
+                    chunks: List[str] = []
+                    current = base_header + "\n"
+                    for line in text_lines:
+                        addition = f"{line}\n"
+                        if len(current) + len(addition) > limit and current.strip():
+                            chunks.append(current.rstrip())
+                            current = addition
+                        else:
+                            current += addition
+                    if current.strip():
+                        chunks.append(current.rstrip())
+                    return chunks
+
+                chunks = _iter_chunks(lines)
+                if not chunks:
+                    chunks = [base_header]
+
+                chunks[-1] = f"{chunks[-1]}\n\nНачать голосование?"
+
+                if len(chunks) == 1:
+                    await _safe_call_async(
+                        status_message.edit_text,
+                        chunks[0],
+                        reply_markup=confirm_keyboard,
+                        disable_web_page_preview=True,
+                    )
+                else:
+                    await _safe_call_async(
+                        status_message.edit_text,
+                        chunks[0],
+                        disable_web_page_preview=True,
+                    )
+                    for chunk in chunks[1:-1]:
+                        await _safe_call_async(
+                            message.answer,
+                            chunk,
+                            disable_web_page_preview=True,
+                        )
+                    await _safe_call_async(
+                        message.answer,
+                        chunks[-1],
+                        reply_markup=confirm_keyboard,
+                        disable_web_page_preview=True,
+                    )
             else:
                 logger.warning("No issues found")
-                await _safe_call_async(message.answer, "❌ Задачи не найдены. Проверьте JQL запрос.", reply_markup=get_session_keyboard())
+                await _safe_call_async(
+                    status_message.edit_text,
+                    "❌ Задачи не найдены. Проверьте JQL запрос.",
+                    reply_markup=get_session_keyboard(),
+                )
         except Exception as e:
             logger.error(f"Error processing JQL: {e}")
-            await _safe_call_async(message.answer, f"❌ Ошибка при поиске задач: {e}", reply_markup=get_session_keyboard())
+            await _safe_call_async(
+                status_message.edit_text,
+                f"❌ Ошибка при поиске задач: {e}",
+                reply_markup=get_session_keyboard(),
+            )
     else:
         logger.debug("Not waiting for JQL, ignoring text message")
 
