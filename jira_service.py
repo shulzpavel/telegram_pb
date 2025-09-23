@@ -75,17 +75,19 @@ class JiraService:
         """Выполнить поиск задач по произвольному JQL."""
         print(f"Searching with JQL: {jql}")
 
-        payload = {
-            "jql": jql,
-            "maxResults": max_results,
-            "fields": ["summary", self.story_points_field],
-        }
+        encoded_jql = quote(jql, safe="=<>"' ()!&|~")
+        fields_param = quote(f"summary,{self.story_points_field}")
+        endpoint = (
+            f"search?jql={encoded_jql}&maxResults={max_results}&fields={fields_param}"
+        )
 
-        result = self._make_request("POST", "search", payload, api_versions=["3", "2"])
+        result = self._make_request("GET", endpoint, api_versions=["3", "2"])
 
         if result and "issues" in result:
             issues = result["issues"]
-            print(f"Found {len(issues)} issues via POST /search")
+            print(f"Found {len(issues)} issues via GET /search")
+            if not issues:
+                return None
             return result
 
         print("No issues found with search")
