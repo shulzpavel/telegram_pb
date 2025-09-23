@@ -45,6 +45,8 @@ class SessionState:
     last_batch: List[Dict[str, Any]] = field(default_factory=list)
     batch_completed: bool = False
     active_vote_message_id: Optional[int] = None
+    current_batch_id: Optional[str] = None
+    current_batch_started_at: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -65,6 +67,8 @@ class SessionState:
             "last_batch": [_serialize_task(task) for task in self.last_batch],
             "batch_completed": self.batch_completed,
             "active_vote_message_id": self.active_vote_message_id,
+            "current_batch_id": self.current_batch_id,
+            "current_batch_started_at": self.current_batch_started_at,
         }
 
     @classmethod
@@ -103,6 +107,8 @@ class SessionState:
             last_batch=last_batch,
             batch_completed=bool(payload.get("batch_completed", False)),
             active_vote_message_id=payload.get("active_vote_message_id"),
+            current_batch_id=payload.get("current_batch_id"),
+            current_batch_started_at=payload.get("current_batch_started_at"),
         )
 
     def ensure_task_votes_initialized(self) -> None:

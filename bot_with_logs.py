@@ -5,11 +5,12 @@ import argparse
 import asyncio
 import logging
 import sys
-from collections import Counter
+from collections import Counter, defaultdict
 from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
+from uuid import uuid4
 
 from aiogram import Bot, Dispatcher, F, Router, types
 from aiogram.exceptions import TelegramBadRequest, TelegramRetryAfter
@@ -469,6 +470,9 @@ async def cb_confirm_tasks(callback: types.CallbackQuery):
 
     session.tasks_queue.extend(tasks_added)
     session.current_task_index = 0
+    batch_started_at = datetime.now()
+    session.current_batch_id = f"{batch_started_at.strftime('%Y%m%d%H%M%S')}-{uuid4().hex[:6]}"
+    session.current_batch_started_at = batch_started_at.isoformat()
     session.last_batch = []
     store.save_session(session)
 
@@ -667,6 +671,17 @@ async def _finalize_current_task(callback: types.CallbackQuery, session: Session
     completed_task['story_points'] = final_int
     completed_task['completed_at'] = datetime.now().isoformat()
     completed_task['votes'] = dict(task.get('votes', {}))
+
+    batch_id = session.current_batch_id
+    if not batch_id:
+        fallback_time = datetime.now()
+        batch_id = f"{fallback_time.strftime('%Y%m%d%H%M%S')}-{uuid4().hex[:6]}"
+        session.current_batch_id = batch_id
+        if not session.current_batch_started_at:
+            session.current_batch_started_at = fallback_time.isoformat()
+
+    completed_task['batch_id'] = batch_id
+    completed_task['batch_started_at'] = session.current_batch_started_at
     session.history.append(completed_task)
     session.last_batch.append(completed_task)
     session.tasks_queue.pop(session.current_task_index)
@@ -695,6 +710,9 @@ async def _finalize_current_task(callback: types.CallbackQuery, session: Session
         message_text = f"{summary_text}\n\n🎉 Все задачи завершены!"
         await _safe_call_async(callback.message.edit_text, message_text, reply_markup=get_main_menu())
         await _send_batch_report(callback.message, session)
+        session.current_batch_id = None
+        session.current_batch_started_at = None
+        store.save_session(session)
 
 
 @router.callback_query(F.data == "accept_results")
@@ -786,6 +804,8 @@ async def cb_reset_session(callback: types.CallbackQuery):
     session.current_task_index = 0
     session.batch_completed = False
     session.active_vote_message_id = None
+    session.current_batch_id = None
+    session.current_batch_started_at = None
     store.save_session(session)
     logger.info(f"Session reset: {session}")
     
@@ -821,51 +841,112 @@ async def cb_day_summary(callback: types.CallbackQuery):
         )
 
         today_date = datetime.now(timezone.utc).astimezone().date()
-        jql = "updated >= startOfDay() ORDER BY updated DESC"
-        issues = jira_service.parse_jira_request(jql) or []
+        completed_tasks = [
+            task
+            for task in session.history
+            if _is_same_day(task.get('completed_at'), today_date)
+        ]
 
-        if not issues:
-            history_candidates = [
-                task for task in session.history
-                if _is_same_day(task.get('completed_at'), today_date)
-            ]
-            if history_candidates:
-                issues = [
-                    {
-                        "key": task.get('jira_key', 'UNKNOWN'),
-                        "summary": task.get('summary', ''),
-                        "url": task.get('url'),
-                        "story_points": task.get('story_points', 0),
-                    }
-                    for task in history_candidates
-                ]
-
-        if not issues:
-            logger.warning("No issues found for today")
+        if not completed_tasks:
+            logger.info("No completed tasks for today in session history")
             await _safe_call_async(
                 callback.message.edit_text,
-                "📊 За сегодня задач не найдено",
+                "📊 За сегодня банчей не было",
                 reply_markup=get_back_keyboard(),
             )
             return
 
-        # Создаем отчет
-        report_text = f"📊 Итоги дня ({today_date.isoformat()}):\n\n"
-        total_story_points = 0
+        batches: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+        for task in completed_tasks:
+            batch_id = task.get('batch_id')
+            if not batch_id:
+                batch_id = f"single-{task.get('jira_key', 'UNKNOWN')}-{task.get('completed_at', '')}"
+            batches[batch_id].append(task)
 
-        for issue in issues:
-            story_points_raw = issue.get('story_points')
-            story_points = story_points_raw if isinstance(story_points_raw, (int, float)) else 0
-            total_story_points += story_points
-            url = issue.get('url')
-            link_text = f" ({url})" if url else ""
-            report_text += f"• {issue['key']}: {issue['summary']} ({story_points} SP){link_text}\n"
+        def _parse_iso(value: Optional[str]) -> Optional[datetime]:
+            if not value:
+                return None
+            try:
+                return datetime.fromisoformat(value)
+            except ValueError:
+                return None
 
-        report_text += f"\n📈 Всего Story Points: {total_story_points}"
+        def _batch_start(tasks: List[Dict[str, Any]]) -> datetime:
+            for task in tasks:
+                dt = _parse_iso(task.get('batch_started_at'))
+                if dt:
+                    return dt
+            for task in tasks:
+                dt = _parse_iso(task.get('completed_at'))
+                if dt:
+                    return dt
+            return datetime.min
+
+        sorted_batches = sorted(batches.items(), key=lambda item: _batch_start(item[1]))
+
+        participant_cache = {
+            user_id: data.get('name', f'ID {user_id}')
+            for user_id, data in session.participants.items()
+        }
+
+        report_lines: List[str] = [f"📊 Итоги дня ({today_date.isoformat()}):", ""]
+        day_total_sp = 0
+
+        for batch_index, (batch_id, batch_tasks) in enumerate(sorted_batches, start=1):
+            tasks_sorted = sorted(
+                batch_tasks,
+                key=lambda task: _parse_iso(task.get('completed_at')) or datetime.min,
+            )
+
+            batch_sp = 0
+            for task in tasks_sorted:
+                sp_raw = task.get('story_points')
+                if isinstance(sp_raw, (int, float)):
+                    batch_sp += sp_raw
+
+            day_total_sp += batch_sp
+
+            start_dt = _parse_iso(tasks_sorted[0].get('batch_started_at'))
+            end_dt = _parse_iso(tasks_sorted[-1].get('completed_at'))
+            time_window = []
+            if start_dt:
+                time_window.append(start_dt.strftime('%H:%M'))
+            if end_dt:
+                time_window.append(end_dt.strftime('%H:%M'))
+
+            timing_text = f" ({' — '.join(time_window)})" if time_window else ""
+            report_lines.append(
+                f"🔹 Банч {batch_index}: задач {len(tasks_sorted)}, {batch_sp} SP{timing_text}"
+            )
+
+            for task in tasks_sorted:
+                story_points_raw = task.get('story_points')
+                story_points = story_points_raw if isinstance(story_points_raw, (int, float)) else 0
+                url = task.get('url')
+                link_text = f" ({url})" if url else ""
+                report_lines.append(
+                    f"• {task.get('jira_key', 'UNKNOWN')}: {task.get('summary', '')} — {story_points} SP{link_text}"
+                )
+
+                votes = task.get('votes', {})
+                if votes:
+                    report_lines.append("  Голоса:")
+                    for voter_id, vote_value in votes.items():
+                        name = participant_cache.get(voter_id, f'ID {voter_id}')
+                        report_lines.append(f"    - {name}: {vote_value}")
+                else:
+                    report_lines.append("  Голоса: нет данных")
+
+                report_lines.append("")
+
+        report_lines.append(f"📈 Всего Story Points за день: {day_total_sp}")
+
+        report_text = "\n".join(report_lines).rstrip()
 
         report_length = len(report_text)
         logger.info(
-            f"Day summary: {len(issues)} issues, {total_story_points} total SP, {report_length} chars"
+            f"Day summary: {len(completed_tasks)} tasks across {len(sorted_batches)} batches, "
+            f"{day_total_sp} total SP, {report_length} chars"
         )
 
         if report_length <= 4000:
