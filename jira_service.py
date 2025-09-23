@@ -74,33 +74,21 @@ class JiraService:
     def search_issues(self, jql: str, max_results: int = 100) -> Optional[Dict[str, Any]]:
         """Выполнить поиск задач по произвольному JQL."""
         print(f"Searching with JQL: {jql}")
-        
-        # Используем новый API v3 search/jql с минимальным payload
-        jql_payload = {"jql": jql}
-        result = self._make_request("POST", "search/jql", jql_payload, api_versions=["3"])
-        
+
+        payload = {
+            "jql": jql,
+            "maxResults": max_results,
+            "fields": ["summary", self.story_points_field],
+        }
+
+        result = self._make_request("POST", "search", payload, api_versions=["3", "2"])
+
         if result and "issues" in result:
             issues = result["issues"]
-            print(f"Found {len(issues)} issues via POST /search/jql")
-            
-            # API v3 search/jql возвращает только ID, нужно получить детали
-            if issues and "id" in issues[0]:
-                # Получаем детали задач по ID
-                issue_ids = [issue["id"] for issue in issues[:max_results]]
-                detailed_issues = []
-                
-                # Получаем детали каждой задачи
-                for issue_id in issue_ids:
-                    issue_detail = self._make_request("GET", f"issue/{issue_id}", api_versions=["3"])
-                    if issue_detail:
-                        detailed_issues.append(issue_detail)
-                
-                if detailed_issues:
-                    return {"issues": detailed_issues}
-            
+            print(f"Found {len(issues)} issues via POST /search")
             return result
-        
-        print("No issues found with search/jql")
+
+        print("No issues found with search")
         return None
 
     def get_issue_url(self, issue_key: str) -> str:
