@@ -75,7 +75,7 @@ class JiraService:
         """Выполнить поиск задач по произвольному JQL."""
         print(f"Searching with JQL: {jql}")
 
-        encoded_jql = quote(jql, safe="=<>"' ()!&|~")
+        encoded_jql = quote(jql, safe="=<>\"' ()!&|~")
         fields_param = quote(f"summary,{self.story_points_field}")
         endpoint = (
             f"search?jql={encoded_jql}&maxResults={max_results}&fields={fields_param}"
