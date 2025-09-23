@@ -82,12 +82,30 @@ class JiraService:
         }
 
         result = self._make_request("POST", "search", payload, api_versions=["3", "2"])
+        if result and result.get("issues"):
+            print(f"Found {len(result['issues'])} issues via POST /search")
+            return result
 
-        if result and "issues" in result:
-            issues = result["issues"]
-            print(f"Found {len(issues)} issues via POST /search")
-            if issues:
-                return result
+        print("POST /search failed or returned no issues, falling back to /search/jql")
+
+        legacy_payload = {"jql": jql, "maxResults": max_results}
+        legacy_result = self._make_request("POST", "search/jql", legacy_payload, api_versions=["3"])
+
+        if legacy_result and legacy_result.get("issues"):
+            issues = legacy_result["issues"]
+            print(f"Found {len(issues)} issues via POST /search/jql")
+
+            if issues and "id" in issues[0] and "key" not in issues[0]:
+                issue_ids = [issue["id"] for issue in issues]
+                detailed_issues = []
+                for issue_id in issue_ids:
+                    detail = self._make_request("GET", f"issue/{issue_id}", api_versions=["3", "2"])
+                    if detail:
+                        detailed_issues.append(detail)
+                if detailed_issues:
+                    return {"issues": detailed_issues}
+            else:
+                return legacy_result
 
         print("No issues found with search")
         return None
