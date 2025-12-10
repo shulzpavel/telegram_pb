@@ -15,9 +15,7 @@
         "jira_key": "IBO2-1302",
         "summary": "Отображение статуса валидации номера и почты ",
         "url": "https://media-life.atlassian.net/browse/IBO2-1302",
-        "votes": {
-          "128847264": "13"
-        },
+        "votes": {},
         "story_points": 1.0
       }
     ],
@@ -99,6 +97,8 @@
     ],
     "last_batch": [],
     "batch_completed": false,
-    "active_vote_message_id": null
+    "active_vote_message_id": null,
+    "current_batch_id": null,
+    "current_batch_started_at": null
   }
 ]
