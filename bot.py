@@ -15,7 +15,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from aiogram import Bot, Dispatcher, F, Router, types
-from aiogram.exceptions import TelegramRetryAfter
+from aiogram.exceptions import TelegramConflictError, TelegramRetryAfter
 from aiogram.filters import Command
 from aiogram.fsm.storage.memory import MemoryStorage
 
@@ -658,7 +658,14 @@ async def main(use_polling: bool = True) -> None:
     dp.include_router(router)
     if use_polling:
         print("✅ Bot is polling. Waiting for messages...")
-        await dp.start_polling(bot)
+        try:
+            await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
+        except TelegramConflictError as e:
+            print(f"⚠️  Конфликт: другой экземпляр бота уже запущен")
+            print(f"   Ошибка: {e}")
+            print(f"   Бот не может работать, пока другой экземпляр активен")
+            print(f"   Остановите другой экземпляр или используйте --no-poll")
+            raise
     else:
         print("✅ Bot launched without polling (assumed secondary instance). Staying idle...")
         await asyncio.Future()
