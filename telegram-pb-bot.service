@@ -1,0 +1,25 @@
+[Unit]
+Description=Telegram Planning Poker Bot
+After=network.target
+
+[Service]
+Type=simple
+User=your_username
+WorkingDirectory=/path/to/telegram_pb
+# ВАЖНО: Замените значения ниже на реальные токены из переменных окружения или .env файла
+Environment=BOT_TOKEN=YOUR_TELEGRAM_BOT_TOKEN
+Environment=USER_TOKEN=user_token
+Environment=LEAD_TOKEN=lead_token
+Environment=ADMIN_TOKEN=admin_token
+Environment=JIRA_URL=https://your-domain.atlassian.net
+Environment=JIRA_USERNAME=your-email@domain.com
+Environment=JIRA_API_TOKEN=YOUR_JIRA_API_TOKEN
+Environment=STORY_POINTS_FIELD=customfield_10022
+Environment=SUPPORTED_TOPICS={"-1003087077812": ["ALL"]}
+Environment=STATE_FILE=data/state.json
+ExecStart=/usr/bin/python3 /path/to/telegram_pb/bot.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
