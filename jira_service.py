@@ -6,6 +6,10 @@ from typing import Any, Dict, Iterable, List, Optional
 
 import requests
 from urllib.parse import quote
+from dotenv import load_dotenv
+
+# Загружаем переменные окружения из .env файла, если он существует
+load_dotenv()
 
 from config import JIRA_API_TOKEN, JIRA_URL, JIRA_USERNAME, STORY_POINTS_FIELD
 
@@ -27,6 +31,7 @@ class JiraService:
     ) -> Optional[Dict[str, Any]]:
         """Выполнить HTTP-запрос к Jira, пробуя несколько версий API."""
         headers = {"Accept": "application/json", "Content-Type": "application/json"}
+        # Для Atlassian Cloud используем Basic Auth с email и API token
         auth = (self.username, self.api_token)
         method = method.upper()
         versions = list(api_versions or ["3"])
@@ -35,11 +40,11 @@ class JiraService:
             url = f"{self.base_url}/rest/api/{version}/{endpoint}"
             try:
                 if method == "GET":
-                    response = requests.get(url, auth=auth, headers=headers)
+                    response = requests.get(url, auth=auth, headers=headers, timeout=30)
                 elif method == "PUT":
-                    response = requests.put(url, auth=auth, headers=headers, json=data)
+                    response = requests.put(url, auth=auth, headers=headers, json=data, timeout=30)
                 elif method == "POST":
-                    response = requests.post(url, auth=auth, headers=headers, json=data)
+                    response = requests.post(url, auth=auth, headers=headers, json=data, timeout=30)
                 else:
                     return None
 
@@ -57,11 +62,29 @@ class JiraService:
                 # Если API-версия недоступна (например, 410), пробуем следующую
                 if status in {301, 302, 303, 307, 308, 404, 410} and version != versions[-1]:
                     continue
-                try:
-                    body = error.response.text
-                except Exception:
-                    body = "<no body>"
-                print(f"Jira API error {status}: {body}")
+                # Для ошибок авторизации (401) выводим более подробную информацию
+                if status == 401:
+                    try:
+                        body = error.response.text
+                    except Exception:
+                        body = "<no body>"
+                    print(f"Jira API authentication error (401): {body}")
+                    print(f"  URL: {url}")
+                    print(f"  Username: {self.username}")
+                    print(f"  Token: {self.api_token[:20] if self.api_token else 'None'}...")
+                    # Не продолжаем попытки для ошибок авторизации
+                    return None
+                # Для ошибок 404 (не найдено) и 403 (нет прав) не выводим в консоль - это нормально
+                if status in {404, 403}:
+                    # Тихо возвращаем None, не засоряя логи
+                    return None
+                # Для других ошибок выводим информацию только если это не 410 (устаревший API)
+                if status != 410:
+                    try:
+                        body = error.response.text
+                    except Exception:
+                        body = "<no body>"
+                    print(f"Jira API error {status}: {body}")
             except requests.exceptions.RequestException as error:
                 print(f"Jira API error: {error}")
                 break
@@ -73,28 +96,25 @@ class JiraService:
 
     def search_issues(self, jql: str, max_results: int = 100) -> Optional[Dict[str, Any]]:
         """Выполнить поиск задач по произвольному JQL."""
-        print(f"Searching with JQL: {jql}")
-
+        # Используем правильный endpoint для поиска (новый формат API v3)
         payload = {
             "jql": jql,
             "maxResults": max_results,
-            "fields": ["summary", self.story_points_field],
+            "fields": ["summary", self.story_points_field, "key"],
         }
 
-        result = self._make_request("POST", "search", payload, api_versions=["3", "2"])
+        # Пробуем новый endpoint /rest/api/3/search
+        result = self._make_request("POST", "search", payload, api_versions=["3"])
         if result and result.get("issues"):
-            print(f"Found {len(result['issues'])} issues via POST /search")
             return result
 
-        print("POST /search failed or returned no issues, falling back to /search/jql")
-
+        # Если не сработало, пробуем старый endpoint /rest/api/3/search/jql
         legacy_payload = {"jql": jql, "maxResults": max_results}
         legacy_result = self._make_request("POST", "search/jql", legacy_payload, api_versions=["3"])
 
         if legacy_result and legacy_result.get("issues"):
             issues = legacy_result["issues"]
-            print(f"Found {len(issues)} issues via POST /search/jql")
-
+            # Если в ответе только ID, получаем полную информацию
             if issues and "id" in issues[0] and "key" not in issues[0]:
                 issue_ids = [issue["id"] for issue in issues]
                 detailed_issues = []
@@ -107,7 +127,6 @@ class JiraService:
             else:
                 return legacy_result
 
-        print("No issues found with search")
         return None
 
     def get_issue_url(self, issue_key: str) -> str:
