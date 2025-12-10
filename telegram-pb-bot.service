@@ -4,10 +4,14 @@ After=network.target
 
 [Service]
 Type=simple
+# ВАЖНО: Замените your_username на реальное имя пользователя на сервере
 User=your_username
+# ВАЖНО: Замените /path/to/telegram_pb на реальный путь к проекту (например: /home/user/telegram_pb)
 WorkingDirectory=/path/to/telegram_pb
 # Load environment from .env file (create it from env.example)
+# ВАЖНО: Замените /path/to/telegram_pb на реальный путь к проекту
 EnvironmentFile=/path/to/telegram_pb/.env
+# ВАЖНО: Замените /path/to/telegram_pb на реальный путь к проекту
 ExecStart=/usr/bin/python3 /path/to/telegram_pb/run.py
 Restart=always
 RestartSec=10
