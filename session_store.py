@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import fcntl
 import json
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -135,13 +137,20 @@ class SessionStore:
         return f"{chat_id}:{topic_part}"
 
     def _load(self) -> None:
+        """Load state with file locking."""
         if not self.state_path.exists():
             return
 
         try:
             with self.state_path.open("r", encoding="utf-8") as fh:
-                payload = json.load(fh)
-        except (OSError, json.JSONDecodeError):
+                # Acquire shared lock for reading
+                try:
+                    fcntl.flock(fh.fileno(), fcntl.LOCK_SH)
+                    payload = json.load(fh)
+                finally:
+                    fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+        except (OSError, json.JSONDecodeError) as e:
+            print(f"Error loading state: {e}")
             return
 
         if not isinstance(payload, list):
@@ -156,10 +165,31 @@ class SessionStore:
             self._sessions[self._make_key(session.chat_id, session.topic_id)] = session
 
     def save(self) -> None:
+        """Save state atomically with file locking."""
         self.state_path.parent.mkdir(parents=True, exist_ok=True)
         data = [session.to_dict() for session in self._sessions.values()]
-        with self.state_path.open("w", encoding="utf-8") as fh:
-            json.dump(data, fh, ensure_ascii=False, indent=2)
+
+        # Atomic write: write to temp file, then rename
+        temp_path = self.state_path.with_suffix('.tmp')
+        try:
+            with open(temp_path, "w", encoding="utf-8") as fh:
+                # Acquire exclusive lock
+                try:
+                    fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+                    json.dump(data, fh, ensure_ascii=False, indent=2)
+                    fh.flush()
+                    os.fsync(fh.fileno())  # Ensure data is written to disk
+                finally:
+                    fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+
+            # Atomic rename
+            temp_path.replace(self.state_path)
+        except Exception as e:
+            # Clean up temp file on error
+            if temp_path.exists():
+                temp_path.unlink()
+            print(f"Error saving state: {e}")
+            raise
 
     def get_session(self, chat_id: int, topic_id: Optional[int]) -> SessionState:
         key = self._make_key(chat_id, topic_id)

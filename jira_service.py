@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Работа с Jira API."""
+"""Async Jira API service."""
 
+import asyncio
 import re
 from typing import Any, Dict, Iterable, List, Optional
 
-import requests
-from urllib.parse import quote
+import aiohttp
 from dotenv import load_dotenv
 
 # Загружаем переменные окружения из .env файла, если он существует
@@ -15,77 +15,94 @@ from config import JIRA_API_TOKEN, JIRA_URL, JIRA_USERNAME, STORY_POINTS_FIELD
 
 
 class JiraService:
+    """Async Jira API service."""
+
     def __init__(self) -> None:
         self.base_url = JIRA_URL
         self.username = JIRA_USERNAME
         self.api_token = JIRA_API_TOKEN
         self.story_points_field = STORY_POINTS_FIELD
         self._key_pattern = re.compile(r"\b([A-Z][A-Z0-9]+-\d+)\b")
+        self._session: Optional[aiohttp.ClientSession] = None
+        self._timeout = aiohttp.ClientTimeout(total=30)
 
-    def _make_request(
+    async def _get_session(self) -> aiohttp.ClientSession:
+        """Get or create aiohttp session."""
+        if self._session is None or self._session.closed:
+            self._session = aiohttp.ClientSession(timeout=self._timeout)
+        return self._session
+
+    async def _close_session(self) -> None:
+        """Close aiohttp session."""
+        if self._session and not self._session.closed:
+            await self._session.close()
+
+    async def _make_request(
         self,
         method: str,
         endpoint: str,
         data: Optional[Dict[str, Any]] = None,
         api_versions: Optional[Iterable[str]] = None,
     ) -> Optional[Dict[str, Any]]:
-        """Выполнить HTTP-запрос к Jira, пробуя несколько версий API."""
+        """Execute async HTTP request to Jira, trying multiple API versions."""
+        if not self.api_token or not self.username:
+            return None
+
         headers = {"Accept": "application/json", "Content-Type": "application/json"}
-        # Для Atlassian Cloud используем Basic Auth с email и API token
-        auth = (self.username, self.api_token)
+        auth = aiohttp.BasicAuth(self.username, self.api_token)
         method = method.upper()
         versions = list(api_versions or ["3"])
+
+        session = await self._get_session()
 
         for version in versions:
             url = f"{self.base_url}/rest/api/{version}/{endpoint}"
             try:
-                if method == "GET":
-                    response = requests.get(url, auth=auth, headers=headers, timeout=30)
-                elif method == "PUT":
-                    response = requests.put(url, auth=auth, headers=headers, json=data, timeout=30)
-                elif method == "POST":
-                    response = requests.post(url, auth=auth, headers=headers, json=data, timeout=30)
-                else:
-                    return None
+                async with session.request(
+                    method, url, auth=auth, headers=headers, json=data
+                ) as response:
+                    # Handle redirects and deprecated endpoints
+                    if response.status in {301, 302, 303, 307, 308, 404, 410}:
+                        if version != versions[-1]:
+                            continue
+                        if response.status in {404, 410}:
+                            return None
 
-                response.raise_for_status()
+                    response.raise_for_status()
 
-                if not response.encoding:
-                    response.encoding = response.apparent_encoding or "utf-8"
+                    if response.status == 204 or response.content_length == 0:
+                        return {"success": True}
 
-                if response.status_code == 204 or not response.content:
-                    return {"success": True}
+                    return await response.json()
 
-                return response.json()
-            except requests.exceptions.HTTPError as error:
-                status = getattr(error.response, "status_code", None)
-                # Если API-версия недоступна (например, 410), пробуем следующую
+            except aiohttp.ClientResponseError as error:
+                status = error.status
+                # If API version is unavailable (e.g., 410), try next version
                 if status in {301, 302, 303, 307, 308, 404, 410} and version != versions[-1]:
                     continue
-                # Для ошибок авторизации (401) выводим более подробную информацию
+                # For authentication errors (401), provide detailed information
                 if status == 401:
                     try:
-                        body = error.response.text
+                        body = await error.response.text()
                     except Exception:
                         body = "<no body>"
                     print(f"Jira API authentication error (401): {body}")
                     print(f"  URL: {url}")
                     print(f"  Username: {self.username}")
                     print(f"  Token: {self.api_token[:20] if self.api_token else 'None'}...")
-                    # Не продолжаем попытки для ошибок авторизации
+                    # Don't continue attempts for auth errors
                     return None
-                # Для ошибок 404 (не найдено) и 403 (нет прав) не выводим в консоль - это нормально
+                # For 404 (not found) and 403 (no permissions) errors, silently return None
                 if status in {404, 403}:
-                    # Тихо возвращаем None, не засоряя логи
                     return None
-                # Для других ошибок выводим информацию только если это не 410 (устаревший API)
+                # For other errors, print information only if not 410 (deprecated API)
                 if status != 410:
                     try:
-                        body = error.response.text
+                        body = await error.response.text()
                     except Exception:
                         body = "<no body>"
                     print(f"Jira API error {status}: {body}")
-            except requests.exceptions.RequestException as error:
+            except aiohttp.ClientError as error:
                 print(f"Jira API error: {error}")
                 break
             except ValueError as error:
@@ -94,32 +111,31 @@ class JiraService:
 
         return None
 
-    def search_issues(self, jql: str, max_results: int = 100) -> Optional[Dict[str, Any]]:
-        """Выполнить поиск задач по произвольному JQL."""
-        # Используем правильный endpoint для поиска (новый формат API v3)
+    async def search_issues(self, jql: str, max_results: int = 100) -> Optional[Dict[str, Any]]:
+        """Execute search for issues using arbitrary JQL."""
         payload = {
             "jql": jql,
             "maxResults": max_results,
             "fields": ["summary", self.story_points_field, "key"],
         }
 
-        # Пробуем новый endpoint /rest/api/3/search
-        result = self._make_request("POST", "search", payload, api_versions=["3"])
+        # Try new endpoint /rest/api/3/search
+        result = await self._make_request("POST", "search", payload, api_versions=["3"])
         if result and result.get("issues"):
             return result
 
-        # Если не сработало, пробуем старый endpoint /rest/api/3/search/jql
+        # If that didn't work, try legacy endpoint /rest/api/3/search/jql
         legacy_payload = {"jql": jql, "maxResults": max_results}
-        legacy_result = self._make_request("POST", "search/jql", legacy_payload, api_versions=["3"])
+        legacy_result = await self._make_request("POST", "search/jql", legacy_payload, api_versions=["3"])
 
         if legacy_result and legacy_result.get("issues"):
             issues = legacy_result["issues"]
-            # Если в ответе только ID, получаем полную информацию
+            # If response only contains IDs, fetch full information
             if issues and "id" in issues[0] and "key" not in issues[0]:
                 issue_ids = [issue["id"] for issue in issues]
                 detailed_issues = []
                 for issue_id in issue_ids:
-                    detail = self._make_request("GET", f"issue/{issue_id}", api_versions=["3", "2"])
+                    detail = await self._make_request("GET", f"issue/{issue_id}", api_versions=["3", "2"])
                     if detail:
                         detailed_issues.append(detail)
                 if detailed_issues:
@@ -130,15 +146,17 @@ class JiraService:
         return None
 
     def get_issue_url(self, issue_key: str) -> str:
+        """Get URL for issue."""
         return f"{self.base_url}/browse/{issue_key}"
 
-    def update_story_points(self, issue_key: str, story_points: int) -> bool:
+    async def update_story_points(self, issue_key: str, story_points: int) -> bool:
+        """Update story points for issue."""
         payload = {"fields": {self.story_points_field: story_points}}
-        result = self._make_request("PUT", f"issue/{issue_key}", payload, api_versions=["3", "2"])
+        result = await self._make_request("PUT", f"issue/{issue_key}", payload, api_versions=["3", "2"])
         return result is not None
 
-    def parse_jira_request(self, text: str) -> Optional[List[Dict[str, Any]]]:
-        """Вернуть список задач по JQL."""
+    async def parse_jira_request(self, text: str) -> Optional[List[Dict[str, Any]]]:
+        """Return list of tasks by JQL."""
         if not text:
             return None
 
@@ -147,13 +165,13 @@ class JiraService:
             return None
 
         try:
-            response = self.search_issues(jql)
+            response = await self.search_issues(jql)
             if not response or "issues" not in response:
                 print("No issues from search")
-                # Fallback: если поиск не сработал, пробуем получить задачи по ключам из JQL
+                # Fallback: if search didn't work, try to get tasks by keys from JQL
                 fallback_issues: List[Dict[str, Any]] = []
                 for key in self._key_pattern.findall(text):
-                    details = self._fetch_issue_by_key(key)
+                    details = await self._fetch_issue_by_key(key)
                     if details:
                         fallback_issues.append(details)
                 return fallback_issues or None
@@ -181,16 +199,17 @@ class JiraService:
             return issues or None
         except Exception as error:
             print(f"Error processing Jira request: {error}")
-            # Fallback: если поиск не сработал, пробуем получить задачи по ключам из JQL
+            # Fallback: if search didn't work, try to get tasks by keys from JQL
             fallback_issues: List[Dict[str, Any]] = []
             for key in self._key_pattern.findall(text):
-                details = self._fetch_issue_by_key(key)
+                details = await self._fetch_issue_by_key(key)
                 if details:
                     fallback_issues.append(details)
             return fallback_issues or None
 
-    def _fetch_issue_by_key(self, issue_key: str) -> Optional[Dict[str, Any]]:
-        issue = self._make_request("GET", f"issue/{issue_key}", api_versions=["3", "2"])
+    async def _fetch_issue_by_key(self, issue_key: str) -> Optional[Dict[str, Any]]:
+        """Fetch issue details by key."""
+        issue = await self._make_request("GET", f"issue/{issue_key}", api_versions=["3", "2"])
         if not issue:
             return None
 
