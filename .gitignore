@@ -55,9 +55,10 @@ data/
 *.tmp
 *.temp
 
-# Documentation files (keep only README.md)
+# Documentation files (keep only README.md and DEPLOY.md)
 *.md
 !README.md
+!DEPLOY.md
 
 # Setup and demo files
 setup_config.py
