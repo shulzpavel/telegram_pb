@@ -9,6 +9,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
+from dotenv import load_dotenv
+
+# Загружаем переменные окружения из .env файла, если он существует
+load_dotenv()
+
 from aiogram import Bot, Dispatcher, F, Router, types
 from aiogram.exceptions import TelegramRetryAfter
 from aiogram.filters import Command
