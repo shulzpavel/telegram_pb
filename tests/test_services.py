@@ -199,6 +199,112 @@ class TestTaskService:
         result = TaskService.start_voting_session(session)
         assert result is False
 
+    def test_reset_tasks_queue(self):
+        """Test resetting tasks queue."""
+        session = Session(chat_id=123, topic_id=456)
+        task1 = Task(summary="Task 1")
+        task2 = Task(summary="Task 2")
+        task3 = Task(summary="Task 3")
+        session.tasks_queue = [task1, task2, task3]
+        session.current_task_index = 2
+        session.batch_completed = False
+        session.current_batch_started_at = "2024-01-01T00:00:00"
+        session.current_batch_id = "batch-123"
+        session.active_vote_message_id = 999
+
+        TaskService.reset_tasks_queue(session)
+
+        assert len(session.tasks_queue) == 0
+        assert session.current_task_index == 0
+        assert session.batch_completed is False
+        assert session.current_batch_started_at is None
+        assert session.current_batch_id is None
+        assert session.active_vote_message_id is None
+
+    def test_reset_tasks_queue_with_active_voting(self):
+        """Test resetting queue while voting is active."""
+        session = Session(chat_id=123, topic_id=456)
+        task1 = Task(summary="Task 1")
+        task2 = Task(summary="Task 2")
+        session.tasks_queue = [task1, task2]
+        session.current_task_index = 0
+        session.current_batch_started_at = "2024-01-01T00:00:00"
+        task1.votes = {1: "5", 2: "8"}
+
+        TaskService.reset_tasks_queue(session)
+
+        assert len(session.tasks_queue) == 0
+        assert session.current_task_index == 0
+        assert session.current_batch_started_at is None
+        # Голоса в current_task должны быть очищены явно
+        # После clear() current_task станет None, но голоса уже очищены
+        assert task1.votes == {}  # Голоса очищены явно перед удалением из очереди
+
+    def test_reset_tasks_queue_empty(self):
+        """Test resetting empty queue."""
+        session = Session(chat_id=123, topic_id=456)
+        session.tasks_queue = []
+        session.current_task_index = 0
+
+        TaskService.reset_tasks_queue(session)
+
+        assert len(session.tasks_queue) == 0
+        assert session.current_task_index == 0
+        assert session.current_batch_started_at is None
+
+    def test_reset_tasks_queue_preserves_history(self):
+        """Test that reset_tasks_queue preserves history and last_batch."""
+        session = Session(chat_id=123, topic_id=456)
+        task1 = Task(summary="Task 1")
+        task2 = Task(summary="Task 2")
+        task3 = Task(summary="Task 3")
+        session.tasks_queue = [task1, task2]
+        session.history = [task3]  # Предыдущие задачи в истории
+        session.last_batch = [task3]  # Последний батч
+        
+        TaskService.reset_tasks_queue(session)
+        
+        # История и last_batch должны сохраниться
+        assert len(session.history) == 1
+        assert len(session.last_batch) == 1
+        assert session.history[0] == task3
+        assert session.last_batch[0] == task3
+        # Очередь очищена
+        assert len(session.tasks_queue) == 0
+
+    def test_reset_tasks_queue_clears_current_task_votes(self):
+        """Test that reset_tasks_queue explicitly clears current_task votes."""
+        session = Session(chat_id=123, topic_id=456)
+        task1 = Task(summary="Task 1")
+        task1.votes = {1: "5", 2: "8", 3: "13"}
+        session.tasks_queue = [task1]
+        session.current_task_index = 0
+        
+        TaskService.reset_tasks_queue(session)
+        
+        # Голоса должны быть очищены явно перед удалением из очереди
+        assert task1.votes == {}
+        assert len(session.tasks_queue) == 0
+
+    def test_reset_tasks_queue_access_control(self):
+        """Test that reset_tasks_queue can only be called by manage roles (tested via can_manage)."""
+        session = Session(chat_id=123, topic_id=456)
+        lead = Participant(user_id=1, name="Lead", role=UserRole.LEAD)
+        participant = Participant(user_id=2, name="User", role=UserRole.PARTICIPANT)
+        session.participants[1] = lead
+        session.participants[2] = participant
+        
+        # Проверяем, что только лид может управлять
+        assert session.can_manage(1) is True
+        assert session.can_manage(2) is False
+        
+        # Метод reset_tasks_queue не проверяет права сам, это делается в handlers
+        # Но мы можем проверить, что метод работает корректно для любой сессии
+        task = Task(summary="Test")
+        session.tasks_queue.append(task)
+        TaskService.reset_tasks_queue(session)
+        assert len(session.tasks_queue) == 0
+
     def test_move_to_next_task(self):
         """Test moving to next task."""
         session = Session(chat_id=123, topic_id=456)

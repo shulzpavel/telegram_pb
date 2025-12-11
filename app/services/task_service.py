@@ -77,3 +77,23 @@ class TaskService:
         if session.current_task:
             session.current_task.votes.clear()
         return session.current_task
+
+    @staticmethod
+    def reset_tasks_queue(session: Session) -> None:
+        """Reset tasks queue and all related voting state.
+        
+        Note: history and last_batch are preserved as per requirements.
+        """
+        # Очищаем голоса текущей задачи явно (если есть)
+        if session.current_task:
+            session.current_task.votes.clear()
+        # Очищаем очередь задач
+        session.tasks_queue.clear()
+        # Сбрасываем индекс текущей задачи
+        session.current_task_index = 0
+        # Сбрасываем состояние голосования
+        session.batch_completed = False
+        session.current_batch_started_at = None
+        session.current_batch_id = None
+        session.active_vote_message_id = None
+        # Примечание: last_batch и history НЕ очищаются, чтобы сохранить историю
