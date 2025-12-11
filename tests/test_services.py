@@ -100,6 +100,23 @@ class TestTaskService:
         assert result is True
         assert session.current_task_index == 0
         assert session.batch_completed is False
+        assert session.current_batch_started_at is not None
+
+    def test_start_voting_session_after_completion(self):
+        """Restart voting after previous batch completed."""
+        session = Session(chat_id=123, topic_id=456)
+        task1 = Task(summary="Task 1")
+        task2 = Task(summary="Task 2")
+        session.tasks_queue = [task1, task2]
+        session.batch_completed = True
+        session.current_task_index = 5  # arbitrary wrong index
+
+        result = TaskService.start_voting_session(session)
+        assert result is True
+        assert session.current_task_index == 0
+        assert session.batch_completed is False
+        assert session.current_task == task1
+        assert session.current_batch_started_at is not None
 
     def test_start_voting_session_empty(self):
         """Test starting voting session with no tasks."""
@@ -118,4 +135,3 @@ class TestTaskService:
         next_task = TaskService.move_to_next_task(session)
         assert session.current_task_index == 1
         assert next_task == task2
-

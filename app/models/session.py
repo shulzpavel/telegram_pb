@@ -32,6 +32,11 @@ class Session:
         return None
 
     @property
+    def is_voting_active(self) -> bool:
+        """Check if voting for current batch is in progress."""
+        return bool(self.current_task) and bool(self.current_batch_started_at) and not self.batch_completed
+
+    @property
     def current_votes(self) -> Dict[int, str]:
         """Get votes for current task."""
         task = self.current_task
@@ -51,4 +56,3 @@ class Session:
         """Check if user can manage session."""
         role = self.get_participant_role(user_id)
         return role in {UserRole.ADMIN, UserRole.LEAD}
-

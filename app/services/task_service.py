@@ -2,6 +2,8 @@
 
 from typing import Dict, List, Optional, Set
 
+from datetime import datetime
+
 from app.models.session import Session
 from app.models.task import Task
 from jira_service import jira_service
@@ -63,6 +65,7 @@ class TaskService:
             return False
         session.current_task_index = 0
         session.batch_completed = False
+        session.current_batch_started_at = datetime.utcnow().isoformat()
         if session.current_task:
             session.current_task.votes.clear()
         return True
@@ -74,4 +77,3 @@ class TaskService:
         if session.current_task:
             session.current_task.votes.clear()
         return session.current_task
-

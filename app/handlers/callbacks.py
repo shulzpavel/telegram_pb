@@ -65,6 +65,9 @@ async def handle_menu(callback: types.CallbackQuery) -> None:
     elif action == "summary":
         await _show_day_summary(callback.message, session, session_service)
 
+    elif action == "start_voting":
+        await _handle_start_voting(callback.message, session, session_service)
+
     elif action == "main":
         await safe_call(callback.message.answer, "📌 Главное меню:", reply_markup=get_main_menu())
 
@@ -119,6 +122,24 @@ async def handle_menu(callback: types.CallbackQuery) -> None:
         await safe_call(callback.message.answer, "👤 Выберите участника для удаления:", reply_markup=keyboard)
 
     await callback.answer()
+
+async def _handle_start_voting(msg: types.Message, session, session_service) -> None:
+    """Manually start voting session."""
+    if not session.tasks_queue:
+        await safe_call(msg.answer, "❌ Нет задач для голосования.", reply_markup=get_back_keyboard())
+        return
+
+    if session.is_voting_active:
+        await safe_call(
+            msg.answer,
+            "ℹ️ Голосование уже запущено.",
+            reply_markup=get_back_keyboard(),
+        )
+        return
+
+    if TaskService.start_voting_session(session):
+        session_service.save_session(session)
+        await _start_next_task(msg, session, session_service)
 
 
 @router.callback_query(F.data.startswith("kick_user:"))
@@ -356,4 +377,3 @@ async def _show_batch_results(msg: types.Message, session) -> None:
         lines.append("")
 
     await safe_call(msg.answer, "\n".join(lines), reply_markup=get_results_keyboard())
-
