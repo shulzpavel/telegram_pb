@@ -73,10 +73,11 @@ async def cmd_start_help(msg: types.Message) -> None:
         "• Лидеры управляют сессией"
     )
 
+    can_manage = participant and session.can_manage(user_id) if participant else False
     if participant:
-        await safe_call(msg.answer, f"👋 Добро пожаловать! Ваша роль: {_format_role_label(participant.role)}", reply_markup=get_main_menu(session))
+        await safe_call(msg.answer, f"👋 Добро пожаловать! Ваша роль: {_format_role_label(participant.role)}", reply_markup=get_main_menu(session, can_manage))
     else:
-        await safe_call(msg.answer, text, parse_mode="Markdown", reply_markup=get_main_menu(session))
+        await safe_call(msg.answer, text, parse_mode="Markdown", reply_markup=get_main_menu(session, can_manage))
 
 
 @router.message(Command("join"))
@@ -120,6 +121,7 @@ async def cmd_join(msg: types.Message) -> None:
         session.current_task.votes.pop(user_id, None)
 
     session_service.save_session(session)
+    can_manage = session.can_manage(user_id)
     await safe_call(msg.answer, f"✅ {msg.from_user.full_name} присоединился как {_format_role_label(role)}.")
-    await safe_call(msg.answer, "📌 Главное меню:", reply_markup=get_main_menu(session))
+    await safe_call(msg.answer, "📌 Главное меню:", reply_markup=get_main_menu(session, can_manage))
 

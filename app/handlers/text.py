@@ -24,11 +24,12 @@ async def handle_text_input(msg: types.Message) -> None:
 
     user_id = msg.from_user.id
     if user_id not in session.participants:
+        can_manage = False
         await safe_call(
             msg.answer,
             "⚠️ Вы не авторизованы. Используйте <code>/join &lt;токен&gt;</code>.",
             parse_mode="HTML",
-            reply_markup=get_main_menu(session),
+            reply_markup=get_main_menu(session, can_manage),
         )
         return
 

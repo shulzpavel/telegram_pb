@@ -16,8 +16,13 @@ def build_vote_keyboard() -> types.InlineKeyboardMarkup:
     return types.InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def get_main_menu(session=None) -> types.InlineKeyboardMarkup:
-    """Get main menu keyboard. Optionally show 'Start' button if tasks exist and voting is not active."""
+def get_main_menu(session=None, can_manage: bool = False) -> types.InlineKeyboardMarkup:
+    """Get main menu keyboard. Optionally show 'Start' button if tasks exist and voting is not active.
+    
+    Args:
+        session: Session object to check for tasks
+        can_manage: Whether the user can manage the session (lead/admin)
+    """
     rows = [
         [
             types.InlineKeyboardButton(text="🆕 Список задач", callback_data="menu:new_task"),
@@ -33,6 +38,10 @@ def get_main_menu(session=None) -> types.InlineKeyboardMarkup:
     # Показываем кнопку "Начать" если есть задачи и голосование не активно
     if session and session.tasks_queue and not session.is_voting_active:
         rows.insert(1, [types.InlineKeyboardButton(text="▶️ Начать", callback_data="menu:start_voting")])
+    
+    # Показываем кнопку "Сбросить очередь" для лидов/админов, если есть задачи
+    if can_manage and session and session.tasks_queue:
+        rows.append([types.InlineKeyboardButton(text="🗑️ Сбросить очередь", callback_data="menu:reset_queue")])
     
     return types.InlineKeyboardMarkup(inline_keyboard=rows)
 

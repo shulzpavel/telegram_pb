@@ -48,11 +48,13 @@ async def handle_menu(callback: types.CallbackQuery) -> None:
         await _send_access_denied(callback, "⚠️ Вы не авторизованы. Используйте /join <токен>.")
         return
 
-    if not session.can_manage(user_id):
-        await _send_access_denied(callback, "❌ Только лидеры и администраторы могут управлять сессией.")
-        return
-
     action = callback.data.split(":", maxsplit=1)[1]
+    
+    # Для некоторых действий не требуется права управления
+    if action not in ["main", "summary", "show_participants", "leave"]:
+        if not session.can_manage(user_id):
+            await _send_access_denied(callback, "❌ Только лидеры и администраторы могут управлять сессией.")
+            return
 
     if action == "new_task":
         PROMPT_JQL = (
@@ -69,7 +71,8 @@ async def handle_menu(callback: types.CallbackQuery) -> None:
         await _handle_start_voting(callback.message, session, session_service)
 
     elif action == "main":
-        await safe_call(callback.message.answer, "📌 Главное меню:", reply_markup=get_main_menu(session))
+        can_manage = session.can_manage(user_id)
+        await safe_call(callback.message.answer, "📌 Главное меню:", reply_markup=get_main_menu(session, can_manage))
 
     elif action == "show_participants":
         if not session.participants:
@@ -121,7 +124,103 @@ async def handle_menu(callback: types.CallbackQuery) -> None:
         keyboard = types.InlineKeyboardMarkup(inline_keyboard=buttons)
         await safe_call(callback.message.answer, "👤 Выберите участника для удаления:", reply_markup=keyboard)
 
+    elif action == "reset_queue":
+        await _handle_reset_queue(callback.message, session, session_service, user_id)
+
     await callback.answer()
+
+
+async def _handle_reset_queue(msg: types.Message, session, session_service, user_id: int) -> None:
+    """Handle reset queue request with confirmation."""
+    if not session.tasks_queue:
+        await safe_call(msg.answer, "❌ Очередь задач пуста, нечего сбрасывать.", reply_markup=get_back_keyboard())
+        return
+    
+    # Показываем подтверждение с количеством задач
+    task_count = len(session.tasks_queue)
+    confirmation_text = (
+        f"⚠️ Вы уверены, что хотите сбросить очередь задач?\n\n"
+        f"📊 В очереди: {task_count} {'задача' if task_count == 1 else 'задач' if task_count < 5 else 'задач'}\n\n"
+        f"Это действие удалит все задачи из очереди и сбросит текущее голосование.\n"
+        f"История голосований сохранится."
+    )
+    
+    keyboard = types.InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                types.InlineKeyboardButton(text="✅ Да, сбросить", callback_data="confirm:reset_queue"),
+                types.InlineKeyboardButton(text="❌ Отмена", callback_data="menu:main"),
+            ]
+        ]
+    )
+    await safe_call(msg.answer, confirmation_text, reply_markup=keyboard)
+
+
+@router.callback_query(F.data == "confirm:reset_queue")
+async def handle_confirm_reset_queue(callback: types.CallbackQuery) -> None:
+    """Handle confirmed reset queue action."""
+    chat_id, topic_id = extract_context(callback)
+    if not is_supported_thread(chat_id, topic_id):
+        await callback.answer()
+        return
+
+    session_service = SessionService(STATE_FILE)
+    session = session_service.get_session(chat_id, topic_id)
+
+    user_id = callback.from_user.id
+    participant = session.participants.get(user_id)
+    if not participant:
+        await _send_access_denied(callback, "⚠️ Вы не авторизованы. Используйте /join <токен>.")
+        return
+
+    if not session.can_manage(user_id):
+        await _send_access_denied(callback, "❌ Только лидеры и администраторы могут управлять сессией.")
+        return
+
+    # Защита от повторного сброса (если очередь уже пуста)
+    if not session.tasks_queue:
+        can_manage = session.can_manage(user_id)
+        await safe_call(
+            callback.message.answer,
+            "ℹ️ Очередь задач уже пуста, нечего сбрасывать.",
+            reply_markup=get_main_menu(session, can_manage),
+        )
+        await callback.answer("ℹ️ Очередь уже пуста")
+        return
+
+    # Проверяем, было ли активное голосование
+    was_voting_active = session.is_voting_active
+    active_vote_message_id = session.active_vote_message_id
+
+    # Сбрасываем очередь
+    task_count = len(session.tasks_queue)
+    TaskService.reset_tasks_queue(session)
+    session_service.save_session(session)
+
+    # Уведомляем о прекращении голосования, если оно было активно
+    if was_voting_active and active_vote_message_id:
+        try:
+            await safe_call(
+                callback.message.bot.edit_message_text,
+                chat_id=chat_id,
+                message_id=active_vote_message_id,
+                text="⏹️ Голосование остановлено. Очередь задач сброшена.",
+            )
+        except Exception:
+            # Игнорируем ошибки редактирования (сообщение может быть уже удалено)
+            pass
+
+    can_manage = session.can_manage(user_id)
+    message_text = f"✅ Очередь задач сброшена.\n\n📊 Удалено задач: {task_count}\n\nТеперь можно добавить новые задачи."
+    if was_voting_active:
+        message_text = "⏹️ Голосование остановлено.\n\n" + message_text
+    
+    await safe_call(
+        callback.message.answer,
+        message_text,
+        reply_markup=get_main_menu(session, can_manage),
+    )
+    await callback.answer("✅ Очередь сброшена")
 
 async def _handle_start_voting(msg: types.Message, session, session_service) -> None:
     """Manually start voting session."""
