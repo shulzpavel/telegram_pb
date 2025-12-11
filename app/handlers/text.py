@@ -2,7 +2,7 @@
 
 from aiogram import Router, types
 
-from app.keyboards import get_back_keyboard, get_main_menu
+from app.keyboards import get_back_keyboard, get_main_menu, get_tasks_added_keyboard
 from app.services.session_service import SessionService
 from app.services.task_service import TaskService
 from app.utils.context import extract_context
@@ -47,8 +47,12 @@ async def handle_text_input(msg: types.Message) -> None:
     added, skipped = await TaskService.add_tasks_from_jira(session, jql)
 
     if not added:
-        message = "⚠️ Все найденные задачи уже добавлены." if skipped else "❌ Не удалось получить задачи из Jira. Проверь JQL и попробуй снова."
-        await safe_call(msg.answer, message, reply_markup=get_back_keyboard())
+        # Если все задачи уже есть в очереди — даём возможность сразу начать голосование
+        if skipped:
+            message = "⚠️ Все найденные задачи уже добавлены. Нажмите «Начать», чтобы запустить голосование."
+            await safe_call(msg.answer, message, reply_markup=get_tasks_added_keyboard())
+        else:
+            await safe_call(msg.answer, "❌ Не удалось получить задачи из Jira. Проверь JQL и попробуй снова.", reply_markup=get_back_keyboard())
         return
 
     session_service.save_session(session)
@@ -56,13 +60,8 @@ async def handle_text_input(msg: types.Message) -> None:
     response = [f"✅ Добавлено {len(added)} задач из Jira."]
     if skipped:
         response.append("⚠️ Пропущены уже добавленные: " + ", ".join(skipped))
-    await safe_call(msg.answer, "\n".join(response), reply_markup=get_back_keyboard())
-
-    # Start voting if this is a new session
-    should_start = session.tasks_queue and not session.is_voting_active
-    if should_start and TaskService.start_voting_session(session):
-        session_service.save_session(session)
-        await _start_voting_session(msg, session, session_service)
+    # Показываем клавиатуру с кнопками "Назад" и "Начать" после добавления задач
+    await safe_call(msg.answer, "\n".join(response), reply_markup=get_tasks_added_keyboard())
 
 
 async def _start_voting_session(msg: types.Message, session, session_service) -> None:
