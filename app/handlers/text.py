@@ -5,6 +5,7 @@ from aiogram import Router, types
 from app.keyboards import get_back_keyboard, get_main_menu, get_tasks_added_keyboard
 from app.services.session_service import SessionService
 from app.services.task_service import TaskService
+from app.utils.audit import audit_log
 from app.utils.context import extract_context
 from app.utils.telegram import safe_call
 from config import STATE_FILE, is_supported_thread
@@ -79,6 +80,23 @@ async def handle_text_input(msg: types.Message) -> None:
         return
 
     session_service.save_session(session)
+
+    # Логируем действие (используем participant.name или msg.from_user как fallback)
+    participant = session.participants.get(user_id)
+    user_name = participant.name if participant else msg.from_user.full_name or f"User {user_id}"
+    audit_log(
+        action="add_tasks",
+        user_id=user_id,
+        user_name=user_name,
+        chat_id=chat_id,
+        topic_id=topic_id,
+        extra={
+            "added_count": len(added),
+            "skipped_count": len(skipped),
+            "jql": jql,
+            "jira_keys": [task.jira_key for task in added if task.jira_key],
+        },
+    )
 
     response = [f"✅ Добавлено {len(added)} задач из Jira."]
     if skipped:
