@@ -57,7 +57,7 @@ class SessionState:
             "participants": {
                 str(user_id): {
                     "name": data["name"],
-                    "role": data["role"].value,
+                    "role": data["role"].value if hasattr(data["role"], "value") else data["role"],
                 }
                 for user_id, data in self.participants.items()
             },
