@@ -20,6 +20,7 @@ def get_main_menu() -> types.InlineKeyboardMarkup:
         inline_keyboard=[
             [
                 types.InlineKeyboardButton(text="🆕 Список задач", callback_data="menu:new_task"),
+                types.InlineKeyboardButton(text="▶️ Начать", callback_data="menu:start_voting"),
                 types.InlineKeyboardButton(text="📋 Итоги дня", callback_data="menu:summary"),
             ],
             [
@@ -46,4 +47,3 @@ def get_results_keyboard() -> types.InlineKeyboardMarkup:
             [types.InlineKeyboardButton(text="⬅️ Назад", callback_data="menu:main")],
         ]
     )
-

@@ -59,11 +59,10 @@ async def handle_text_input(msg: types.Message) -> None:
     await safe_call(msg.answer, "\n".join(response), reply_markup=get_back_keyboard())
 
     # Start voting if this is a new session
-    start_new_session = len(session.tasks_queue) == len(added) and session.current_task_index == 0
-    if start_new_session:
-        if TaskService.start_voting_session(session):
-            session_service.save_session(session)
-            await _start_voting_session(msg, session, session_service)
+    should_start = session.tasks_queue and not session.is_voting_active
+    if should_start and TaskService.start_voting_session(session):
+        session_service.save_session(session)
+        await _start_voting_session(msg, session, session_service)
 
 
 async def _start_voting_session(msg: types.Message, session, session_service) -> None:
@@ -91,4 +90,3 @@ async def _start_voting_session(msg: types.Message, session, session_service) ->
     )
     session.active_vote_message_id = sent.message_id if sent else None
     session_service.save_session(session)
-

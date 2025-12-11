@@ -112,6 +112,22 @@ class TestSession:
         session.current_task_index = 0
         assert session.current_task == task
 
+    def test_is_voting_active(self):
+        """Test voting active flag."""
+        session = Session(chat_id=123, topic_id=456)
+        assert session.is_voting_active is False
+
+        task = Task(summary="Test")
+        session.tasks_queue.append(task)
+        session.current_task_index = 0
+        assert session.is_voting_active is False
+
+        session.current_batch_started_at = "now"
+        assert session.is_voting_active is True
+
+        session.batch_completed = True
+        assert session.is_voting_active is False
+
     def test_can_vote(self):
         """Test can_vote method."""
         session = Session(chat_id=123, topic_id=456)
@@ -136,4 +152,3 @@ class TestSession:
         participant = Participant(user_id=2, name="User", role=UserRole.PARTICIPANT)
         session.participants[2] = participant
         assert session.can_manage(2) is False
-
