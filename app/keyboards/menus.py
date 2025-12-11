@@ -5,14 +5,23 @@ from aiogram import types
 FIBONACCI_VALUES = ["1", "2", "3", "5", "8", "13"]
 
 
-def build_vote_keyboard() -> types.InlineKeyboardMarkup:
-    """Build voting keyboard with Fibonacci values and skip button."""
+def build_vote_keyboard(can_manage: bool = False) -> types.InlineKeyboardMarkup:
+    """Build voting keyboard with Fibonacci values and skip button.
+    
+    Args:
+        can_manage: Whether to show "Need Review" button for leads/admins
+    """
     rows = [
         [types.InlineKeyboardButton(text=value, callback_data=f"vote:{value}") for value in FIBONACCI_VALUES[i : i + 3]]
         for i in range(0, len(FIBONACCI_VALUES), 3)
     ]
     # Добавляем кнопку "Пропустить" в отдельную строку
     rows.append([types.InlineKeyboardButton(text="⏭️ Пропустить", callback_data="vote:skip")])
+    
+    # Добавляем кнопку "Нужен пересмотр" для лидов/админов
+    if can_manage:
+        rows.append([types.InlineKeyboardButton(text="🔄 Нужен пересмотр", callback_data="vote:needs_review")])
+    
     return types.InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -70,6 +79,7 @@ def get_results_keyboard() -> types.InlineKeyboardMarkup:
     return types.InlineKeyboardMarkup(
         inline_keyboard=[
             [types.InlineKeyboardButton(text="🔄 Обновить SP в Jira", callback_data="update_jira_sp")],
+            [types.InlineKeyboardButton(text="🔄 Обновить (пропустить ошибки)", callback_data="update_jira_sp:skip_errors")],
             [types.InlineKeyboardButton(text="⬅️ Назад", callback_data="menu:main")],
         ]
     )

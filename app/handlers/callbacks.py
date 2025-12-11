@@ -8,6 +8,7 @@ from app.keyboards import get_back_keyboard, get_main_menu, get_results_keyboard
 from app.services.session_service import SessionService
 from app.services.task_service import TaskService
 from app.services.voting_service import VotingService
+from app.utils.audit import audit_log
 from app.utils.context import extract_context
 from app.utils.telegram import safe_call
 from config import STATE_FILE, UserRole, is_supported_thread
@@ -68,7 +69,7 @@ async def handle_menu(callback: types.CallbackQuery) -> None:
         await _show_day_summary(callback.message, session, session_service)
 
     elif action == "start_voting":
-        await _handle_start_voting(callback.message, session, session_service)
+        await _handle_start_voting(callback.message, session, session_service, user_id=user_id)
 
     elif action == "main":
         can_manage = session.can_manage(user_id)
@@ -196,6 +197,17 @@ async def handle_confirm_reset_queue(callback: types.CallbackQuery) -> None:
     task_count = len(session.tasks_queue)
     TaskService.reset_tasks_queue(session)
     session_service.save_session(session)
+    
+    # Логируем действие (используем participant.name или callback.from_user как fallback)
+    user_name = participant.name if participant else callback.from_user.full_name or f"User {user_id}"
+    audit_log(
+        action="reset_queue",
+        user_id=user_id,
+        user_name=user_name,
+        chat_id=chat_id,
+        topic_id=topic_id,
+        extra={"task_count": task_count, "was_voting_active": was_voting_active},
+    )
 
     # Уведомляем о прекращении голосования, если оно было активно
     if was_voting_active and active_vote_message_id:
@@ -222,7 +234,7 @@ async def handle_confirm_reset_queue(callback: types.CallbackQuery) -> None:
     )
     await callback.answer("✅ Очередь сброшена")
 
-async def _handle_start_voting(msg: types.Message, session, session_service) -> None:
+async def _handle_start_voting(msg: types.Message, session, session_service, user_id: int) -> None:
     """Manually start voting session."""
     if not session.tasks_queue:
         await safe_call(msg.answer, "❌ Нет задач для голосования.", reply_markup=get_back_keyboard())
@@ -238,7 +250,7 @@ async def _handle_start_voting(msg: types.Message, session, session_service) -> 
 
     if TaskService.start_voting_session(session):
         session_service.save_session(session)
-        await _start_next_task(msg, session, session_service)
+        await _start_next_task(msg, session, session_service, user_id=user_id)
 
 
 @router.callback_query(F.data.startswith("kick_user:"))
@@ -305,6 +317,86 @@ async def handle_vote(callback: types.CallbackQuery) -> None:
         return
 
     value = callback.data.split(":", maxsplit=1)[1]
+    
+    # Обработка "Нужен пересмотр" - только для лидов/админов
+    if value == "needs_review":
+        if not session.can_manage(user_id):
+            await _send_access_denied(callback, "❌ Только лидеры и администраторы могут запросить пересмотр.")
+            return
+        
+        if not session.current_task:
+            await callback.answer("❌ Нет активной задачи для пересмотра")
+            return
+        
+        # Сохраняем текущий индекс и задачу для проверки
+        current_index = session.current_task_index
+        task_to_review = session.current_task
+        was_single_task = len(session.tasks_queue) == 1
+        active_msg_id = session.active_vote_message_id  # Сохраняем для удаления
+        
+        # Возвращаем задачу в конец очереди
+        task = session.tasks_queue.pop(current_index)
+        task.votes.clear()  # Сбрасываем голоса
+        session.tasks_queue.append(task)
+        
+        # Если задача была единственной, после переноса она останется той же
+        # В этом случае завершаем батч
+        if was_single_task:
+            # Сбрасываем active_vote_message_id ПЕРЕД удалением сообщения
+            session.active_vote_message_id = None
+            
+            # Удаляем старое сообщение голосования
+            if active_msg_id:
+                try:
+                    await safe_call(
+                        callback.message.bot.delete_message,
+                        chat_id=chat_id,
+                        message_id=active_msg_id,
+                    )
+                except Exception:
+                    pass
+            
+            session_service.save_session(session)
+            await callback.answer("🔄 Задача возвращена в конец очереди. Завершаем батч.")
+            await _finish_batch(callback.message, session, session_service)
+            return
+        
+        # Обновляем индекс: если задача была последней, индекс корректируется
+        # После переноса текущая задача должна быть следующей (или предыдущей, если была последней)
+        if current_index >= len(session.tasks_queue):
+            session.current_task_index = len(session.tasks_queue) - 1
+        # Если индекс остался валидным, но указывает на ту же задачу (не должно быть),
+        # оставляем как есть - следующая проверка это обработает
+        
+        # Сбрасываем active_vote_message_id ПЕРЕД удалением сообщения
+        active_msg_id = session.active_vote_message_id
+        session.active_vote_message_id = None
+        
+        session_service.save_session(session)
+        await callback.answer("🔄 Задача возвращена в конец очереди для пересмотра")
+        
+        # Удаляем старое сообщение голосования
+        if active_msg_id:
+            try:
+                await safe_call(
+                    callback.message.bot.delete_message,
+                    chat_id=chat_id,
+                    message_id=active_msg_id,
+                )
+            except Exception:
+                # Игнорируем ошибки удаления
+                pass
+        
+        # Переходим к следующей задаче
+        # Проверяем, что текущая задача изменилась (не та же, что была перенесена)
+        if session.current_task and session.current_task != task_to_review:
+            await _start_next_task(callback.message, session, session_service, user_id=user_id)
+        else:
+            # Если по какой-то причине текущая задача та же, завершаем батч
+            await _finish_batch(callback.message, session, session_service)
+        return
+    
+    # Обычное голосование
     if session.current_task:
         session.current_task.votes[user_id] = value
     session_service.save_session(session)
@@ -313,14 +405,62 @@ async def handle_vote(callback: types.CallbackQuery) -> None:
         await callback.answer("⏭️ Голосование пропущено")
     else:
         await callback.answer("✅ Голос учтён!")
+    
+    # Обновляем сообщение с задачей, чтобы показать обновленные списки
+    if session.current_task and session.active_vote_message_id:
+        # Получаем списки проголосовавших и ожидающих
+        eligible_voters = [uid for uid in session.participants if session.can_vote(uid)]
+        voted_user_ids = set(session.current_task.votes.keys())
+        waiting_user_ids = [uid for uid in eligible_voters if uid not in voted_user_ids]
+        
+        voted_names = []
+        for uid in voted_user_ids:
+            participant = session.participants.get(uid)
+            if participant:
+                voted_names.append(participant.name)
+        
+        waiting_names = []
+        for uid in waiting_user_ids:
+            participant = session.participants.get(uid)
+            if participant:
+                waiting_names.append(participant.name)
+        
+        text_parts = [
+            f"📝 Оценка задачи {session.current_task_index + 1}/{len(session.tasks_queue)}:\n",
+            f"{session.current_task.text}\n",
+        ]
+        
+        if voted_names:
+            text_parts.append(f"✅ Проголосовали: {', '.join(voted_names)}")
+        
+        if waiting_names:
+            text_parts.append(f"⏳ Ждём: {', '.join(waiting_names)}")
+        
+        text_parts.append("\nВыберите вашу оценку:")
+        text = "\n".join(text_parts)
+        
+        can_manage = session.can_manage(user_id)
+        from app.keyboards import build_vote_keyboard
+        try:
+            await safe_call(
+                callback.message.bot.edit_message_text,
+                chat_id=chat_id,
+                message_id=session.active_vote_message_id,
+                text=text,
+                reply_markup=build_vote_keyboard(can_manage=can_manage),
+                disable_web_page_preview=True,
+            )
+        except Exception:
+            # Игнорируем ошибки редактирования (сообщение может быть удалено)
+            pass
 
     if VotingService.all_voters_voted(session):
         TaskService.move_to_next_task(session)
         session_service.save_session(session)
-        await _start_next_task(callback.message, session, session_service)
+        await _start_next_task(callback.message, session, session_service, user_id=user_id)
 
 
-@router.callback_query(F.data == "update_jira_sp")
+@router.callback_query(F.data.startswith("update_jira_sp"))
 async def handle_update_jira_sp(callback: types.CallbackQuery) -> None:
     """Handle update Jira story points callback."""
     chat_id, topic_id = extract_context(callback)
@@ -339,14 +479,24 @@ async def handle_update_jira_sp(callback: types.CallbackQuery) -> None:
         await _send_access_denied(callback, "❌ Нет результатов для обновления.")
         return
 
+    # Проверяем режим работы (обычный или с пропуском ошибок)
+    skip_errors = callback.data.endswith(":skip_errors")
+    
     from jira_service import jira_service
 
     updated = 0
+    failed = []
+    skipped = []
+    
     for task in session.last_batch:
         if not task.jira_key:
+            skipped.append(f"{task.jira_key or 'Без ключа'}: нет ключа Jira")
             continue
 
         if not task.votes:
+            if skip_errors:
+                skipped.append(f"{task.jira_key}: нет голосов")
+                continue
             await safe_call(
                 callback.message.answer,
                 f"❌ Нет голосов для задачи {task.jira_key}.",
@@ -356,6 +506,9 @@ async def handle_update_jira_sp(callback: types.CallbackQuery) -> None:
 
         story_points = VotingService.get_max_vote(task.votes)
         if story_points == 0:
+            if skip_errors:
+                skipped.append(f"{task.jira_key}: нет валидных голосов")
+                continue
             await safe_call(
                 callback.message.answer,
                 f"❌ Голоса для {task.jira_key} нельзя преобразовать в число.",
@@ -363,29 +516,82 @@ async def handle_update_jira_sp(callback: types.CallbackQuery) -> None:
             )
             continue
 
-        from jira_service import jira_service
         if await jira_service.update_story_points(task.jira_key, story_points):
             task.story_points = story_points
             updated += 1
-            await safe_call(
-                callback.message.answer,
-                f"✅ Обновлено SP для {task.jira_key}: {story_points} points",
-                reply_markup=get_back_keyboard(),
-            )
+            if not skip_errors:
+                await safe_call(
+                    callback.message.answer,
+                    f"✅ Обновлено SP для {task.jira_key}: {story_points} points",
+                    reply_markup=get_back_keyboard(),
+                )
         else:
-            await safe_call(
-                callback.message.answer,
-                f"❌ Не удалось обновить SP для {task.jira_key}",
-                reply_markup=get_back_keyboard(),
-            )
+            if skip_errors:
+                failed.append(task.jira_key)
+            else:
+                await safe_call(
+                    callback.message.answer,
+                    f"❌ Не удалось обновить SP для {task.jira_key}",
+                    reply_markup=get_back_keyboard(),
+                )
 
-    if updated:
+    # Сохраняем сессию только если были изменения
+    if updated > 0:
         session_service.save_session(session)
+    
+    # Логируем действие (даже если ничего не обновилось)
+    # Используем participant.name если есть, иначе callback.from_user.full_name как fallback
+    participant = session.participants.get(callback.from_user.id)
+    user_name = participant.name if participant else callback.from_user.full_name or f"User {callback.from_user.id}"
+    
+    jira_keys = [task.jira_key for task in session.last_batch if task.jira_key]
+    extra_data = {
+        "updated_count": updated,
+        "failed_count": len(failed),
+        "skipped_count": len(skipped),
+        "total_tasks": len(session.last_batch),
+        "jira_keys": jira_keys[:10],
+    }
+    
+    # Добавляем списки failed и skipped для диагностики (усечённые)
+    if failed:
+        extra_data["failed_keys"] = failed[:10]  # Первые 10 ключей с ошибками
+    if skipped:
+        extra_data["skipped_reasons"] = skipped[:10]  # Первые 10 причин пропуска
+    
+    audit_log(
+        action="update_jira_sp" + ("_skip_errors" if skip_errors else ""),
+        user_id=callback.from_user.id,
+        user_name=user_name,
+        chat_id=chat_id,
+        topic_id=topic_id,
+        extra=extra_data,
+    )
+    
+    # Формируем резюме
+    if skip_errors:
+        summary_parts = [f"📊 Резюме обновления Jira:"]
+        summary_parts.append(f"✅ Обновлено: {updated}")
+        if failed:
+            summary_parts.append(f"❌ Ошибки: {len(failed)} ({', '.join(failed[:5])}{'...' if len(failed) > 5 else ''})")
+        if skipped:
+            summary_parts.append(f"⏭️ Пропущено: {len(skipped)}")
+            if len(skipped) <= 5:
+                for skip_reason in skipped:
+                    summary_parts.append(f"  • {skip_reason}")
+        
         await safe_call(
             callback.message.answer,
-            f"🎉 Обновлено {updated} задач в Jira!",
+            "\n".join(summary_parts),
             reply_markup=get_back_keyboard(),
         )
+    else:
+        if updated:
+            await safe_call(
+                callback.message.answer,
+                f"🎉 Обновлено {updated} задач в Jira!",
+                reply_markup=get_back_keyboard(),
+            )
 
     await callback.answer()
 
@@ -426,24 +632,58 @@ async def _show_day_summary(msg: types.Message, session, session_service) -> Non
     output_path.unlink(missing_ok=True)
 
 
-async def _start_next_task(msg: types.Message, session, session_service) -> None:
+async def _start_next_task(msg: types.Message, session, session_service, user_id: Optional[int] = None) -> None:
     """Start voting for next task."""
     task = session.current_task
     if task is None:
         await _finish_batch(msg, session, session_service)
         return
 
-    text = (
-        f"📝 Оценка задачи {session.current_task_index + 1}/{len(session.tasks_queue)}:\n\n"
-        f"{task.text}\n\nВыберите вашу оценку:"
-    )
-
+    # Получаем списки проголосовавших и ожидающих
+    eligible_voters = [uid for uid in session.participants if session.can_vote(uid)]
+    voted_user_ids = set(task.votes.keys())
+    waiting_user_ids = [uid for uid in eligible_voters if uid not in voted_user_ids]
+    
+    # Формируем списки имен
+    voted_names = []
+    for uid in voted_user_ids:
+        participant = session.participants.get(uid)
+        if participant:
+            voted_names.append(participant.name)
+    
+    waiting_names = []
+    for uid in waiting_user_ids:
+        participant = session.participants.get(uid)
+        if participant:
+            waiting_names.append(participant.name)
+    
+    # Формируем текст задачи
+    text_parts = [
+        f"📝 Оценка задачи {session.current_task_index + 1}/{len(session.tasks_queue)}:\n",
+        f"{task.text}\n",
+    ]
+    
+    if voted_names:
+        text_parts.append(f"✅ Проголосовали: {', '.join(voted_names)}")
+    
+    if waiting_names:
+        text_parts.append(f"⏳ Ждём: {', '.join(waiting_names)}")
+    
+    if not voted_names and not waiting_names:
+        text_parts.append("\nВыберите вашу оценку:")
+    else:
+        text_parts.append("\nВыберите вашу оценку:")
+    
+    text = "\n".join(text_parts)
+    
+    # Определяем, показывать ли кнопку "Нужен пересмотр"
+    can_manage = user_id is not None and session.can_manage(user_id) if user_id else False
     from app.keyboards import build_vote_keyboard
 
     sent = await safe_call(
         msg.answer,
         text,
-        reply_markup=build_vote_keyboard(),
+        reply_markup=build_vote_keyboard(can_manage=can_manage),
         disable_web_page_preview=True,
     )
     session.active_vote_message_id = sent.message_id if sent else None
