@@ -23,11 +23,35 @@ class TestVotingService:
         votes = {1: "5", 2: "8", 3: "5", 4: "5"}
         assert VotingService.get_most_common_vote(votes) == 5
 
+    def test_get_most_common_vote_with_skip(self):
+        """Test getting most common vote ignoring skip votes."""
+        # Skip votes should be ignored
+        votes = {1: "3", 2: "skip", 3: "5", 4: "5", 5: "skip"}
+        assert VotingService.get_most_common_vote(votes) == 5
+
+    def test_get_most_common_vote_all_skip(self):
+        """Test getting most common vote when all votes are skip."""
+        votes = {1: "skip", 2: "skip", 3: "skip"}
+        assert VotingService.get_most_common_vote(votes) == 0
+
     def test_calculate_average_vote(self):
         """Test calculating average vote."""
         votes = {1: "5", 2: "8", 3: "3"}
         avg = VotingService.calculate_average_vote(votes)
         assert abs(avg - 5.33) < 0.1
+
+    def test_calculate_average_vote_with_skip(self):
+        """Test calculating average vote ignoring skip votes."""
+        votes = {1: "3", 2: "skip", 3: "5", 4: "8", 5: "skip"}
+        avg = VotingService.calculate_average_vote(votes)
+        # Should calculate average of 3, 5, 8 = 16/3 = 5.33
+        assert abs(avg - 5.33) < 0.1
+
+    def test_calculate_average_vote_all_skip(self):
+        """Test calculating average vote when all votes are skip."""
+        votes = {1: "skip", 2: "skip"}
+        avg = VotingService.calculate_average_vote(votes)
+        assert avg == 0.0
 
     def test_all_voters_voted(self):
         """Test checking if all voters voted."""
@@ -47,6 +71,27 @@ class TestVotingService:
         assert VotingService.all_voters_voted(session) is False
 
         task.votes[2] = "8"
+        assert VotingService.all_voters_voted(session) is True
+
+    def test_all_voters_voted_with_skip(self):
+        """Test checking if all voters voted including skip votes."""
+        session = Session(chat_id=123, topic_id=456)
+        task = Task(summary="Test")
+        session.tasks_queue.append(task)
+        session.current_task_index = 0
+
+        participant1 = Participant(user_id=1, name="User1", role=UserRole.PARTICIPANT)
+        participant2 = Participant(user_id=2, name="User2", role=UserRole.PARTICIPANT)
+        session.participants[1] = participant1
+        session.participants[2] = participant2
+
+        assert VotingService.all_voters_voted(session) is False
+
+        task.votes[1] = "5"
+        assert VotingService.all_voters_voted(session) is False
+
+        # Skip vote should count as voted
+        task.votes[2] = "skip"
         assert VotingService.all_voters_voted(session) is True
 
     def test_complete_task(self):
@@ -72,6 +117,36 @@ class TestVotingService:
         assert len(session.last_batch) == 2
         assert len(session.history) == 2
         assert session.batch_completed is True
+
+    def test_finish_batch_resets_current_batch_started_at(self):
+        """Test that finish_batch resets current_batch_started_at."""
+        session = Session(chat_id=123, topic_id=456)
+        task1 = Task(summary="Task 1")
+        session.tasks_queue = [task1]
+        session.current_batch_started_at = "2024-01-01T00:00:00"
+
+        VotingService.finish_batch(session)
+        assert session.current_batch_started_at is None
+
+    def test_get_max_vote(self):
+        """Test getting maximum vote value."""
+        votes = {1: "3", 2: "3", 3: "5", 4: "13"}
+        assert VotingService.get_max_vote(votes) == 13
+
+    def test_get_max_vote_with_skip(self):
+        """Test getting maximum vote value ignoring skip votes."""
+        votes = {1: "3", 2: "skip", 3: "5", 4: "13", 5: "skip"}
+        assert VotingService.get_max_vote(votes) == 13
+
+    def test_get_max_vote_all_skip(self):
+        """Test getting maximum vote value when all votes are skip."""
+        votes = {1: "skip", 2: "skip", 3: "skip"}
+        assert VotingService.get_max_vote(votes) == 0
+
+    def test_get_max_vote_empty(self):
+        """Test getting maximum vote value from empty votes."""
+        votes = {}
+        assert VotingService.get_max_vote(votes) == 0
 
 
 class TestTaskService:
