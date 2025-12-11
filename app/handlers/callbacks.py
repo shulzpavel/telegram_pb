@@ -69,7 +69,7 @@ async def handle_menu(callback: types.CallbackQuery) -> None:
         await _handle_start_voting(callback.message, session, session_service)
 
     elif action == "main":
-        await safe_call(callback.message.answer, "📌 Главное меню:", reply_markup=get_main_menu())
+        await safe_call(callback.message.answer, "📌 Главное меню:", reply_markup=get_main_menu(session))
 
     elif action == "show_participants":
         if not session.participants:
@@ -210,7 +210,10 @@ async def handle_vote(callback: types.CallbackQuery) -> None:
         session.current_task.votes[user_id] = value
     session_service.save_session(session)
 
-    await callback.answer("✅ Голос учтён!")
+    if value == "skip":
+        await callback.answer("⏭️ Голосование пропущено")
+    else:
+        await callback.answer("✅ Голос учтён!")
 
     if VotingService.all_voters_voted(session):
         TaskService.move_to_next_task(session)
@@ -252,7 +255,7 @@ async def handle_update_jira_sp(callback: types.CallbackQuery) -> None:
             )
             continue
 
-        story_points = VotingService.get_most_common_vote(task.votes)
+        story_points = VotingService.get_max_vote(task.votes)
         if story_points == 0:
             await safe_call(
                 callback.message.answer,
@@ -310,8 +313,11 @@ async def _show_day_summary(msg: types.Message, session, session_service) -> Non
             for user_id, vote in task.votes.items():
                 participant = session.participants.get(user_id)
                 name = participant.name if participant else f"ID {user_id}"
-                fh.write(f"  - {name}: {vote}\n")
-            max_vote = VotingService.get_most_common_vote(task.votes)
+                if vote == "skip":
+                    fh.write(f"  - {name}: ⏭️ Пропущено\n")
+                else:
+                    fh.write(f"  - {name}: {vote}\n")
+            max_vote = VotingService.get_max_vote(task.votes)
             total_sp += max_vote
             fh.write("\n")
         fh.write(f"Всего SP за день: {total_sp}\n")
@@ -373,7 +379,10 @@ async def _show_batch_results(msg: types.Message, session) -> None:
             for user_id, vote in task.votes.items():
                 participant = session.participants.get(user_id)
                 name = participant.name if participant else f"User {user_id}"
-                lines.append(f"   - {name}: {vote}")
+                if vote == "skip":
+                    lines.append(f"   - {name}: ⏭️ Пропущено")
+                else:
+                    lines.append(f"   - {name}: {vote}")
         lines.append("")
 
     await safe_call(msg.answer, "\n".join(lines), reply_markup=get_results_keyboard())

@@ -28,7 +28,7 @@ async def handle_text_input(msg: types.Message) -> None:
             msg.answer,
             "⚠️ Вы не авторизованы. Используйте <code>/join &lt;токен&gt;</code>.",
             parse_mode="HTML",
-            reply_markup=get_main_menu(),
+            reply_markup=get_main_menu(session),
         )
         return
 
@@ -44,14 +44,36 @@ async def handle_text_input(msg: types.Message) -> None:
         return
 
     jql = msg.text.strip()
-    added, skipped = await TaskService.add_tasks_from_jira(session, jql)
+    
+    # Показываем индикатор загрузки во время поиска в Jira
+    loading_msg = await safe_call(
+        msg.answer,
+        "⏳ Ожидайте, идет поиск задач в Jira...",
+        reply_markup=None,
+    )
+    
+    try:
+        # Выполняем поиск задач
+        added, skipped = await TaskService.add_tasks_from_jira(session, jql)
+    finally:
+        # Удаляем сообщение "ожидания" после завершения поиска (даже если была ошибка)
+        if loading_msg:
+            try:
+                await msg.bot.delete_message(chat_id=msg.chat.id, message_id=loading_msg.message_id)
+            except Exception:
+                # Игнорируем ошибки удаления (сообщение уже удалено или недоступно)
+                pass
 
     if not added:
         # Если все задачи уже есть в очереди — даём возможность сразу начать голосование
         if skipped:
             message = "⚠️ Все найденные задачи уже добавлены. Нажмите «Начать», чтобы запустить голосование."
+            # Логируем для диагностики
+            print(f"[Jira] INFO: Все задачи уже добавлены. JQL: {jql}, Skipped ({len(skipped)}): {', '.join(skipped[:10])}{'...' if len(skipped) > 10 else ''}")
             await safe_call(msg.answer, message, reply_markup=get_tasks_added_keyboard())
         else:
+            # Логируем ошибку поиска
+            print(f"[Jira] ERROR: Не удалось получить задачи. JQL: {jql}")
             await safe_call(msg.answer, "❌ Не удалось получить задачи из Jira. Проверь JQL и попробуй снова.", reply_markup=get_back_keyboard())
         return
 
