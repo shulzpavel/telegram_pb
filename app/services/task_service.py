@@ -73,9 +73,18 @@ class TaskService:
     @staticmethod
     def move_to_next_task(session: Session) -> Optional[Task]:
         """Move to next task in queue."""
-        session.current_task_index += 1
+        # Очищаем голоса текущей задачи перед переходом
         if session.current_task:
             session.current_task.votes.clear()
+        
+        # Переходим к следующей задаче
+        session.current_task_index += 1
+        
+        # Проверяем, что индекс не вышел за пределы
+        if session.current_task_index >= len(session.tasks_queue):
+            # Задач больше нет, возвращаем None
+            return None
+        
         return session.current_task
 
     @staticmethod

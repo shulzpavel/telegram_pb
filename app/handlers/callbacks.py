@@ -479,6 +479,9 @@ async def handle_update_jira_sp(callback: types.CallbackQuery) -> None:
         await _send_access_denied(callback, "❌ Нет результатов для обновления.")
         return
 
+    # Отвечаем на callback сразу, чтобы избежать ошибки "query is too old"
+    await callback.answer()
+
     # Проверяем режим работы (обычный или с пропуском ошибок)
     skip_errors = callback.data.endswith(":skip_errors")
     
@@ -593,8 +596,6 @@ async def handle_update_jira_sp(callback: types.CallbackQuery) -> None:
                 reply_markup=get_back_keyboard(),
             )
 
-    await callback.answer()
-
 
 async def _show_day_summary(msg: types.Message, session, session_service) -> None:
     """Show day summary."""
@@ -692,14 +693,23 @@ async def _start_next_task(msg: types.Message, session, session_service, user_id
 
 async def _finish_batch(msg: types.Message, session, session_service) -> None:
     """Finish current batch."""
-    if not session.tasks_queue:
-        await safe_call(msg.answer, "📭 Список задач пуст. Добавьте задачи и начните заново.")
+    # Защита от повторного вызова: если батч уже завершён, не обрабатываем повторно
+    if session.batch_completed:
         return
 
+    # Если очередь пуста и нет задач для завершения - это ошибка состояния
+    if not session.tasks_queue:
+        if not session.last_batch:
+            await safe_call(msg.answer, "📭 Список задач пуст. Добавьте задачи и начните заново.")
+        return
+
+    # Завершаем батч: перемещаем все задачи из очереди в last_batch и history
     completed_tasks = VotingService.finish_batch(session)
     session_service.save_session(session)
 
-    await _show_batch_results(msg, session)
+    # Показываем результаты только если есть завершённые задачи
+    if completed_tasks:
+        await _show_batch_results(msg, session)
 
 
 async def _show_batch_results(msg: types.Message, session) -> None:
@@ -707,21 +717,41 @@ async def _show_batch_results(msg: types.Message, session) -> None:
     if not session.last_batch:
         return
 
+    # Telegram limit: 4096 characters per message
+    MAX_MESSAGE_LENGTH = 4000  # Оставляем запас
+    
     lines = ["📊 Результаты голосования:\n"]
+    current_length = len(lines[0])
+    
     for index, task in enumerate(session.last_batch, start=1):
+        task_lines = []
         header = f"{index}. {task.text}"
         if task.jira_key:
             header += f" (Jira: {task.jira_key})"
-        lines.append(header)
+        task_lines.append(header)
 
         if task.votes:
             for user_id, vote in task.votes.items():
                 participant = session.participants.get(user_id)
                 name = participant.name if participant else f"User {user_id}"
                 if vote == "skip":
-                    lines.append(f"   - {name}: ⏭️ Пропущено")
+                    task_lines.append(f"   - {name}: ⏭️ Пропущено")
                 else:
-                    lines.append(f"   - {name}: {vote}")
-        lines.append("")
-
-    await safe_call(msg.answer, "\n".join(lines), reply_markup=get_results_keyboard())
+                    task_lines.append(f"   - {name}: {vote}")
+        task_lines.append("")
+        
+        # Проверяем, поместится ли следующая задача в текущее сообщение
+        task_text = "\n".join(task_lines)
+        if current_length + len(task_text) > MAX_MESSAGE_LENGTH and lines:
+            # Отправляем текущее сообщение
+            await safe_call(msg.answer, "\n".join(lines), reply_markup=None)
+            # Начинаем новое сообщение
+            lines = [f"📊 Результаты голосования (продолжение):\n"]
+            current_length = len(lines[0])
+        
+        lines.extend(task_lines)
+        current_length += len(task_text)
+    
+    # Отправляем последнее сообщение с клавиатурой
+    if lines:
+        await safe_call(msg.answer, "\n".join(lines), reply_markup=get_results_keyboard())

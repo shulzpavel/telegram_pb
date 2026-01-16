@@ -89,6 +89,10 @@ class VotingService:
     @staticmethod
     def finish_batch(session: Session) -> List[Task]:
         """Finish current batch and move tasks to history."""
+        # Защита от повторного вызова: если батч уже завершён, возвращаем пустой список
+        if session.batch_completed:
+            return []
+        
         completed_tasks = []
         finished_at = datetime.utcnow().isoformat()
 
@@ -96,6 +100,8 @@ class VotingService:
             task.completed_at = finished_at
             completed_tasks.append(task)
 
+        # Очищаем last_batch перед установкой новых задач, чтобы избежать дублирования
+        session.last_batch.clear()
         session.last_batch = completed_tasks.copy()
         session.history.extend(completed_tasks)
         session.tasks_queue.clear()

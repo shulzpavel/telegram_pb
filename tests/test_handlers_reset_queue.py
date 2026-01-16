@@ -104,3 +104,6 @@ class TestResetQueueAccess:
         assert session.current_task_index == 0
         assert session.current_batch_started_at is None
 
+
+
+
