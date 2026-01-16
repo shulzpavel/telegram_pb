@@ -52,7 +52,7 @@ async def handle_menu(callback: types.CallbackQuery) -> None:
     action = callback.data.split(":", maxsplit=1)[1]
     
     # Для некоторых действий не требуется права управления
-    if action not in ["main", "summary", "show_participants", "leave"]:
+    if action not in ["main", "summary", "show_participants", "leave", "last_batch"]:
         if not session.can_manage(user_id):
             await _send_access_denied(callback, "❌ Только лидеры и администраторы могут управлять сессией.")
             return
@@ -127,6 +127,16 @@ async def handle_menu(callback: types.CallbackQuery) -> None:
 
     elif action == "reset_queue":
         await _handle_reset_queue(callback.message, session, session_service, user_id)
+
+    elif action == "last_batch":
+        if not session.last_batch:
+            await safe_call(
+                callback.message.answer,
+                "📭 Нет результатов последнего батча.",
+                reply_markup=get_back_keyboard(),
+            )
+        else:
+            await _show_batch_results(callback.message, session)
 
     await callback.answer()
 
