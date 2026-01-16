@@ -28,8 +28,7 @@ async def handle_text_input(msg: types.Message) -> None:
         can_manage = False
         await safe_call(
             msg.answer,
-            "⚠️ Вы не авторизованы. Используйте <code>/join &lt;токен&gt;</code>.",
-            parse_mode="HTML",
+            "⚠️ Вы не авторизованы. Используйте /join <token>",
             reply_markup=get_main_menu(session, can_manage),
         )
         return
