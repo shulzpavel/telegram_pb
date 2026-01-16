@@ -48,6 +48,10 @@ def get_main_menu(session=None, can_manage: bool = False) -> types.InlineKeyboar
     if session and session.tasks_queue and not session.is_voting_active:
         rows.insert(1, [types.InlineKeyboardButton(text="▶️ Начать", callback_data="menu:start_voting")])
     
+    # Показываем кнопку "Результаты последнего батча" если есть результаты
+    if session and session.last_batch:
+        rows.insert(1, [types.InlineKeyboardButton(text="📊 Результаты последнего батча", callback_data="menu:last_batch")])
+    
     # Показываем кнопку "Сбросить очередь" для лидов/админов, если есть задачи
     if can_manage and session and session.tasks_queue:
         rows.append([types.InlineKeyboardButton(text="🗑️ Сбросить очередь", callback_data="menu:reset_queue")])

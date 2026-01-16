@@ -64,6 +64,7 @@ async def cmd_start_help(msg: types.Message) -> None:
         "— 🆕 Добавление задач из Jira по JQL\n"
         "— 📋 Итоги текущего банча\n"
         "— 📊 Итоги дня\n"
+        "— 📊 Результаты последнего батча (/results)\n"
         "— 👥 Просмотр участников\n"
         "— 🚪 Покинуть сессию\n"
         "— 🗑️ Удалить участника (лидеры и админы)\n\n"
@@ -124,4 +125,31 @@ async def cmd_join(msg: types.Message) -> None:
     can_manage = session.can_manage(user_id)
     await safe_call(msg.answer, f"✅ {msg.from_user.full_name} присоединился как {_format_role_label(role)}.")
     await safe_call(msg.answer, "📌 Главное меню:", reply_markup=get_main_menu(session, can_manage))
+
+
+@router.message(Command("results", "last_batch"))
+async def cmd_results(msg: types.Message) -> None:
+    """Handle /results and /last_batch commands to show last batch results."""
+    chat_id, topic_id = extract_context(msg)
+    if not is_supported_thread(chat_id, topic_id):
+        return
+
+    from config import STATE_FILE
+    from app.services.session_service import SessionService
+    from app.handlers.callbacks import _show_batch_results
+    
+    session_service = SessionService(STATE_FILE)
+    session = session_service.get_session(chat_id, topic_id)
+    
+    user_id = msg.from_user.id
+    if user_id not in session.participants:
+        await safe_call(msg.answer, "❌ Вы не зарегистрированы через /join.")
+        return
+    
+    if not session.last_batch:
+        await safe_call(msg.answer, "📭 Нет результатов последнего батча.")
+        return
+    
+    # Показываем результаты последнего батча
+    await _show_batch_results(msg, session)
 
