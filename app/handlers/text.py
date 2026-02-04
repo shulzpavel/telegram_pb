@@ -42,6 +42,7 @@ async def handle_text_input(msg: types.Message) -> None:
             msg.answer,
             "❌ Только лидеры и администраторы могут добавлять задачи.",
             reply_markup=get_back_keyboard(),
+            parse_mode=None,
         )
         return
 
@@ -75,11 +76,16 @@ async def handle_text_input(msg: types.Message) -> None:
             message = "⚠️ Все найденные задачи уже добавлены. Нажмите «Начать», чтобы запустить голосование."
             # Логируем для диагностики
             print(f"[Jira] INFO: Все задачи уже добавлены. JQL: {jql}, Skipped ({len(skipped)}): {', '.join(skipped[:10])}{'...' if len(skipped) > 10 else ''}")
-            await safe_call(msg.answer, message, reply_markup=get_tasks_added_keyboard())
+            await safe_call(msg.answer, message, reply_markup=get_tasks_added_keyboard(), parse_mode=None)
         else:
             # Логируем ошибку поиска
             print(f"[Jira] ERROR: Не удалось получить задачи. JQL: {jql}")
-            await safe_call(msg.answer, "❌ Не удалось получить задачи из Jira. Проверь JQL и попробуй снова.", reply_markup=get_back_keyboard())
+            await safe_call(
+                msg.answer,
+                "❌ Не удалось получить задачи из Jira. Проверь JQL и попробуй снова.",
+                reply_markup=get_back_keyboard(),
+                parse_mode=None,
+            )
         return
 
     session_service.save_session(session)
@@ -105,7 +111,7 @@ async def handle_text_input(msg: types.Message) -> None:
     if skipped:
         response.append("⚠️ Пропущены уже добавленные: " + ", ".join(skipped))
     # Показываем клавиатуру с кнопками "Назад" и "Начать" после добавления задач
-    await safe_call(msg.answer, "\n".join(response), reply_markup=get_tasks_added_keyboard())
+    await safe_call(msg.answer, "\n".join(response), reply_markup=get_tasks_added_keyboard(), parse_mode=None)
 
 
 async def _start_voting_session(msg: types.Message, session, session_service) -> None:
