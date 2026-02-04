@@ -14,9 +14,9 @@ from config import STATE_FILE, is_supported_thread
 router = Router()
 
 
-# Обрабатываем только текстовые сообщения, которые не являются командами,
-# чтобы исключить двойные ответы на /start, /join и прочие команды.
-@router.message(F.text, ~Command())
+# Обрабатываем только текстовые сообщения, которые не являются командами
+# (не начинаются с "/"), чтобы исключить двойные ответы на /start, /join и прочие команды.
+@router.message(F.text, ~F.text.startswith("/"))
 async def handle_text_input(msg: types.Message) -> None:
     """Handle text input (JQL queries)."""
     chat_id, topic_id = extract_context(msg)
