@@ -1,6 +1,7 @@
 """Text message handlers."""
 
-from aiogram import Router, types
+from aiogram import F, Router, types
+from aiogram.filters import Command
 
 from app.keyboards import get_back_keyboard, get_main_menu, get_tasks_added_keyboard
 from app.services.session_service import SessionService
@@ -13,7 +14,9 @@ from config import STATE_FILE, is_supported_thread
 router = Router()
 
 
-@router.message()
+# Обрабатываем только текстовые сообщения, которые не являются командами,
+# чтобы исключить двойные ответы на /start, /join и прочие команды.
+@router.message(F.text, ~Command())
 async def handle_text_input(msg: types.Message) -> None:
     """Handle text input (JQL queries)."""
     chat_id, topic_id = extract_context(msg)
@@ -28,7 +31,8 @@ async def handle_text_input(msg: types.Message) -> None:
         can_manage = False
         await safe_call(
             msg.answer,
-            "⚠️ Вы не авторизованы. Используйте /join <token>",
+            "⚠️ Вы не авторизованы. Используйте команду /join с токеном от администратора.",
+            parse_mode=None,
             reply_markup=get_main_menu(session, can_manage),
         )
         return

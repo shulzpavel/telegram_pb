@@ -148,6 +148,36 @@ class TestVotingService:
         votes = {}
         assert VotingService.get_max_vote(votes) == 0
 
+    def test_votes_preserved_until_finish_batch(self):
+        """Votes should remain on tasks when moving between tasks and through finish_batch."""
+        session = Session(chat_id=123, topic_id=456)
+        # Participants who can vote
+        session.participants[1] = Participant(user_id=1, name="Lead", role=UserRole.LEAD)
+        session.participants[2] = Participant(user_id=2, name="User", role=UserRole.PARTICIPANT)
+
+        task1 = Task(jira_key="TEST-1", summary="Task 1")
+        task2 = Task(jira_key="TEST-2", summary="Task 2")
+        session.tasks_queue = [task1, task2]
+        session.current_task_index = 0
+
+        # Votes for first task
+        task1.votes = {1: "3", 2: "5"}
+        # Simulate move to next task (should NOT wipe votes of task1)
+        next_task = TaskService.move_to_next_task(session)
+        assert next_task == task2
+        assert task1.votes == {1: "3", 2: "5"}
+
+        # Add votes for second task
+        task2.votes = {1: "8"}
+
+        # Finish batch and ensure votes are still present in last_batch/history
+        completed = VotingService.finish_batch(session)
+        assert len(completed) == 2
+        assert completed[0].votes == {1: "3", 2: "5"}
+        assert completed[1].votes == {1: "8"}
+        assert session.last_batch[0].votes == {1: "3", 2: "5"}
+        assert session.history[1].votes == {1: "8"}
+
 
 class TestTaskService:
     """Tests for TaskService."""
