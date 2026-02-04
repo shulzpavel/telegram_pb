@@ -71,12 +71,16 @@ async def handle_text_input(msg: types.Message) -> None:
                 pass
 
     if not added:
-        # Если все задачи уже есть в очереди — даём возможность сразу начать голосование
+        # Если все найденные задачи уже есть
         if skipped:
-            message = "⚠️ Все найденные задачи уже добавлены. Нажмите «Начать», чтобы запустить голосование."
-            # Логируем для диагностики
             print(f"[Jira] INFO: Все задачи уже добавлены. JQL: {jql}, Skipped ({len(skipped)}): {', '.join(skipped[:10])}{'...' if len(skipped) > 10 else ''}")
-            await safe_call(msg.answer, message, reply_markup=get_tasks_added_keyboard(), parse_mode=None)
+            if session.tasks_queue:
+                message = "⚠️ Все найденные задачи уже добавлены. Нажмите «Начать», чтобы запустить голосование."
+                keyboard = get_tasks_added_keyboard()
+            else:
+                message = "⚠️ Все найденные задачи уже были добавлены ранее, а очередь сейчас пуста. Добавьте новые задачи."
+                keyboard = get_back_keyboard()
+            await safe_call(msg.answer, message, reply_markup=keyboard, parse_mode=None)
         else:
             # Логируем ошибку поиска
             print(f"[Jira] ERROR: Не удалось получить задачи. JQL: {jql}")
