@@ -635,6 +635,7 @@ async def _show_day_summary(msg: types.Message, session, session_service) -> Non
                     fh.write(f"  - {name}: {vote}\n")
             max_vote = VotingService.get_max_vote(task.votes)
             total_sp += max_vote
+            fh.write(f"Итог SP: {max_vote}\n")
             fh.write("\n")
         fh.write(f"Всего SP за день: {total_sp}\n")
 
@@ -748,6 +749,9 @@ async def _show_batch_results(msg: types.Message, session) -> None:
                     task_lines.append(f"   - {name}: ⏭️ Пропущено")
                 else:
                     task_lines.append(f"   - {name}: {vote}")
+        # Итоговое SP — максимум голосов (skip не учитывается)
+        sp = VotingService.get_max_vote(task.votes)
+        task_lines.append(f"   Итог SP: {sp}")
         task_lines.append("")
         
         # Проверяем, поместится ли следующая задача в текущее сообщение
