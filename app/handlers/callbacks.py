@@ -46,7 +46,7 @@ async def handle_menu(callback: types.CallbackQuery) -> None:
     user_id = callback.from_user.id
     participant = session.participants.get(user_id)
     if not participant:
-        await _send_access_denied(callback, "⚠️ Вы не авторизованы. Используйте /join <токен>.")
+        await _send_access_denied(callback, "⚠️ Вы не авторизованы. Используйте /join токен.")
         return
 
     action = callback.data.split(":", maxsplit=1)[1]
@@ -681,21 +681,35 @@ async def _start_next_task(msg: types.Message, session, session_service, user_id
     if waiting_names:
         text_parts.append(f"⏳ Ждём: {', '.join(waiting_names)}")
     
-    if not voted_names and not waiting_names:
-        text_parts.append("\nВыберите вашу оценку:")
-    else:
-        text_parts.append("\nВыберите вашу оценку:")
-    
+    text_parts.append("\nВыберите вашу оценку:")
     text = "\n".join(text_parts)
     
     # Определяем, показывать ли кнопку "Нужен пересмотр"
     can_manage = user_id is not None and session.can_manage(user_id) if user_id else False
     from app.keyboards import build_vote_keyboard
+    markup = build_vote_keyboard(can_manage=can_manage)
 
+    # Если уже есть активное сообщение, пробуем его отредактировать, чтобы избежать дублей
+    if session.active_vote_message_id:
+        try:
+            edited = await safe_call(
+                msg.bot.edit_message_text,
+                chat_id=msg.chat.id,
+                message_id=session.active_vote_message_id,
+                text=text,
+                reply_markup=markup,
+                disable_web_page_preview=True,
+            )
+            if edited:
+                return
+        except Exception:
+            # Если редактирование не удалось (удалено/нет прав/старое сообщение), отправим новое ниже
+            session.active_vote_message_id = None
+    
     sent = await safe_call(
         msg.answer,
         text,
-        reply_markup=build_vote_keyboard(can_manage=can_manage),
+        reply_markup=markup,
         disable_web_page_preview=True,
     )
     session.active_vote_message_id = sent.message_id if sent else None
