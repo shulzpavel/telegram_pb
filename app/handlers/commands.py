@@ -94,18 +94,18 @@ async def cmd_join(msg: types.Message) -> None:
     session = session_service.get_session(chat_id, topic_id)
 
     if not msg.text:
-        await safe_call(msg.answer, "❌ Использование: /join <токен>")
+        await safe_call(msg.answer, "❌ Использование: /join токен", parse_mode=None)
         return
 
     args = msg.text.split()
     if len(args) != 2:
-        await safe_call(msg.answer, "❌ Использование: /join <токен>")
+        await safe_call(msg.answer, "❌ Использование: /join токен", parse_mode=None)
         return
 
     token = args[1]
     role = _resolve_role_by_token(token)
     if role is None:
-        await safe_call(msg.answer, "❌ Неверный токен.")
+        await safe_call(msg.answer, "❌ Неверный токен.", parse_mode=None)
         return
 
     from app.models.participant import Participant
@@ -152,4 +152,3 @@ async def cmd_results(msg: types.Message) -> None:
     
     # Показываем результаты последнего батча
     await _show_batch_results(msg, session)
-
