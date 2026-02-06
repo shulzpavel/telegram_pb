@@ -14,9 +14,9 @@ class FinishBatchUseCase:
     def __init__(self, session_repo: SessionRepository):
         self.session_repo = session_repo
 
-    def execute(self, chat_id: int, topic_id: Optional[int]) -> List[Task]:
+    async def execute(self, chat_id: int, topic_id: Optional[int]) -> List[Task]:
         """Finish current batch and move tasks to history."""
-        session = self.session_repo.get_session(chat_id, topic_id)
+        session = await self.session_repo.get_session(chat_id, topic_id)
         
         # Protection against double call
         if session.batch_completed:
@@ -38,5 +38,5 @@ class FinishBatchUseCase:
         session.active_vote_message_id = None
         session.current_batch_started_at = None
 
-        self.session_repo.save_session(session)
+        await self.session_repo.save_session(session)
         return completed_tasks

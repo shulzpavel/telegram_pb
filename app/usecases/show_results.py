@@ -69,13 +69,13 @@ class ShowResultsUseCase:
         self.session_repo = session_repo
         self.policy = VotingPolicy()
 
-    def get_batch_results(self, chat_id: int, topic_id: Optional[int]) -> Optional[List[Task]]:
+    async def get_batch_results(self, chat_id: int, topic_id: Optional[int]) -> Optional[List[Task]]:
         """Get last batch results."""
-        session = self.session_repo.get_session(chat_id, topic_id)
+        session = await self.session_repo.get_session(chat_id, topic_id)
         return session.last_batch if session.last_batch else None
 
-    def get_day_summary(self, chat_id: int, topic_id: Optional[int]) -> Tuple[List[Task], int]:
+    async def get_day_summary(self, chat_id: int, topic_id: Optional[int]) -> Tuple[List[Task], int]:
         """Get day summary with total story points."""
-        session = self.session_repo.get_session(chat_id, topic_id)
+        session = await self.session_repo.get_session(chat_id, topic_id)
         total_sp = sum(self.policy.get_max_vote(task.votes) for task in session.history)
         return session.history, total_sp

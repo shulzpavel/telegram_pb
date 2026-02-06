@@ -1,5 +1,6 @@
 """Text message handlers."""
 
+import asyncio
 from aiogram import F, Router, types
 from aiogram.filters import Command
 
@@ -20,7 +21,7 @@ async def handle_text_input(msg: types.Message, container: DIContainer) -> None:
     if not is_supported_thread(chat_id, topic_id):
         return
 
-    session = container.session_repo.get_session(chat_id, topic_id)
+    session = await container.session_repo.get_session(chat_id, topic_id)
 
     user_id = msg.from_user.id
     if user_id not in session.participants:
@@ -49,7 +50,7 @@ async def handle_text_input(msg: types.Message, container: DIContainer) -> None:
 
     # Антидубль: если уже идёт поиск, отвечаем и выходим
     busy_key = (chat_id, topic_id, "jql")
-    lock = container._busy_locks.setdefault(busy_key, asyncio.Lock())
+    lock = await container.acquire_busy(busy_key)
     if lock.locked():
         await container.notifier.send_message(
             chat_id=chat_id,
@@ -78,13 +79,14 @@ async def handle_text_input(msg: types.Message, container: DIContainer) -> None:
         added, skipped = await container.add_tasks.execute(chat_id, topic_id, jql)
     finally:
         lock.release()
+        container.release_busy(busy_key)
 
     if not added:
         if skipped:
             print(
                 f"[Jira] INFO: Все задачи уже добавлены. JQL: {jql}, Skipped ({len(skipped)}): {', '.join(skipped[:10])}{'...' if len(skipped) > 10 else ''}"
             )
-            session = container.session_repo.get_session(chat_id, topic_id)  # Refresh
+            session = await container.session_repo.get_session(chat_id, topic_id)  # Refresh
             if session.tasks_queue:
                 message = "⚠️ Все найденные задачи уже добавлены. Нажмите «Начать», чтобы запустить голосование."
                 keyboard = get_tasks_added_keyboard()
@@ -126,7 +128,7 @@ async def handle_text_input(msg: types.Message, container: DIContainer) -> None:
                 )
         return
 
-    session = container.session_repo.get_session(chat_id, topic_id)  # Refresh after adding
+    session = await container.session_repo.get_session(chat_id, topic_id)  # Refresh after adding
     participant = session.participants.get(user_id)
     user_name = participant.name if participant else msg.from_user.full_name or f"User {user_id}"
     audit_log(

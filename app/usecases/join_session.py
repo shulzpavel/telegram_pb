@@ -14,7 +14,7 @@ class JoinSessionUseCase:
     def __init__(self, session_repo: SessionRepository):
         self.session_repo = session_repo
 
-    def execute(
+    async def execute(
         self,
         chat_id: int,
         topic_id: Optional[int],
@@ -23,7 +23,7 @@ class JoinSessionUseCase:
         role: UserRole,
     ) -> Session:
         """Join user to session with given role."""
-        session = self.session_repo.get_session(chat_id, topic_id)
+        session = await self.session_repo.get_session(chat_id, topic_id)
         
         session.participants[user_id] = Participant(
             user_id=user_id,
@@ -35,5 +35,5 @@ class JoinSessionUseCase:
         if role == UserRole.ADMIN and session.current_task:
             session.current_task.votes.pop(user_id, None)
         
-        self.session_repo.save_session(session)
+        await self.session_repo.save_session(session)
         return session

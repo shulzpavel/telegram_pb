@@ -43,7 +43,7 @@ async def cmd_start_help(msg: types.Message, container: DIContainer) -> None:
     if not is_supported_thread(chat_id, topic_id):
         return
 
-    session = container.session_repo.get_session(chat_id, topic_id)
+    session = await container.session_repo.get_session(chat_id, topic_id)
     user_id = msg.from_user.id
     participant = session.participants.get(user_id)
 
@@ -101,7 +101,7 @@ async def cmd_join(msg: types.Message, container: DIContainer) -> None:
         return
 
     user_id = msg.from_user.id
-    session = container.join_session.execute(
+    session = await container.join_session.execute(
         chat_id=chat_id,
         topic_id=topic_id,
         user_id=user_id,
@@ -124,14 +124,14 @@ async def cmd_results(msg: types.Message, container: DIContainer) -> None:
     if not is_supported_thread(chat_id, topic_id):
         return
 
-    session = container.session_repo.get_session(chat_id, topic_id)
+    session = await container.session_repo.get_session(chat_id, topic_id)
 
     user_id = msg.from_user.id
     if user_id not in session.participants:
         await safe_call(msg.answer, "❌ Вы не зарегистрированы через /join.")
         return
 
-    batch_results = container.show_results.get_batch_results(chat_id, topic_id)
+    batch_results = await container.show_results.get_batch_results(chat_id, topic_id)
     if not batch_results:
         await safe_call(msg.answer, "📭 Нет результатов последнего батча.")
         return
