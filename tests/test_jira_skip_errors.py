@@ -3,10 +3,10 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from app.models.participant import Participant
-from app.models.session import Session
-from app.models.task import Task
-from app.services.voting_service import VotingService
+from app.domain.participant import Participant
+from app.domain.session import Session
+from app.domain.task import Task
+from app.usecases.show_results import VotingPolicy
 from config import UserRole
 
 
@@ -50,7 +50,7 @@ class TestJiraSkipErrors:
                 skipped.append(f"{task.jira_key}: нет голосов")
                 continue
             
-            story_points = VotingService.get_max_vote(task.votes)
+            story_points = VotingPolicy.get_max_vote(task.votes)
             if story_points == 0:
                 skipped.append(f"{task.jira_key}: нет валидных голосов")
                 continue
@@ -127,7 +127,7 @@ class TestJiraSkipErrors:
                 skipped.append(f"{task.jira_key}: нет голосов")
                 continue
             
-            story_points = VotingService.get_max_vote(task.votes)
+            story_points = VotingPolicy.get_max_vote(task.votes)
             if story_points == 0:
                 skipped.append(f"{task.jira_key}: нет валидных голосов")
                 continue
@@ -188,7 +188,7 @@ class TestJiraSkipErrors:
                 skipped.append(f"{task.jira_key}: нет голосов")
                 continue
             
-            story_points = VotingService.get_max_vote(task.votes)
+            story_points = VotingPolicy.get_max_vote(task.votes)
             if story_points == 0:
                 skipped.append(f"{task.jira_key}: нет валидных голосов")
                 continue

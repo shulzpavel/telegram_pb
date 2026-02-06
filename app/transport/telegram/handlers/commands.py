@@ -2,20 +2,16 @@
 
 from typing import Optional
 
-from aiogram import F, Router, types
+from aiogram import Router, types
 from aiogram.filters import Command
 
 from app.keyboards import get_back_keyboard, get_main_menu
+from app.providers import DIContainer
 from app.utils.context import extract_context
 from app.utils.telegram import safe_call
 from config import ADMIN_TOKEN, LEAD_TOKEN, USER_TOKEN, UserRole, is_supported_thread
 
 router = Router()
-PROMPT_JQL = (
-    "✏️ Отправь JQL запрос из Jira (например: \n"
-    "• key = FLEX-365\n"
-    "• project = FLEX ORDER BY created DESC)"
-)
 
 ROLE_TITLES = {
     UserRole.ADMIN: "Администратор",
@@ -41,16 +37,13 @@ def _format_role_label(role: UserRole) -> str:
 
 
 @router.message(Command("start", "help"))
-async def cmd_start_help(msg: types.Message) -> None:
+async def cmd_start_help(msg: types.Message, container: DIContainer) -> None:
     """Handle /start and /help commands."""
     chat_id, topic_id = extract_context(msg)
     if not is_supported_thread(chat_id, topic_id):
         return
 
-    from config import STATE_FILE
-    from app.services.session_service import SessionService
-    session_service = SessionService(STATE_FILE)
-    session = session_service.get_session(chat_id, topic_id)
+    session = container.session_repo.get_session(chat_id, topic_id)
     user_id = msg.from_user.id
     participant = session.participants.get(user_id)
 
@@ -76,22 +69,21 @@ async def cmd_start_help(msg: types.Message) -> None:
 
     can_manage = participant and session.can_manage(user_id) if participant else False
     if participant:
-        await safe_call(msg.answer, f"👋 Добро пожаловать! Ваша роль: {_format_role_label(participant.role)}", reply_markup=get_main_menu(session, can_manage))
+        await safe_call(
+            msg.answer,
+            f"👋 Добро пожаловать! Ваша роль: {_format_role_label(participant.role)}",
+            reply_markup=get_main_menu(session, can_manage),
+        )
     else:
         await safe_call(msg.answer, text, parse_mode="Markdown", reply_markup=get_main_menu(session, can_manage))
 
 
 @router.message(Command("join"))
-async def cmd_join(msg: types.Message) -> None:
+async def cmd_join(msg: types.Message, container: DIContainer) -> None:
     """Handle /join command."""
     chat_id, topic_id = extract_context(msg)
     if not is_supported_thread(chat_id, topic_id):
         return
-
-    from config import STATE_FILE
-    from app.services.session_service import SessionService
-    session_service = SessionService(STATE_FILE)
-    session = session_service.get_session(chat_id, topic_id)
 
     if not msg.text:
         await safe_call(msg.answer, "❌ Использование: /join токен", parse_mode=None)
@@ -108,47 +100,43 @@ async def cmd_join(msg: types.Message) -> None:
         await safe_call(msg.answer, "❌ Неверный токен.", parse_mode=None)
         return
 
-    from app.models.participant import Participant
-
     user_id = msg.from_user.id
-    session.participants[user_id] = Participant(
+    session = container.join_session.execute(
+        chat_id=chat_id,
+        topic_id=topic_id,
         user_id=user_id,
-        name=msg.from_user.full_name,
+        user_name=msg.from_user.full_name or f"User {user_id}",
         role=role,
     )
 
-    # Drop votes if admin
-    if role == UserRole.ADMIN and session.current_task:
-        session.current_task.votes.pop(user_id, None)
-
-    session_service.save_session(session)
     can_manage = session.can_manage(user_id)
-    await safe_call(msg.answer, f"✅ {msg.from_user.full_name} присоединился как {_format_role_label(role)}.")
+    await safe_call(
+        msg.answer,
+        f"✅ {msg.from_user.full_name} присоединился как {_format_role_label(role)}.",
+    )
     await safe_call(msg.answer, "📌 Главное меню:", reply_markup=get_main_menu(session, can_manage))
 
 
 @router.message(Command("results", "last_batch"))
-async def cmd_results(msg: types.Message) -> None:
+async def cmd_results(msg: types.Message, container: DIContainer) -> None:
     """Handle /results and /last_batch commands to show last batch results."""
     chat_id, topic_id = extract_context(msg)
     if not is_supported_thread(chat_id, topic_id):
         return
 
-    from config import STATE_FILE
-    from app.services.session_service import SessionService
-    from app.handlers.callbacks import _show_batch_results
-    
-    session_service = SessionService(STATE_FILE)
-    session = session_service.get_session(chat_id, topic_id)
-    
+    session = container.session_repo.get_session(chat_id, topic_id)
+
     user_id = msg.from_user.id
     if user_id not in session.participants:
         await safe_call(msg.answer, "❌ Вы не зарегистрированы через /join.")
         return
-    
-    if not session.last_batch:
+
+    batch_results = container.show_results.get_batch_results(chat_id, topic_id)
+    if not batch_results:
         await safe_call(msg.answer, "📭 Нет результатов последнего батча.")
         return
-    
-    # Показываем результаты последнего батча
-    await _show_batch_results(msg, session)
+
+    # Import here to avoid circular dependency
+    from app.transport.telegram.handlers.callbacks import _show_batch_results
+
+    await _show_batch_results(msg, session, container)

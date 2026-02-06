@@ -3,11 +3,12 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from app.models.participant import Participant
-from app.models.session import Session
-from app.models.task import Task
-from app.services.task_service import TaskService
-from app.services.voting_service import VotingService
+from app.domain.participant import Participant
+from app.domain.session import Session
+from app.domain.task import Task
+from app.adapters.session_file import FileSessionRepository
+from app.usecases.finish_batch import FinishBatchUseCase
+from app.usecases.show_results import VotingPolicy
 from config import UserRole
 
 
@@ -48,7 +49,17 @@ class TestE2EHandlers:
         # Если была единственной, должна завершиться батч
         if was_single_task:
             # Симулируем завершение батча
-            completed_tasks = VotingService.finish_batch(session)
+            from pathlib import Path
+            temp_file = Path("/tmp/test_e2e_state.json")
+            if temp_file.exists():
+                temp_file.unlink()
+            repo = FileSessionRepository(temp_file)
+            repo.save_session(session)
+            finish_batch = FinishBatchUseCase(repo)
+            completed_tasks = finish_batch.execute(123, 456)
+            session = repo.get_session(123, 456)
+            if temp_file.exists():
+                temp_file.unlink()
             assert len(completed_tasks) == 1
             assert session.active_vote_message_id is None  # Должен сброситься
             assert session.batch_completed is True

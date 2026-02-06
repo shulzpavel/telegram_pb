@@ -47,3 +47,6 @@ def audit_log(
     
     print(log_line)
 
+    # также пишем в stdout структурированный JSON для последующего парсинга логами / Grafana Loki
+    structured = dict(log_entry)
+    print(json.dumps({"audit": structured}, ensure_ascii=False))

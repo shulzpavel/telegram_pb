@@ -1,7 +1,12 @@
-# Environment variables
+# Environment variables and secrets
 .env
 .env.local
 .env.production
+*.env
+*_token.txt
+*_secret.txt
+secrets/
+tokens/
 
 # Python
 __pycache__/
@@ -50,10 +55,21 @@ bot_debug.log
 # Runtime data
 data/
 .pytest_cache/
+*.json
+!package.json
+!package-lock.json
+test_*.json
+*_test.json
+*_state.json
 
 # Temporary files
 *.tmp
 *.temp
+/tmp/
+temp/
+*.test
+test_output/
+test_results/
 
 # Documentation files (keep only README.md and DEPLOY.md)
 *.md

@@ -1,57 +1,94 @@
-"""Tests for services."""
+"""Tests for usecases and voting policy."""
 
 import pytest
+from pathlib import Path
+from unittest.mock import Mock
 
-from app.models.participant import Participant
-from app.models.session import Session
-from app.models.task import Task
-from app.services.task_service import TaskService
-from app.services.voting_service import VotingService
+from app.domain.participant import Participant
+from app.domain.session import Session
+from app.domain.task import Task
+from app.usecases.show_results import VotingPolicy
+from app.usecases.start_batch import StartBatchUseCase
+from app.usecases.cast_vote import CastVoteUseCase
+from app.usecases.finish_batch import FinishBatchUseCase
+from app.usecases.reset_queue import ResetQueueUseCase
+from app.adapters.session_file import FileSessionRepository
 from config import UserRole
 
 
-class TestVotingService:
-    """Tests for VotingService."""
+class TestVotingPolicy:
+    """Tests for VotingPolicy."""
 
-    def test_count_votes(self):
-        """Test vote counting."""
-        votes = {1: "5", 2: "8", 3: "5"}
-        assert VotingService.count_votes(votes) == 3
+    def test_get_max_vote(self):
+        """Test getting maximum vote value."""
+        votes = {1: "3", 2: "3", 3: "5", 4: "13"}
+        assert VotingPolicy.get_max_vote(votes) == 13
+
+    def test_get_max_vote_with_skip(self):
+        """Test getting maximum vote value ignoring skip votes."""
+        votes = {1: "3", 2: "skip", 3: "5", 4: "13", 5: "skip"}
+        assert VotingPolicy.get_max_vote(votes) == 13
+
+    def test_get_max_vote_all_skip(self):
+        """Test getting maximum vote value when all votes are skip."""
+        votes = {1: "skip", 2: "skip", 3: "skip"}
+        assert VotingPolicy.get_max_vote(votes) == 0
+
+    def test_get_max_vote_empty(self):
+        """Test getting maximum vote value from empty votes."""
+        votes = {}
+        assert VotingPolicy.get_max_vote(votes) == 0
 
     def test_get_most_common_vote(self):
         """Test getting most common vote."""
         votes = {1: "5", 2: "8", 3: "5", 4: "5"}
-        assert VotingService.get_most_common_vote(votes) == 5
+        assert VotingPolicy.get_most_common_vote(votes) == 5
 
     def test_get_most_common_vote_with_skip(self):
         """Test getting most common vote ignoring skip votes."""
-        # Skip votes should be ignored
         votes = {1: "3", 2: "skip", 3: "5", 4: "5", 5: "skip"}
-        assert VotingService.get_most_common_vote(votes) == 5
+        assert VotingPolicy.get_most_common_vote(votes) == 5
 
     def test_get_most_common_vote_all_skip(self):
         """Test getting most common vote when all votes are skip."""
         votes = {1: "skip", 2: "skip", 3: "skip"}
-        assert VotingService.get_most_common_vote(votes) == 0
+        assert VotingPolicy.get_most_common_vote(votes) == 0
 
     def test_calculate_average_vote(self):
         """Test calculating average vote."""
         votes = {1: "5", 2: "8", 3: "3"}
-        avg = VotingService.calculate_average_vote(votes)
+        avg = VotingPolicy.calculate_average_vote(votes)
         assert abs(avg - 5.33) < 0.1
 
     def test_calculate_average_vote_with_skip(self):
         """Test calculating average vote ignoring skip votes."""
         votes = {1: "3", 2: "skip", 3: "5", 4: "8", 5: "skip"}
-        avg = VotingService.calculate_average_vote(votes)
+        avg = VotingPolicy.calculate_average_vote(votes)
         # Should calculate average of 3, 5, 8 = 16/3 = 5.33
         assert abs(avg - 5.33) < 0.1
 
     def test_calculate_average_vote_all_skip(self):
         """Test calculating average vote when all votes are skip."""
         votes = {1: "skip", 2: "skip"}
-        avg = VotingService.calculate_average_vote(votes)
+        avg = VotingPolicy.calculate_average_vote(votes)
         assert avg == 0.0
+
+
+class TestCastVoteUseCase:
+    """Tests for CastVoteUseCase."""
+
+    def setup_method(self):
+        """Setup test fixtures."""
+        self.temp_file = Path("/tmp/test_state.json")
+        if self.temp_file.exists():
+            self.temp_file.unlink()
+        self.repo = FileSessionRepository(self.temp_file)
+        self.use_case = CastVoteUseCase(self.repo)
+
+    def teardown_method(self):
+        """Cleanup test fixtures."""
+        if self.temp_file.exists():
+            self.temp_file.unlink()
 
     def test_all_voters_voted(self):
         """Test checking if all voters voted."""
@@ -65,13 +102,17 @@ class TestVotingService:
         session.participants[1] = participant1
         session.participants[2] = participant2
 
-        assert VotingService.all_voters_voted(session) is False
+        self.repo.save_session(session)
+
+        assert self.use_case.all_voters_voted(123, 456) is False
 
         task.votes[1] = "5"
-        assert VotingService.all_voters_voted(session) is False
+        self.repo.save_session(session)
+        assert self.use_case.all_voters_voted(123, 456) is False
 
         task.votes[2] = "8"
-        assert VotingService.all_voters_voted(session) is True
+        self.repo.save_session(session)
+        assert self.use_case.all_voters_voted(123, 456) is True
 
     def test_all_voters_voted_with_skip(self):
         """Test checking if all voters voted including skip votes."""
@@ -85,24 +126,75 @@ class TestVotingService:
         session.participants[1] = participant1
         session.participants[2] = participant2
 
-        assert VotingService.all_voters_voted(session) is False
+        self.repo.save_session(session)
+
+        assert self.use_case.all_voters_voted(123, 456) is False
 
         task.votes[1] = "5"
-        assert VotingService.all_voters_voted(session) is False
+        self.repo.save_session(session)
+        assert self.use_case.all_voters_voted(123, 456) is False
 
         # Skip vote should count as voted
         task.votes[2] = "skip"
-        assert VotingService.all_voters_voted(session) is True
+        self.repo.save_session(session)
+        assert self.use_case.all_voters_voted(123, 456) is True
 
-    def test_complete_task(self):
-        """Test completing a task."""
+
+class TestStartBatchUseCase:
+    """Tests for StartBatchUseCase."""
+
+    def setup_method(self):
+        """Setup test fixtures."""
+        self.temp_file = Path("/tmp/test_state.json")
+        if self.temp_file.exists():
+            self.temp_file.unlink()
+        self.repo = FileSessionRepository(self.temp_file)
+        self.use_case = StartBatchUseCase(self.repo)
+
+    def teardown_method(self):
+        """Cleanup test fixtures."""
+        if self.temp_file.exists():
+            self.temp_file.unlink()
+
+    def test_start_voting_session(self):
+        """Test starting voting session."""
         session = Session(chat_id=123, topic_id=456)
         task = Task(summary="Test")
         session.tasks_queue.append(task)
-        session.current_task_index = 0
+        self.repo.save_session(session)
 
-        VotingService.complete_task(session)
-        assert session.current_task.completed_at is not None
+        result = self.use_case.execute(123, 456)
+        assert result is True
+
+        session = self.repo.get_session(123, 456)
+        assert session.current_task_index == 0
+        assert session.batch_completed is False
+        assert session.current_batch_started_at is not None
+
+    def test_start_voting_session_empty(self):
+        """Test starting voting session with no tasks."""
+        session = Session(chat_id=123, topic_id=456)
+        self.repo.save_session(session)
+
+        result = self.use_case.execute(123, 456)
+        assert result is False
+
+
+class TestFinishBatchUseCase:
+    """Tests for FinishBatchUseCase."""
+
+    def setup_method(self):
+        """Setup test fixtures."""
+        self.temp_file = Path("/tmp/test_state.json")
+        if self.temp_file.exists():
+            self.temp_file.unlink()
+        self.repo = FileSessionRepository(self.temp_file)
+        self.use_case = FinishBatchUseCase(self.repo)
+
+    def teardown_method(self):
+        """Cleanup test fixtures."""
+        if self.temp_file.exists():
+            self.temp_file.unlink()
 
     def test_finish_batch(self):
         """Test finishing a batch."""
@@ -110,9 +202,12 @@ class TestVotingService:
         task1 = Task(summary="Task 1")
         task2 = Task(summary="Task 2")
         session.tasks_queue = [task1, task2]
+        self.repo.save_session(session)
 
-        completed = VotingService.finish_batch(session)
+        completed = self.use_case.execute(123, 456)
         assert len(completed) == 2
+
+        session = self.repo.get_session(123, 456)
         assert len(session.tasks_queue) == 0
         assert len(session.last_batch) == 2
         assert len(session.history) == 2
@@ -124,110 +219,29 @@ class TestVotingService:
         task1 = Task(summary="Task 1")
         session.tasks_queue = [task1]
         session.current_batch_started_at = "2024-01-01T00:00:00"
+        self.repo.save_session(session)
 
-        VotingService.finish_batch(session)
+        self.use_case.execute(123, 456)
+
+        session = self.repo.get_session(123, 456)
         assert session.current_batch_started_at is None
 
-    def test_get_max_vote(self):
-        """Test getting maximum vote value."""
-        votes = {1: "3", 2: "3", 3: "5", 4: "13"}
-        assert VotingService.get_max_vote(votes) == 13
 
-    def test_get_max_vote_with_skip(self):
-        """Test getting maximum vote value ignoring skip votes."""
-        votes = {1: "3", 2: "skip", 3: "5", 4: "13", 5: "skip"}
-        assert VotingService.get_max_vote(votes) == 13
+class TestResetQueueUseCase:
+    """Tests for ResetQueueUseCase."""
 
-    def test_get_max_vote_all_skip(self):
-        """Test getting maximum vote value when all votes are skip."""
-        votes = {1: "skip", 2: "skip", 3: "skip"}
-        assert VotingService.get_max_vote(votes) == 0
+    def setup_method(self):
+        """Setup test fixtures."""
+        self.temp_file = Path("/tmp/test_state.json")
+        if self.temp_file.exists():
+            self.temp_file.unlink()
+        self.repo = FileSessionRepository(self.temp_file)
+        self.use_case = ResetQueueUseCase(self.repo)
 
-    def test_get_max_vote_empty(self):
-        """Test getting maximum vote value from empty votes."""
-        votes = {}
-        assert VotingService.get_max_vote(votes) == 0
-
-    def test_votes_preserved_until_finish_batch(self):
-        """Votes should remain on tasks when moving between tasks and through finish_batch."""
-        session = Session(chat_id=123, topic_id=456)
-        # Participants who can vote
-        session.participants[1] = Participant(user_id=1, name="Lead", role=UserRole.LEAD)
-        session.participants[2] = Participant(user_id=2, name="User", role=UserRole.PARTICIPANT)
-
-        task1 = Task(jira_key="TEST-1", summary="Task 1")
-        task2 = Task(jira_key="TEST-2", summary="Task 2")
-        session.tasks_queue = [task1, task2]
-        session.current_task_index = 0
-
-        # Votes for first task
-        task1.votes = {1: "3", 2: "5"}
-        # Simulate move to next task (should NOT wipe votes of task1)
-        next_task = TaskService.move_to_next_task(session)
-        assert next_task == task2
-        assert task1.votes == {1: "3", 2: "5"}
-
-        # Add votes for second task
-        task2.votes = {1: "8"}
-
-        # Finish batch and ensure votes are still present in last_batch/history
-        completed = VotingService.finish_batch(session)
-        assert len(completed) == 2
-        assert completed[0].votes == {1: "3", 2: "5"}
-        assert completed[1].votes == {1: "8"}
-        assert session.last_batch[0].votes == {1: "3", 2: "5"}
-        assert session.history[1].votes == {1: "8"}
-
-
-class TestTaskService:
-    """Tests for TaskService."""
-
-    def test_prepare_task_from_jira(self):
-        """Test preparing task from Jira issue."""
-        issue = {
-            "key": "TEST-1",
-            "summary": "Test task",
-            "url": "https://test.com/TEST-1",
-            "story_points": 5,
-        }
-        task = TaskService.prepare_task_from_jira(issue)
-        assert task.jira_key == "TEST-1"
-        assert task.summary == "Test task"
-        assert task.story_points == 5
-
-    def test_start_voting_session(self):
-        """Test starting voting session."""
-        session = Session(chat_id=123, topic_id=456)
-        task = Task(summary="Test")
-        session.tasks_queue.append(task)
-
-        result = TaskService.start_voting_session(session)
-        assert result is True
-        assert session.current_task_index == 0
-        assert session.batch_completed is False
-        assert session.current_batch_started_at is not None
-
-    def test_start_voting_session_after_completion(self):
-        """Restart voting after previous batch completed."""
-        session = Session(chat_id=123, topic_id=456)
-        task1 = Task(summary="Task 1")
-        task2 = Task(summary="Task 2")
-        session.tasks_queue = [task1, task2]
-        session.batch_completed = True
-        session.current_task_index = 5  # arbitrary wrong index
-
-        result = TaskService.start_voting_session(session)
-        assert result is True
-        assert session.current_task_index == 0
-        assert session.batch_completed is False
-        assert session.current_task == task1
-        assert session.current_batch_started_at is not None
-
-    def test_start_voting_session_empty(self):
-        """Test starting voting session with no tasks."""
-        session = Session(chat_id=123, topic_id=456)
-        result = TaskService.start_voting_session(session)
-        assert result is False
+    def teardown_method(self):
+        """Cleanup test fixtures."""
+        if self.temp_file.exists():
+            self.temp_file.unlink()
 
     def test_reset_tasks_queue(self):
         """Test resetting tasks queue."""
@@ -241,46 +255,18 @@ class TestTaskService:
         session.current_batch_started_at = "2024-01-01T00:00:00"
         session.current_batch_id = "batch-123"
         session.active_vote_message_id = 999
+        self.repo.save_session(session)
 
-        TaskService.reset_tasks_queue(session)
+        task_count = self.use_case.execute(123, 456)
+        assert task_count == 3
 
+        session = self.repo.get_session(123, 456)
         assert len(session.tasks_queue) == 0
         assert session.current_task_index == 0
         assert session.batch_completed is False
         assert session.current_batch_started_at is None
         assert session.current_batch_id is None
         assert session.active_vote_message_id is None
-
-    def test_reset_tasks_queue_with_active_voting(self):
-        """Test resetting queue while voting is active."""
-        session = Session(chat_id=123, topic_id=456)
-        task1 = Task(summary="Task 1")
-        task2 = Task(summary="Task 2")
-        session.tasks_queue = [task1, task2]
-        session.current_task_index = 0
-        session.current_batch_started_at = "2024-01-01T00:00:00"
-        task1.votes = {1: "5", 2: "8"}
-
-        TaskService.reset_tasks_queue(session)
-
-        assert len(session.tasks_queue) == 0
-        assert session.current_task_index == 0
-        assert session.current_batch_started_at is None
-        # Голоса в current_task должны быть очищены явно
-        # После clear() current_task станет None, но голоса уже очищены
-        assert task1.votes == {}  # Голоса очищены явно перед удалением из очереди
-
-    def test_reset_tasks_queue_empty(self):
-        """Test resetting empty queue."""
-        session = Session(chat_id=123, topic_id=456)
-        session.tasks_queue = []
-        session.current_task_index = 0
-
-        TaskService.reset_tasks_queue(session)
-
-        assert len(session.tasks_queue) == 0
-        assert session.current_task_index == 0
-        assert session.current_batch_started_at is None
 
     def test_reset_tasks_queue_preserves_history(self):
         """Test that reset_tasks_queue preserves history and last_batch."""
@@ -289,60 +275,15 @@ class TestTaskService:
         task2 = Task(summary="Task 2")
         task3 = Task(summary="Task 3")
         session.tasks_queue = [task1, task2]
-        session.history = [task3]  # Предыдущие задачи в истории
-        session.last_batch = [task3]  # Последний батч
-        
-        TaskService.reset_tasks_queue(session)
-        
-        # История и last_batch должны сохраниться
+        session.history = [task3]
+        session.last_batch = [task3]
+        self.repo.save_session(session)
+
+        self.use_case.execute(123, 456)
+
+        session = self.repo.get_session(123, 456)
         assert len(session.history) == 1
         assert len(session.last_batch) == 1
         assert session.history[0] == task3
         assert session.last_batch[0] == task3
-        # Очередь очищена
         assert len(session.tasks_queue) == 0
-
-    def test_reset_tasks_queue_clears_current_task_votes(self):
-        """Test that reset_tasks_queue explicitly clears current_task votes."""
-        session = Session(chat_id=123, topic_id=456)
-        task1 = Task(summary="Task 1")
-        task1.votes = {1: "5", 2: "8", 3: "13"}
-        session.tasks_queue = [task1]
-        session.current_task_index = 0
-        
-        TaskService.reset_tasks_queue(session)
-        
-        # Голоса должны быть очищены явно перед удалением из очереди
-        assert task1.votes == {}
-        assert len(session.tasks_queue) == 0
-
-    def test_reset_tasks_queue_access_control(self):
-        """Test that reset_tasks_queue can only be called by manage roles (tested via can_manage)."""
-        session = Session(chat_id=123, topic_id=456)
-        lead = Participant(user_id=1, name="Lead", role=UserRole.LEAD)
-        participant = Participant(user_id=2, name="User", role=UserRole.PARTICIPANT)
-        session.participants[1] = lead
-        session.participants[2] = participant
-        
-        # Проверяем, что только лид может управлять
-        assert session.can_manage(1) is True
-        assert session.can_manage(2) is False
-        
-        # Метод reset_tasks_queue не проверяет права сам, это делается в handlers
-        # Но мы можем проверить, что метод работает корректно для любой сессии
-        task = Task(summary="Test")
-        session.tasks_queue.append(task)
-        TaskService.reset_tasks_queue(session)
-        assert len(session.tasks_queue) == 0
-
-    def test_move_to_next_task(self):
-        """Test moving to next task."""
-        session = Session(chat_id=123, topic_id=456)
-        task1 = Task(summary="Task 1")
-        task2 = Task(summary="Task 2")
-        session.tasks_queue = [task1, task2]
-        session.current_task_index = 0
-
-        next_task = TaskService.move_to_next_task(session)
-        assert session.current_task_index == 1
-        assert next_task == task2

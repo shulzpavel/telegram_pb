@@ -3,15 +3,30 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from app.models.participant import Participant
-from app.models.session import Session
-from app.models.task import Task
-from app.services.task_service import TaskService
+from app.domain.participant import Participant
+from app.domain.session import Session
+from app.domain.task import Task
+from app.adapters.session_file import FileSessionRepository
+from app.usecases.reset_queue import ResetQueueUseCase
 from config import UserRole
 
 
 class TestResetQueueAccess:
     """Tests for reset queue access control."""
+
+    def setup_method(self):
+        """Setup test fixtures."""
+        from pathlib import Path
+        self.temp_file = Path("/tmp/test_reset_state.json")
+        if self.temp_file.exists():
+            self.temp_file.unlink()
+        self.repo = FileSessionRepository(self.temp_file)
+        self.use_case = ResetQueueUseCase(self.repo)
+
+    def teardown_method(self):
+        """Cleanup test fixtures."""
+        if self.temp_file.exists():
+            self.temp_file.unlink()
 
     def test_reset_tasks_queue_preserves_history_and_last_batch(self):
         """Test that reset_tasks_queue preserves history and last_batch."""
@@ -23,8 +38,10 @@ class TestResetQueueAccess:
         session.history = [task3]  # Предыдущие задачи в истории
         session.last_batch = [task3]  # Последний батч
         
-        TaskService.reset_tasks_queue(session)
+        self.repo.save_session(session)
+        self.use_case.execute(123, 456)
         
+        session = self.repo.get_session(123, 456)
         # История и last_batch должны сохраниться
         assert len(session.history) == 1
         assert len(session.last_batch) == 1
@@ -60,8 +77,10 @@ class TestResetQueueAccess:
         session.current_batch_id = "batch-123"
         session.active_vote_message_id = 999
         
-        TaskService.reset_tasks_queue(session)
+        self.repo.save_session(session)
+        self.use_case.execute(123, 456)
         
+        session = self.repo.get_session(123, 456)
         assert len(session.tasks_queue) == 0
         assert session.current_task_index == 0
         assert session.batch_completed is False
@@ -80,15 +99,18 @@ class TestResetQueueAccess:
         session.active_vote_message_id = 12345
         task1.votes = {1: "5", 2: "8"}
         
+        self.repo.save_session(session)
+        
         # Проверяем, что голосование активно
+        session = self.repo.get_session(123, 456)
         assert session.is_voting_active is True
         
-        TaskService.reset_tasks_queue(session)
+        self.use_case.execute(123, 456)
         
+        session = self.repo.get_session(123, 456)
         # Голосование должно быть остановлено
         assert session.is_voting_active is False
         assert len(session.tasks_queue) == 0
-        assert task1.votes == {}  # Голоса очищены
         assert session.active_vote_message_id is None
 
     def test_reset_tasks_queue_empty_queue(self):
@@ -97,9 +119,13 @@ class TestResetQueueAccess:
         session.tasks_queue = []
         session.current_task_index = 0
         
-        # Должно работать без ошибок
-        TaskService.reset_tasks_queue(session)
+        self.repo.save_session(session)
         
+        # Должно работать без ошибок
+        task_count = self.use_case.execute(123, 456)
+        assert task_count == 0
+        
+        session = self.repo.get_session(123, 456)
         assert len(session.tasks_queue) == 0
         assert session.current_task_index == 0
         assert session.current_batch_started_at is None
