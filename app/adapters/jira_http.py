@@ -1,30 +1,31 @@
-#!/usr/bin/env python3
-"""Async Jira API service."""
+"""HTTP adapter for Jira API client."""
 
-import asyncio
 import re
 from typing import Any, Dict, Iterable, List, Optional
 
 import aiohttp
-from dotenv import load_dotenv
 
-# Загружаем переменные окружения из .env файла, если он существует
-load_dotenv()
-
-from config import JIRA_API_TOKEN, JIRA_URL, JIRA_USERNAME, STORY_POINTS_FIELD
+from app.ports.jira_client import JiraClient
 
 
-class JiraService:
-    """Async Jira API service."""
+class JiraHttpClient(JiraClient):
+    """HTTP implementation of Jira client."""
 
-    def __init__(self) -> None:
-        self.base_url = JIRA_URL
-        self.username = JIRA_USERNAME
-        self.api_token = JIRA_API_TOKEN
-        self.story_points_field = STORY_POINTS_FIELD
+    def __init__(
+        self,
+        base_url: str,
+        username: str,
+        api_token: str,
+        story_points_field: str,
+        timeout: int = 30,
+    ) -> None:
+        self.base_url = base_url
+        self.username = username
+        self.api_token = api_token
+        self.story_points_field = story_points_field
         self._key_pattern = re.compile(r"\b([A-Z][A-Z0-9]+-\d+)\b")
         self._session: Optional[aiohttp.ClientSession] = None
-        self._timeout = aiohttp.ClientTimeout(total=30)
+        self._timeout = aiohttp.ClientTimeout(total=timeout)
 
     async def _get_session(self) -> aiohttp.ClientSession:
         """Get or create aiohttp session."""
@@ -32,7 +33,7 @@ class JiraService:
             self._session = aiohttp.ClientSession(timeout=self._timeout)
         return self._session
 
-    async def _close_session(self) -> None:
+    async def close(self) -> None:
         """Close aiohttp session."""
         if self._session and not self._session.closed:
             await self._session.close()
@@ -224,6 +225,3 @@ class JiraService:
             "url": self.get_issue_url(issue_key),
             "story_points": story_points,
         }
-
-
-jira_service = JiraService()

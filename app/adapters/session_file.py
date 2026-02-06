@@ -1,14 +1,18 @@
-"""Session management service."""
+"""File-based adapter for session repository."""
 
 from pathlib import Path
 from typing import Optional
 
-from app.models.session import Session
+from app.domain.participant import Participant
+from app.domain.session import Session
+from app.domain.task import Task
+from app.ports.session_repository import SessionRepository
+from config import UserRole
 from session_store import SessionState, SessionStore
 
 
-class SessionService:
-    """Service for managing sessions."""
+class FileSessionRepository(SessionRepository):
+    """File-based implementation of session repository."""
 
     def __init__(self, state_file: Path):
         self.store = SessionStore(state_file)
@@ -23,11 +27,12 @@ class SessionService:
         session_state = self._session_to_state(session)
         self.store.save_session(session_state)
 
+    def delete_session(self, chat_id: int, topic_id: Optional[int]) -> None:
+        """Delete session."""
+        self.store.delete_session(chat_id, topic_id)
+
     def _state_to_session(self, state: SessionState) -> Session:
         """Convert SessionState to Session model."""
-        from app.models.participant import Participant
-        from app.models.task import Task
-
         participants = {
             uid: Participant.from_dict(uid, data) for uid, data in state.participants.items()
         }
@@ -79,4 +84,3 @@ class SessionService:
             current_batch_started_at=session.current_batch_started_at,
         )
         return state
-

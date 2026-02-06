@@ -2,9 +2,9 @@
 
 import pytest
 
-from app.models.participant import Participant
-from app.models.session import Session
-from app.models.task import Task
+from app.domain.participant import Participant
+from app.domain.session import Session
+from app.domain.task import Task
 from config import UserRole
 
 

@@ -25,6 +25,9 @@ JIRA_USERNAME = os.getenv("JIRA_USERNAME", "your-email@domain.com")
 JIRA_API_TOKEN = os.getenv("JIRA_API_TOKEN", "YOUR_JIRA_API_TOKEN_HERE")
 STORY_POINTS_FIELD = os.getenv("STORY_POINTS_FIELD", "customfield_10022")
 
+# Postgres metrics storage
+POSTGRES_DSN = os.getenv("POSTGRES_DSN", "")
+
 # Файл для сохранения состояния
 STATE_FILE = Path(os.getenv("STATE_FILE", "data/state.json"))
 

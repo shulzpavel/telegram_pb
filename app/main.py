@@ -12,9 +12,9 @@ from aiogram import Bot, Dispatcher
 from aiogram.exceptions import TelegramConflictError
 from aiogram.fsm.storage.memory import MemoryStorage
 
-from app.handlers import commands
-from config import BOT_TOKEN, STATE_FILE
-from app.services.session_service import SessionService
+from config import BOT_TOKEN
+from app.providers import DIContainer
+from app.transport.telegram.router import setup_routers
 
 
 async def main(use_polling: bool = True) -> None:
@@ -25,31 +25,30 @@ async def main(use_polling: bool = True) -> None:
     bot = Bot(token=BOT_TOKEN, parse_mode="HTML")
     dp = Dispatcher(storage=MemoryStorage())
 
-    # Include routers
-    from app.handlers import callbacks, commands, text
+    # Initialize DI container
+    container = DIContainer(bot=bot)
 
-    dp.include_router(commands.router)
-    dp.include_router(callbacks.router)
-    dp.include_router(text.router)
+    # Setup routers with DI
+    setup_routers(dp, container)
 
-    # Cleanup on shutdown
-    import atexit
-    from jira_service import jira_service
-    atexit.register(lambda: asyncio.run(jira_service._close_session()) if jira_service._session else None)
-
-    if use_polling:
-        print("✅ Bot is polling. Waiting for messages...")
-        try:
-            await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
-        except TelegramConflictError as e:
-            print(f"⚠️  Конфликт: другой экземпляр бота уже запущен")
-            print(f"   Ошибка: {e}")
-            print(f"   Бот не может работать, пока другой экземпляр активен")
-            print(f"   Остановите другой экземпляр или используйте --no-poll")
-            raise
-    else:
-        print("✅ Bot launched without polling (assumed secondary instance). Staying idle...")
-        await asyncio.Future()
+    try:
+        if use_polling:
+            print("✅ Bot is polling. Waiting for messages...")
+            try:
+                await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
+            except TelegramConflictError as e:
+                print(f"⚠️  Конфликт: другой экземпляр бота уже запущен")
+                print(f"   Ошибка: {e}")
+                print(f"   Бот не может работать, пока другой экземпляр активен")
+                print(f"   Остановите другой экземпляр или используйте --no-poll")
+                raise
+        else:
+            print("✅ Bot launched without polling (assumed secondary instance). Staying idle...")
+            await asyncio.Future()
+    finally:
+        # Cleanup resources
+        await container.cleanup()
+        await bot.session.close()
 
 
 if __name__ == "__main__":
@@ -61,4 +60,3 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
     asyncio.run(main(use_polling=not args.no_poll))
-
