@@ -1,0 +1,106 @@
+version: '3.8'
+
+services:
+  jira-service:
+    build:
+      context: .
+      dockerfile: services/jira-service/Dockerfile
+    container_name: jira-service
+    ports:
+      - "8001:8001"
+    environment:
+      - JIRA_SERVICE_PORT=8001
+      - JIRA_URL=${JIRA_URL}
+      - JIRA_USERNAME=${JIRA_USERNAME}
+      - JIRA_API_TOKEN=${JIRA_API_TOKEN}
+      - STORY_POINTS_FIELD=${STORY_POINTS_FIELD}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+
+  voting-service:
+    build:
+      context: .
+      dockerfile: services/voting-service/Dockerfile
+    container_name: voting-service
+    ports:
+      - "8002:8002"
+    environment:
+      - VOTING_SERVICE_PORT=8002
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+      - POSTGRES_DSN=${POSTGRES_DSN}
+      - STATE_FILE=${STATE_FILE:-/data/state.json}
+    volumes:
+      - voting-data:/data
+    depends_on:
+      - redis
+      - postgres
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/health/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: voting-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:15-alpine
+    container_name: voting-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB:-telegram_pb}
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  gateway:
+    build:
+      context: .
+      dockerfile: services/gateway/Dockerfile
+    container_name: telegram-gateway
+    environment:
+      - BOT_TOKEN=${BOT_TOKEN}
+      - JIRA_SERVICE_URL=http://jira-service:8001
+      - VOTING_SERVICE_URL=http://voting-service:8002
+      - POSTGRES_DSN=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-telegram_pb}
+      - USER_TOKEN=${USER_TOKEN}
+      - LEAD_TOKEN=${LEAD_TOKEN}
+      - ADMIN_TOKEN=${ADMIN_TOKEN}
+      - SUPPORTED_TOPICS=${SUPPORTED_TOPICS}
+    depends_on:
+      jira-service:
+        condition: service_healthy
+      voting-service:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  voting-data:
+  redis-data:
+  postgres-data:

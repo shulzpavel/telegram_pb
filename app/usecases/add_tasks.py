@@ -17,7 +17,7 @@ class AddTasksFromJiraUseCase:
 
     async def execute(self, chat_id: int, topic_id: Optional[int], jql: str) -> Tuple[List[Task], List[str]]:
         """Add tasks from Jira query to session."""
-        session = self.session_repo.get_session(chat_id, topic_id)
+        session = await self.session_repo.get_session(chat_id, topic_id)
         
         jira_issues = await self.jira_client.parse_jira_request(jql)
         if not jira_issues:
@@ -52,5 +52,5 @@ class AddTasksFromJiraUseCase:
             existing_keys.add(jira_key)
             added.append(task)
 
-        self.session_repo.save_session(session)
+        await self.session_repo.save_session(session)
         return added, skipped

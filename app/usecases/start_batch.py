@@ -13,9 +13,9 @@ class StartBatchUseCase:
     def __init__(self, session_repo: SessionRepository):
         self.session_repo = session_repo
 
-    def execute(self, chat_id: int, topic_id: Optional[int]) -> bool:
+    async def execute(self, chat_id: int, topic_id: Optional[int]) -> bool:
         """Start voting session for tasks."""
-        session = self.session_repo.get_session(chat_id, topic_id)
+        session = await self.session_repo.get_session(chat_id, topic_id)
         
         if not session.tasks_queue:
             return False
@@ -26,5 +26,5 @@ class StartBatchUseCase:
         if session.current_task:
             session.current_task.votes.clear()
         
-        self.session_repo.save_session(session)
+        await self.session_repo.save_session(session)
         return True

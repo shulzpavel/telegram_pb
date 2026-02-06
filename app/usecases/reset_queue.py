@@ -12,9 +12,9 @@ class ResetQueueUseCase:
     def __init__(self, session_repo: SessionRepository):
         self.session_repo = session_repo
 
-    def execute(self, chat_id: int, topic_id: Optional[int]) -> int:
+    async def execute(self, chat_id: int, topic_id: Optional[int]) -> int:
         """Reset tasks queue and voting state. Returns number of tasks removed."""
-        session = self.session_repo.get_session(chat_id, topic_id)
+        session = await self.session_repo.get_session(chat_id, topic_id)
         
         task_count = len(session.tasks_queue)
         
@@ -34,5 +34,5 @@ class ResetQueueUseCase:
         
         # Note: last_batch and history are preserved
         
-        self.session_repo.save_session(session)
+        await self.session_repo.save_session(session)
         return task_count

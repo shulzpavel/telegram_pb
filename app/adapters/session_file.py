@@ -17,17 +17,17 @@ class FileSessionRepository(SessionRepository):
     def __init__(self, state_file: Path):
         self.store = SessionStore(state_file)
 
-    def get_session(self, chat_id: int, topic_id: Optional[int]) -> Session:
+    async def get_session(self, chat_id: int, topic_id: Optional[int]) -> Session:
         """Get or create session."""
         session_state = self.store.get_session(chat_id, topic_id)
         return self._state_to_session(session_state)
 
-    def save_session(self, session: Session) -> None:
+    async def save_session(self, session: Session) -> None:
         """Save session state."""
         session_state = self._session_to_state(session)
         self.store.save_session(session_state)
 
-    def delete_session(self, chat_id: int, topic_id: Optional[int]) -> None:
+    async def delete_session(self, chat_id: int, topic_id: Optional[int]) -> None:
         """Delete session."""
         self.store.delete_session(chat_id, topic_id)
 

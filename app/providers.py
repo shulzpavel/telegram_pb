@@ -6,8 +6,8 @@ from typing import Optional, Dict, Tuple
 
 from aiogram import Bot
 
-from app.adapters.jira_http import JiraHttpClient
-from app.adapters.session_file import FileSessionRepository
+from app.adapters.jira_service_client import JiraServiceHttpClient
+from app.adapters.voting_service_client import VotingServiceHttpClient
 from app.adapters.metrics_null import NullMetricsRepository
 from app.adapters.telegram_notifier import TelegramNotifier
 from app.ports.jira_client import JiraClient
@@ -24,12 +24,9 @@ from app.usecases.show_results import ShowResultsUseCase
 from app.usecases.start_batch import StartBatchUseCase
 from app.usecases.update_jira_sp import UpdateJiraStoryPointsUseCase
 from config import (
-    JIRA_API_TOKEN,
-    JIRA_URL,
-    JIRA_USERNAME,
-    STATE_FILE,
-    STORY_POINTS_FIELD,
     POSTGRES_DSN,
+    JIRA_SERVICE_URL,
+    VOTING_SERVICE_URL,
 )
 
 
@@ -44,14 +41,21 @@ class DIContainer:
         notifier: Optional[Notifier] = None,
         metrics_repo: Optional[MetricsRepository] = None,
     ):
-        # Adapters
-        self._jira_client = jira_client or JiraHttpClient(
-            base_url=JIRA_URL,
-            username=JIRA_USERNAME,
-            api_token=JIRA_API_TOKEN,
-            story_points_field=STORY_POINTS_FIELD,
-        )
-        self._session_repo = session_repo or FileSessionRepository(STATE_FILE)
+        # Always use HTTP clients to microservices
+        if jira_client is None:
+            if not JIRA_SERVICE_URL:
+                raise ValueError("JIRA_SERVICE_URL must be set for microservices mode")
+            self._jira_client = JiraServiceHttpClient(base_url=JIRA_SERVICE_URL)
+        else:
+            self._jira_client = jira_client
+
+        if session_repo is None:
+            if not VOTING_SERVICE_URL:
+                raise ValueError("VOTING_SERVICE_URL must be set for microservices mode")
+            self._session_repo = VotingServiceHttpClient(base_url=VOTING_SERVICE_URL)
+        else:
+            self._session_repo = session_repo
+
         self._notifier = notifier or TelegramNotifier(bot)
 
         if metrics_repo is not None:
@@ -72,6 +76,16 @@ class DIContainer:
         # In-memory flags/locks for long operations (e.g., JQL, update_sp) to avoid duplicate presses
         self.busy_ops: set[Tuple] = set()
         self._busy_locks: Dict[Tuple, asyncio.Lock] = {}
+
+    async def acquire_busy(self, key: Tuple) -> asyncio.Lock:
+        """Acquire busy lock for key. Returns lock object."""
+        if key not in self._busy_locks:
+            self._busy_locks[key] = asyncio.Lock()
+        return self._busy_locks[key]
+
+    def release_busy(self, key: Tuple) -> None:
+        """Release busy flag for key."""
+        self.busy_ops.discard(key)
 
         # Use cases
         self.add_tasks = AddTasksFromJiraUseCase(self._jira_client, self._session_repo)
@@ -106,7 +120,12 @@ class DIContainer:
 
     async def cleanup(self) -> None:
         """Cleanup resources."""
-        if isinstance(self._jira_client, JiraHttpClient):
+        # Close Jira client (both direct and HTTP service client have close method)
+        if hasattr(self._jira_client, "close"):
             await self._jira_client.close()
+        # Close session repo if it has close method (HTTP client does)
+        if hasattr(self._session_repo, "close"):
+            await self._session_repo.close()
+        # Close metrics
         if hasattr(self._metrics, "close"):
             await self._metrics.close()

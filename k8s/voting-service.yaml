@@ -1,0 +1,65 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: voting-service
+  namespace: telegram-pb
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: voting-service
+  template:
+    metadata:
+      labels:
+        app: voting-service
+    spec:
+      containers:
+      - name: voting-service
+        image: telegram-pb/voting-service:latest
+        ports:
+        - containerPort: 8002
+        env:
+        - name: VOTING_SERVICE_PORT
+          value: "8002"
+        - name: REDIS_URL
+          valueFrom:
+            configMapKeyRef:
+              name: voting-config
+              key: redis-url
+        - name: POSTGRES_DSN
+          valueFrom:
+            secretKeyRef:
+              name: postgres-secrets
+              key: dsn
+        livenessProbe:
+          httpGet:
+            path: /health/live
+            port: 8002
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health/ready
+            port: 8002
+          initialDelaySeconds: 10
+          periodSeconds: 5
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "200m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: voting-service
+  namespace: telegram-pb
+spec:
+  selector:
+    app: voting-service
+  ports:
+  - port: 8002
+    targetPort: 8002
+  type: ClusterIP

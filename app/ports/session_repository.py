@@ -10,16 +10,16 @@ class SessionRepository(ABC):
     """Interface for session persistence."""
 
     @abstractmethod
-    def get_session(self, chat_id: int, topic_id: Optional[int]) -> Session:
+    async def get_session(self, chat_id: int, topic_id: Optional[int]) -> Session:
         """Get or create session."""
         pass
 
     @abstractmethod
-    def save_session(self, session: Session) -> None:
+    async def save_session(self, session: Session) -> None:
         """Save session state."""
         pass
 
     @abstractmethod
-    def delete_session(self, chat_id: int, topic_id: Optional[int]) -> None:
+    async def delete_session(self, chat_id: int, topic_id: Optional[int]) -> None:
         """Delete session."""
         pass

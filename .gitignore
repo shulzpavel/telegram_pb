@@ -58,6 +58,7 @@ data/
 *.json
 !package.json
 !package-lock.json
+!docs/*.json
 test_*.json
 *_test.json
 *_state.json
@@ -75,6 +76,7 @@ test_results/
 *.md
 !README.md
 !DEPLOY.md
+!docs/*.md
 
 # Setup and demo files
 setup_config.py

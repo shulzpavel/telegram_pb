@@ -1,5 +1,6 @@
 """Callback query handlers."""
 
+import asyncio
 from pathlib import Path
 from typing import Optional, Tuple
 
@@ -58,7 +59,7 @@ async def handle_menu(callback: types.CallbackQuery, container: DIContainer) -> 
         await callback.answer()
         return
 
-    session = container.session_repo.get_session(chat_id, topic_id)
+    session = await container.session_repo.get_session(chat_id, topic_id)
 
     user_id = callback.from_user.id
     participant = session.participants.get(user_id)
@@ -130,7 +131,7 @@ async def handle_menu(callback: types.CallbackQuery, container: DIContainer) -> 
             )
 
     elif action == "leave":
-        if container.leave_session.execute(chat_id, topic_id, user_id):
+        if await container.leave_session.execute(chat_id, topic_id, user_id):
             await container.notifier.send_message(
                 chat_id=chat_id,
                 text="🚪 Вы покинули сессию.",
@@ -166,7 +167,7 @@ async def handle_menu(callback: types.CallbackQuery, container: DIContainer) -> 
         await _handle_reset_queue(callback.message, session, container, user_id)
 
     elif action == "last_batch":
-        batch_results = container.show_results.get_batch_results(chat_id, topic_id)
+        batch_results = await container.show_results.get_batch_results(chat_id, topic_id)
         if not batch_results:
             await container.notifier.send_message(
                 chat_id=chat_id,
@@ -220,7 +221,7 @@ async def handle_confirm_reset_queue(callback: types.CallbackQuery, container: D
         await callback.answer()
         return
 
-    session = container.session_repo.get_session(chat_id, topic_id)
+    session = await container.session_repo.get_session(chat_id, topic_id)
 
     user_id = callback.from_user.id
     participant = session.participants.get(user_id)
@@ -249,7 +250,7 @@ async def handle_confirm_reset_queue(callback: types.CallbackQuery, container: D
     was_voting_active = session.is_voting_active
     active_vote_message_id = session.active_vote_message_id
 
-    task_count = container.reset_queue.execute(chat_id, topic_id)
+    task_count = await container.reset_queue.execute(chat_id, topic_id)
 
     user_name = participant.name if participant else callback.from_user.full_name or f"User {user_id}"
     audit_log(
@@ -265,7 +266,7 @@ async def handle_confirm_reset_queue(callback: types.CallbackQuery, container: D
         await container.notifier.delete_message(chat_id=chat_id, message_id=active_vote_message_id)
 
     can_manage = session.can_manage(user_id)
-    session = container.session_repo.get_session(chat_id, topic_id)  # Refresh after reset
+    session = await container.session_repo.get_session(chat_id, topic_id)  # Refresh after reset
     message_text = f"✅ Очередь задач сброшена.\n\n📊 Удалено задач: {task_count}\n\nТеперь можно добавить новые задачи."
     if was_voting_active:
         message_text = "⏹️ Голосование остановлено.\n\n" + message_text
@@ -296,9 +297,9 @@ async def _handle_start_voting(msg: types.Message, session: Session, container: 
         )
         return
 
-    if container.start_batch.execute(session.chat_id, session.topic_id):
+    if await container.start_batch.execute(session.chat_id, session.topic_id):
         # Перечитываем session из репозитория после изменений
-        session = container.session_repo.get_session(session.chat_id, session.topic_id)
+        session = await container.session_repo.get_session(session.chat_id, session.topic_id)
         await _start_next_task(msg, session, container, user_id=user_id)
 
 
@@ -310,7 +311,7 @@ async def kick_user(callback: types.CallbackQuery, container: DIContainer) -> No
         await callback.answer()
         return
 
-    session = container.session_repo.get_session(chat_id, topic_id)
+    session = await container.session_repo.get_session(chat_id, topic_id)
 
     if not session.can_manage(callback.from_user.id):
         await _send_access_denied(callback, "❌ Недостаточно прав для удаления участников.", container)
@@ -323,7 +324,7 @@ async def kick_user(callback: types.CallbackQuery, container: DIContainer) -> No
         return
 
     participant = session.participants.get(target_id)
-    if container.leave_session.execute(chat_id, topic_id, target_id):
+    if await container.leave_session.execute(chat_id, topic_id, target_id):
         if participant:
             await container.notifier.send_message(
                 chat_id=chat_id,
@@ -349,7 +350,7 @@ async def handle_vote(callback: types.CallbackQuery, container: DIContainer) -> 
         await callback.answer()
         return
 
-    session = container.session_repo.get_session(chat_id, topic_id)
+    session = await container.session_repo.get_session(chat_id, topic_id)
 
     user_id = callback.from_user.id
     if user_id not in session.participants:
@@ -395,7 +396,7 @@ async def handle_vote(callback: types.CallbackQuery, container: DIContainer) -> 
 
         if was_single_task:
             session.active_vote_message_id = None
-            container.session_repo.save_session(session)
+            await container.session_repo.save_session(session)
 
             if active_msg_id:
                 await container.notifier.delete_message(chat_id=chat_id, message_id=active_msg_id)
@@ -410,7 +411,7 @@ async def handle_vote(callback: types.CallbackQuery, container: DIContainer) -> 
         active_msg_id = session.active_vote_message_id
         session.active_vote_message_id = None
 
-        container.session_repo.save_session(session)
+        await container.session_repo.save_session(session)
         await callback.answer("🔄 Задача возвращена в конец очереди для пересмотра")
 
         if active_msg_id:
@@ -423,22 +424,22 @@ async def handle_vote(callback: types.CallbackQuery, container: DIContainer) -> 
         return
 
     # Обычное голосование
-    if container.cast_vote.execute(chat_id, topic_id, user_id, value):
+    if await container.cast_vote.execute(chat_id, topic_id, user_id, value):
         if value == "skip":
             await callback.answer("⏭️ Голосование пропущено")
         else:
             await callback.answer("✅ Голос учтён!")
 
         # Обновляем сообщение с задачей
-        session = container.session_repo.get_session(chat_id, topic_id)  # Refresh
+        session = await container.session_repo.get_session(chat_id, topic_id)  # Refresh
         if session.current_task and session.active_vote_message_id:
             await _update_vote_message(session, container, user_id)
 
-        if container.cast_vote.all_voters_voted(chat_id, topic_id):
+        if await container.cast_vote.all_voters_voted(chat_id, topic_id):
             # Move to next task
-            session = container.session_repo.get_session(chat_id, topic_id)
+            session = await container.session_repo.get_session(chat_id, topic_id)
             session.current_task_index += 1
-            container.session_repo.save_session(session)
+            await container.session_repo.save_session(session)
             await _start_next_task(callback.message, session, container, user_id=user_id)
 
 
@@ -483,7 +484,7 @@ async def handle_update_jira_sp(callback: types.CallbackQuery, container: DICont
         await callback.answer()
         return
 
-    session = container.session_repo.get_session(chat_id, topic_id)
+    session = await container.session_repo.get_session(chat_id, topic_id)
 
     if not session.can_manage(callback.from_user.id):
         await _send_access_denied(callback, "❌ Только лидеры и администраторы могут обновлять SP.", container)
@@ -496,7 +497,7 @@ async def handle_update_jira_sp(callback: types.CallbackQuery, container: DICont
     await callback.answer()
 
     busy_key = _busy_key(chat_id, topic_id, "update_sp")
-    lock = container._busy_locks.setdefault(busy_key, asyncio.Lock())
+    lock = await container.acquire_busy(busy_key)
     if lock.locked():
         await container.notifier.answer_callback(
             callback_query_id=callback.id, text="⏳ Обновление уже выполняется...", show_alert=False
@@ -515,7 +516,7 @@ async def handle_update_jira_sp(callback: types.CallbackQuery, container: DICont
         updated, failed, skipped = await container.update_jira_sp.execute(chat_id, topic_id, skip_errors=skip_errors)
 
         # Обновляем сессию после изменений
-        session = container.session_repo.get_session(chat_id, topic_id)
+        session = await container.session_repo.get_session(chat_id, topic_id)
 
         try:
             await container.metrics.record_event(
@@ -562,33 +563,20 @@ async def handle_update_jira_sp(callback: types.CallbackQuery, container: DICont
 
         summary_parts = []
         if skip_errors:
-            summary_parts.append(f"📊 Резюме обновления Jira:")
-            summary_parts.append(f"✅ Обновлено: {updated}")
+            summary_parts.append(f"📊 Обновлено: {updated}")
             if failed:
-                summary_parts.append(
-                    f"❌ Ошибки: {len(failed)} ({', '.join(failed[:5])}{'...' if len(failed) > 5 else ''})"
-                )
+                summary_parts.append(f"❌ Ошибки: {len(failed)} ({', '.join(failed[:3])}{'...' if len(failed) > 3 else ''})")
             if skipped:
                 summary_parts.append(f"⏭️ Пропущено: {len(skipped)}")
-                if len(skipped) <= 3:
-                    for skip_reason in skipped:
-                        summary_parts.append(f"  • {skip_reason}")
         else:
             if updated:
-                summary_parts.append(f"🎉 Обновлено {updated} задач в Jira!")
+                summary_parts.append(f"✅ Обновлено: {updated}")
             else:
-                # Сообщаем о результате даже если ничего не обновлено
-                summary_parts.append(f"📊 Результат обновления Jira:")
                 summary_parts.append(f"❌ Обновлено: 0")
                 if failed:
-                    summary_parts.append(
-                        f"❌ Ошибки: {len(failed)} ({', '.join(failed[:5])}{'...' if len(failed) > 5 else ''})"
-                    )
+                    summary_parts.append(f"❌ Ошибки: {len(failed)} ({', '.join(failed[:3])}{'...' if len(failed) > 3 else ''})")
                 if skipped:
                     summary_parts.append(f"⏭️ Пропущено: {len(skipped)}")
-                    if len(skipped) <= 3:
-                        for skip_reason in skipped:
-                            summary_parts.append(f"  • {skip_reason}")
 
         summary_text = "\n".join(summary_parts)
 
@@ -609,7 +597,7 @@ async def handle_update_jira_sp(callback: types.CallbackQuery, container: DICont
 
     except Exception as e:
         # Обработка любых исключений
-        error_text = "❌ Не удалось обновить Story Points. Попробуйте позже."
+        error_text = "❌ Сервис недоступен. Попробуйте позже."
         
         if status_msg and hasattr(status_msg, 'message_id'):
             try:
@@ -638,11 +626,12 @@ async def handle_update_jira_sp(callback: types.CallbackQuery, container: DICont
     finally:
         # Всегда снимаем busy-lock
         lock.release()
+        container.release_busy(busy_key)
 
 
 async def _show_day_summary(msg: types.Message, session: Session, container: DIContainer) -> None:
     """Show day summary."""
-    history, total_sp = container.show_results.get_day_summary(session.chat_id, session.topic_id)
+    history, total_sp = await container.show_results.get_day_summary(session.chat_id, session.topic_id)
     
     if not history:
         await container.notifier.send_message(
@@ -726,7 +715,7 @@ async def _start_next_task(
                 return
         except Exception:
             session.active_vote_message_id = None
-            container.session_repo.save_session(session)
+            await container.session_repo.save_session(session)
 
     sent = await container.notifier.send_message(
         chat_id=msg.chat.id,
@@ -735,7 +724,7 @@ async def _start_next_task(
         disable_web_page_preview=True,
     )
     session.active_vote_message_id = sent.message_id if sent else None
-    container.session_repo.save_session(session)
+    await container.session_repo.save_session(session)
 
 
 async def _finish_batch(msg: types.Message, session: Session, container: DIContainer) -> None:
@@ -751,10 +740,10 @@ async def _finish_batch(msg: types.Message, session: Session, container: DIConta
             )
         return
 
-    completed_tasks = container.finish_batch.execute(session.chat_id, session.topic_id)
+    completed_tasks = await container.finish_batch.execute(session.chat_id, session.topic_id)
 
     if completed_tasks:
-        session = container.session_repo.get_session(session.chat_id, session.topic_id)  # Refresh
+        session = await container.session_repo.get_session(session.chat_id, session.topic_id)  # Refresh
         await _show_batch_results(msg, session, container)
 
 

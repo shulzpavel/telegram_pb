@@ -1,0 +1,70 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: telegram-gateway
+  namespace: telegram-pb
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: telegram-gateway
+  template:
+    metadata:
+      labels:
+        app: telegram-gateway
+    spec:
+      containers:
+      - name: gateway
+        image: telegram-pb/gateway:latest
+        env:
+        - name: BOT_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: telegram-secrets
+              key: bot-token
+        - name: JIRA_SERVICE_URL
+          value: "http://jira-service:8001"
+        - name: VOTING_SERVICE_URL
+          value: "http://voting-service:8002"
+        - name: POSTGRES_DSN
+          valueFrom:
+            secretKeyRef:
+              name: postgres-secrets
+              key: dsn
+        - name: USER_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: telegram-secrets
+              key: user-token
+        - name: LEAD_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: telegram-secrets
+              key: lead-token
+        - name: ADMIN_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: telegram-secrets
+              key: admin-token
+        - name: SUPPORTED_TOPICS
+          valueFrom:
+            configMapKeyRef:
+              name: gateway-config
+              key: supported-topics
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "200m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: telegram-gateway
+  namespace: telegram-pb
+spec:
+  selector:
+    app: telegram-gateway
+  type: ClusterIP

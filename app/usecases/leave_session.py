@@ -12,9 +12,9 @@ class LeaveSessionUseCase:
     def __init__(self, session_repo: SessionRepository):
         self.session_repo = session_repo
 
-    def execute(self, chat_id: int, topic_id: Optional[int], user_id: int) -> bool:
+    async def execute(self, chat_id: int, topic_id: Optional[int], user_id: int) -> bool:
         """Remove user from session."""
-        session = self.session_repo.get_session(chat_id, topic_id)
+        session = await self.session_repo.get_session(chat_id, topic_id)
         
         if user_id not in session.participants:
             return False
@@ -23,5 +23,5 @@ class LeaveSessionUseCase:
         if session.current_task:
             session.current_task.votes.pop(user_id, None)
         
-        self.session_repo.save_session(session)
+        await self.session_repo.save_session(session)
         return True

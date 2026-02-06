@@ -27,7 +27,7 @@ class UpdateJiraStoryPointsUseCase:
         Returns:
             Tuple of (updated_count, failed_keys, skipped_reasons)
         """
-        session = self.session_repo.get_session(chat_id, topic_id)
+        session = await self.session_repo.get_session(chat_id, topic_id)
         
         if not session.last_batch:
             return 0, [], []
@@ -66,6 +66,6 @@ class UpdateJiraStoryPointsUseCase:
                     failed.append(task.jira_key)
         
         if updated > 0:
-            self.session_repo.save_session(session)
+            await self.session_repo.save_session(session)
         
         return updated, failed, skipped

@@ -12,7 +12,7 @@ class CastVoteUseCase:
     def __init__(self, session_repo: SessionRepository):
         self.session_repo = session_repo
 
-    def execute(
+    async def execute(
         self,
         chat_id: int,
         topic_id: Optional[int],
@@ -20,7 +20,7 @@ class CastVoteUseCase:
         vote_value: str,
     ) -> bool:
         """Cast vote for current task."""
-        session = self.session_repo.get_session(chat_id, topic_id)
+        session = await self.session_repo.get_session(chat_id, topic_id)
         
         if not session.current_task:
             return False
@@ -29,12 +29,12 @@ class CastVoteUseCase:
             return False
         
         session.current_task.votes[user_id] = vote_value
-        self.session_repo.save_session(session)
+        await self.session_repo.save_session(session)
         return True
 
-    def all_voters_voted(self, chat_id: int, topic_id: Optional[int]) -> bool:
+    async def all_voters_voted(self, chat_id: int, topic_id: Optional[int]) -> bool:
         """Check if all eligible voters have voted."""
-        session = self.session_repo.get_session(chat_id, topic_id)
+        session = await self.session_repo.get_session(chat_id, topic_id)
         
         if not session.current_task:
             return False
