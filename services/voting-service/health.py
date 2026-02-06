@@ -1,14 +1,14 @@
-"""Health check endpoints."""
+"""Health check endpoints for Voting Service."""
 
 from fastapi import APIRouter
 from pydantic import BaseModel
+
+from services.voting_service.repository import get_repository
 
 router = APIRouter()
 
 
 class HealthResponse(BaseModel):
-    """Health check response."""
-
     status: str
     service: str
     version: str
@@ -16,35 +16,29 @@ class HealthResponse(BaseModel):
 
 @router.get("/", response_model=HealthResponse)
 async def health_check() -> HealthResponse:
-    """Basic health check."""
-    return HealthResponse(
-        status="healthy",
-        service="voting-service",
-        version="1.0.0",
-    )
+    """Basic liveness."""
+    return HealthResponse(status="healthy", service="voting-service", version="1.0.0")
 
 
 @router.get("/ready")
 async def readiness_check() -> dict:
-    """Readiness check - verify database connection."""
+    """Readiness: инициализация и закрытие репозитория."""
+    repo = None
     try:
-        import sys
-from pathlib import Path
-
-# Add parent directory to path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-
-from services.voting_service.repository import get_repository
         repo = await get_repository()
-        # Try a simple operation
-        # For file-based, just check if it exists
-        await repo.close()
+        # Простая операция: сохранить/прочитать ничего не требуется, важно создать и закрыть
         return {"status": "ready"}
-    except Exception as e:
-        return {"status": "not_ready", "error": str(e)}
+    except Exception as exc:  # noqa: BLE001
+        return {"status": "not_ready", "error": str(exc)}
+    finally:
+        if repo and hasattr(repo, "close"):
+            try:
+                await repo.close()
+            except Exception:
+                pass
 
 
 @router.get("/live")
 async def liveness_check() -> dict:
-    """Liveness check."""
+    """Liveness endpoint."""
     return {"status": "alive"}
