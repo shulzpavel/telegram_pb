@@ -3,9 +3,12 @@ FROM python:3.11-slim
 ARG PIP_INDEX_URL=https://pypi.org/simple
 ARG PIP_DEFAULT_TIMEOUT=60
 
+# Avoid tz/locale prompts during install
+ENV DEBIAN_FRONTEND=noninteractive
+
 # Needed for container healthcheck (curl)
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends curl \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends curl \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
