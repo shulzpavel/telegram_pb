@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from services.jira_service.client import JiraServiceClient
 
 router = APIRouter()
+health_router = router  # backward compatibility
 
 
 class HealthResponse(BaseModel):

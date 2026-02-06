@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from services.voting_service.repository import get_repository
 
 router = APIRouter()
+health_router = router  # backward compatibility
 
 
 class HealthResponse(BaseModel):
