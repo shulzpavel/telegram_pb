@@ -1,14 +1,14 @@
-"""Health check endpoints."""
+"""Health check endpoints for Jira Service."""
 
 from fastapi import APIRouter
 from pydantic import BaseModel
+
+from services.jira_service.client import JiraServiceClient
 
 router = APIRouter()
 
 
 class HealthResponse(BaseModel):
-    """Health check response."""
-
     status: str
     service: str
     version: str
@@ -16,36 +16,22 @@ class HealthResponse(BaseModel):
 
 @router.get("/", response_model=HealthResponse)
 async def health_check() -> HealthResponse:
-    """Basic health check."""
-    return HealthResponse(
-        status="healthy",
-        service="jira-service",
-        version="1.0.0",
-    )
+    """Basic liveness."""
+    return HealthResponse(status="healthy", service="jira-service", version="1.0.0")
 
 
 @router.get("/ready")
 async def readiness_check() -> dict:
-    """Readiness check - verify Jira connection."""
-    import sys
-from pathlib import Path
-
-# Add parent directory to path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-
-from services.jira_service.client import JiraServiceClient
-    
+    """Readiness: попытка создать/закрыть клиент."""
     try:
         client = JiraServiceClient()
-        # Try a simple operation to verify connection
-        # For now, just check if client can be created
         await client.close()
         return {"status": "ready"}
-    except Exception as e:
-        return {"status": "not_ready", "error": str(e)}
+    except Exception as exc:  # noqa: BLE001
+        return {"status": "not_ready", "error": str(exc)}
 
 
 @router.get("/live")
 async def liveness_check() -> dict:
-    """Liveness check."""
+    """Liveness endpoint."""
     return {"status": "alive"}
