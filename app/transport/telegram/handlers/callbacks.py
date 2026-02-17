@@ -381,46 +381,18 @@ async def handle_vote(callback: types.CallbackQuery, container: DIContainer) -> 
             )
             return
 
-        if not session.current_task:
-            await callback.answer("❌ Нет активной задачи для пересмотра")
-            return
-
-        current_index = session.current_task_index
-        task_to_review = session.current_task
-        was_single_task = len(session.tasks_queue) == 1
         active_msg_id = session.active_vote_message_id
-
-        task = session.tasks_queue.pop(current_index)
-        task.votes.clear()
-        session.tasks_queue.append(task)
-
-        if was_single_task:
-            session.active_vote_message_id = None
-            await container.session_repo.save_session(session)
-
-            if active_msg_id:
-                await container.notifier.delete_message(chat_id=chat_id, message_id=active_msg_id)
-
-            await callback.answer("🔄 Задача возвращена в конец очереди. Завершаем батч.")
-            await _finish_batch(callback.message, session, container)
-            return
-
-        if current_index >= len(session.tasks_queue):
-            session.current_task_index = len(session.tasks_queue) - 1
-
-        active_msg_id = session.active_vote_message_id
-        session.active_vote_message_id = None
-
-        await container.session_repo.save_session(session)
-        await callback.answer("🔄 Задача возвращена в конец очереди для пересмотра")
+        batch_finished, session = await container.needs_review.execute(chat_id, topic_id, user_id)
 
         if active_msg_id:
             await container.notifier.delete_message(chat_id=chat_id, message_id=active_msg_id)
 
-        if session.current_task and session.current_task != task_to_review:
-            await _start_next_task(callback.message, session, container, user_id=user_id)
-        else:
+        if batch_finished:
+            await callback.answer("🔄 Задача возвращена в конец очереди. Завершаем батч.")
             await _finish_batch(callback.message, session, container)
+        else:
+            await callback.answer("🔄 Задача возвращена в конец очереди для пересмотра")
+            await _start_next_task(callback.message, session, container, user_id=user_id)
         return
 
     # Обычное голосование
@@ -436,11 +408,12 @@ async def handle_vote(callback: types.CallbackQuery, container: DIContainer) -> 
             await _update_vote_message(session, container, user_id)
 
         if await container.cast_vote.all_voters_voted(chat_id, topic_id):
-            # Move to next task
+            batch_finished, _ = await container.advance_task.execute(chat_id, topic_id)
             session = await container.session_repo.get_session(chat_id, topic_id)
-            session.current_task_index += 1
-            await container.session_repo.save_session(session)
-            await _start_next_task(callback.message, session, container, user_id=user_id)
+            if batch_finished:
+                await _finish_batch(callback.message, session, container)
+            else:
+                await _start_next_task(callback.message, session, container, user_id=user_id)
 
 
 async def _update_vote_message(session: Session, container: DIContainer, user_id: int) -> None:
@@ -714,6 +687,14 @@ async def _start_next_task(
             if edited:
                 return
         except Exception:
+            # Edit не удался — удаляем старое сообщение, чтобы не дублировать
+            try:
+                await container.notifier.delete_message(
+                    chat_id=msg.chat.id,
+                    message_id=session.active_vote_message_id,
+                )
+            except Exception:
+                pass
             session.active_vote_message_id = None
             await container.session_repo.save_session(session)
 

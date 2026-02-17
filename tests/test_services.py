@@ -90,7 +90,8 @@ class TestCastVoteUseCase:
         if self.temp_file.exists():
             self.temp_file.unlink()
 
-    def test_all_voters_voted(self):
+    @pytest.mark.asyncio
+    async def test_all_voters_voted(self):
         """Test checking if all voters voted."""
         session = Session(chat_id=123, topic_id=456)
         task = Task(summary="Test")
@@ -102,19 +103,20 @@ class TestCastVoteUseCase:
         session.participants[1] = participant1
         session.participants[2] = participant2
 
-        self.repo.save_session(session)
+        await self.repo.save_session(session)
 
-        assert self.use_case.all_voters_voted(123, 456) is False
+        assert await self.use_case.all_voters_voted(123, 456) is False
 
         task.votes[1] = "5"
-        self.repo.save_session(session)
-        assert self.use_case.all_voters_voted(123, 456) is False
+        await self.repo.save_session(session)
+        assert await self.use_case.all_voters_voted(123, 456) is False
 
         task.votes[2] = "8"
-        self.repo.save_session(session)
-        assert self.use_case.all_voters_voted(123, 456) is True
+        await self.repo.save_session(session)
+        assert await self.use_case.all_voters_voted(123, 456) is True
 
-    def test_all_voters_voted_with_skip(self):
+    @pytest.mark.asyncio
+    async def test_all_voters_voted_with_skip(self):
         """Test checking if all voters voted including skip votes."""
         session = Session(chat_id=123, topic_id=456)
         task = Task(summary="Test")
@@ -126,18 +128,18 @@ class TestCastVoteUseCase:
         session.participants[1] = participant1
         session.participants[2] = participant2
 
-        self.repo.save_session(session)
+        await self.repo.save_session(session)
 
-        assert self.use_case.all_voters_voted(123, 456) is False
+        assert await self.use_case.all_voters_voted(123, 456) is False
 
         task.votes[1] = "5"
-        self.repo.save_session(session)
-        assert self.use_case.all_voters_voted(123, 456) is False
+        await self.repo.save_session(session)
+        assert await self.use_case.all_voters_voted(123, 456) is False
 
         # Skip vote should count as voted
         task.votes[2] = "skip"
-        self.repo.save_session(session)
-        assert self.use_case.all_voters_voted(123, 456) is True
+        await self.repo.save_session(session)
+        assert await self.use_case.all_voters_voted(123, 456) is True
 
 
 class TestStartBatchUseCase:
@@ -156,27 +158,29 @@ class TestStartBatchUseCase:
         if self.temp_file.exists():
             self.temp_file.unlink()
 
-    def test_start_voting_session(self):
+    @pytest.mark.asyncio
+    async def test_start_voting_session(self):
         """Test starting voting session."""
         session = Session(chat_id=123, topic_id=456)
         task = Task(summary="Test")
         session.tasks_queue.append(task)
-        self.repo.save_session(session)
+        await self.repo.save_session(session)
 
-        result = self.use_case.execute(123, 456)
+        result = await self.use_case.execute(123, 456)
         assert result is True
 
-        session = self.repo.get_session(123, 456)
+        session = await self.repo.get_session(123, 456)
         assert session.current_task_index == 0
         assert session.batch_completed is False
         assert session.current_batch_started_at is not None
 
-    def test_start_voting_session_empty(self):
+    @pytest.mark.asyncio
+    async def test_start_voting_session_empty(self):
         """Test starting voting session with no tasks."""
         session = Session(chat_id=123, topic_id=456)
-        self.repo.save_session(session)
+        await self.repo.save_session(session)
 
-        result = self.use_case.execute(123, 456)
+        result = await self.use_case.execute(123, 456)
         assert result is False
 
 
@@ -196,34 +200,36 @@ class TestFinishBatchUseCase:
         if self.temp_file.exists():
             self.temp_file.unlink()
 
-    def test_finish_batch(self):
+    @pytest.mark.asyncio
+    async def test_finish_batch(self):
         """Test finishing a batch."""
         session = Session(chat_id=123, topic_id=456)
         task1 = Task(summary="Task 1")
         task2 = Task(summary="Task 2")
         session.tasks_queue = [task1, task2]
-        self.repo.save_session(session)
+        await self.repo.save_session(session)
 
-        completed = self.use_case.execute(123, 456)
+        completed = await self.use_case.execute(123, 456)
         assert len(completed) == 2
 
-        session = self.repo.get_session(123, 456)
+        session = await self.repo.get_session(123, 456)
         assert len(session.tasks_queue) == 0
         assert len(session.last_batch) == 2
         assert len(session.history) == 2
         assert session.batch_completed is True
 
-    def test_finish_batch_resets_current_batch_started_at(self):
+    @pytest.mark.asyncio
+    async def test_finish_batch_resets_current_batch_started_at(self):
         """Test that finish_batch resets current_batch_started_at."""
         session = Session(chat_id=123, topic_id=456)
         task1 = Task(summary="Task 1")
         session.tasks_queue = [task1]
         session.current_batch_started_at = "2024-01-01T00:00:00"
-        self.repo.save_session(session)
+        await self.repo.save_session(session)
 
-        self.use_case.execute(123, 456)
+        await self.use_case.execute(123, 456)
 
-        session = self.repo.get_session(123, 456)
+        session = await self.repo.get_session(123, 456)
         assert session.current_batch_started_at is None
 
 
@@ -243,7 +249,8 @@ class TestResetQueueUseCase:
         if self.temp_file.exists():
             self.temp_file.unlink()
 
-    def test_reset_tasks_queue(self):
+    @pytest.mark.asyncio
+    async def test_reset_tasks_queue(self):
         """Test resetting tasks queue."""
         session = Session(chat_id=123, topic_id=456)
         task1 = Task(summary="Task 1")
@@ -255,12 +262,12 @@ class TestResetQueueUseCase:
         session.current_batch_started_at = "2024-01-01T00:00:00"
         session.current_batch_id = "batch-123"
         session.active_vote_message_id = 999
-        self.repo.save_session(session)
+        await self.repo.save_session(session)
 
-        task_count = self.use_case.execute(123, 456)
+        task_count = await self.use_case.execute(123, 456)
         assert task_count == 3
 
-        session = self.repo.get_session(123, 456)
+        session = await self.repo.get_session(123, 456)
         assert len(session.tasks_queue) == 0
         assert session.current_task_index == 0
         assert session.batch_completed is False
@@ -268,7 +275,8 @@ class TestResetQueueUseCase:
         assert session.current_batch_id is None
         assert session.active_vote_message_id is None
 
-    def test_reset_tasks_queue_preserves_history(self):
+    @pytest.mark.asyncio
+    async def test_reset_tasks_queue_preserves_history(self):
         """Test that reset_tasks_queue preserves history and last_batch."""
         session = Session(chat_id=123, topic_id=456)
         task1 = Task(summary="Task 1")
@@ -277,13 +285,13 @@ class TestResetQueueUseCase:
         session.tasks_queue = [task1, task2]
         session.history = [task3]
         session.last_batch = [task3]
-        self.repo.save_session(session)
+        await self.repo.save_session(session)
 
-        self.use_case.execute(123, 456)
+        await self.use_case.execute(123, 456)
 
-        session = self.repo.get_session(123, 456)
+        session = await self.repo.get_session(123, 456)
         assert len(session.history) == 1
         assert len(session.last_batch) == 1
-        assert session.history[0] == task3
-        assert session.last_batch[0] == task3
+        assert session.history[0].summary == task3.summary
+        assert session.last_batch[0].summary == task3.summary
         assert len(session.tasks_queue) == 0

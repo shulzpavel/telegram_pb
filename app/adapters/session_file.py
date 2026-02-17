@@ -1,4 +1,11 @@
-"""File-based adapter for session repository."""
+"""File-based adapter for session repository.
+
+Mapping SessionState (session_store) <-> Session (domain):
+- SessionState.votes: legacy global field; on load ignored (votes come from tasks_queue).
+- Session stores votes inside Task.votes.
+- On save: state.votes = session.current_task.votes (for backward compat).
+- tasks_queue, history, last_batch: lists of Task <-> dict with 'votes' key.
+"""
 
 from pathlib import Path
 from typing import Optional

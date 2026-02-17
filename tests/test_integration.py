@@ -35,7 +35,8 @@ class TestFullWorkflow:
         if self.temp_file.exists():
             self.temp_file.unlink()
 
-    def test_full_workflow_with_reset(self):
+    @pytest.mark.asyncio
+    async def test_full_workflow_with_reset(self):
         """Test complete workflow: create session → add tasks → vote → reset queue."""
         # 1. Создаём сессию
         session = Session(chat_id=123, topic_id=456)
@@ -60,13 +61,13 @@ class TestFullWorkflow:
         assert len(session.history) == 0
         assert len(session.last_batch) == 0
 
-        self.repo.save_session(session)
+        await self.repo.save_session(session)
 
         # 3. Старт голосования
-        result = self.start_batch.execute(123, 456)
+        result = await self.start_batch.execute(123, 456)
         assert result is True
 
-        session = self.repo.get_session(123, 456)
+        session = await self.repo.get_session(123, 456)
         assert session.current_task_index == 0
         assert session.current_task.jira_key == task1.jira_key
         assert session.current_batch_started_at is not None
@@ -74,21 +75,21 @@ class TestFullWorkflow:
 
         # 4. Голосуем по первой задаче (с одним skip)
         # Lead голосует
-        self.cast_vote.execute(123, 456, 1, "5")
+        await self.cast_vote.execute(123, 456, 1, "5")
         # Participant1 голосует
-        self.cast_vote.execute(123, 456, 2, "8")
+        await self.cast_vote.execute(123, 456, 2, "8")
         # Participant2 пропускает
-        self.cast_vote.execute(123, 456, 3, "skip")
+        await self.cast_vote.execute(123, 456, 3, "skip")
 
         # Проверяем, что все проголосовали
-        assert self.cast_vote.all_voters_voted(123, 456) is True
+        assert await self.cast_vote.all_voters_voted(123, 456) is True
 
         # Переходим к следующей задаче (вручную, так как usecase не делает это автоматически)
-        session = self.repo.get_session(123, 456)
+        session = await self.repo.get_session(123, 456)
         session.current_task_index += 1
-        self.repo.save_session(session)
+        await self.repo.save_session(session)
 
-        session = self.repo.get_session(123, 456)
+        session = await self.repo.get_session(123, 456)
         assert session.current_task == task2
         assert session.current_task_index == 1
         # Проверяем голоса в истории (task1 теперь в истории после перехода)
@@ -105,17 +106,17 @@ class TestFullWorkflow:
             assert len(task1_from_repo.votes) == 3
 
         # 5. Голосуем по второй задаче
-        self.cast_vote.execute(123, 456, 1, "3")
-        self.cast_vote.execute(123, 456, 2, "3")
-        self.cast_vote.execute(123, 456, 3, "5")
+        await self.cast_vote.execute(123, 456, 1, "3")
+        await self.cast_vote.execute(123, 456, 2, "3")
+        await self.cast_vote.execute(123, 456, 3, "5")
 
-        assert self.cast_vote.all_voters_voted(123, 456) is True
+        assert await self.cast_vote.all_voters_voted(123, 456) is True
 
         # Завершаем батч
-        completed_tasks = self.finish_batch.execute(123, 456)
+        completed_tasks = await self.finish_batch.execute(123, 456)
         assert len(completed_tasks) == 2
 
-        session = self.repo.get_session(123, 456)
+        session = await self.repo.get_session(123, 456)
         assert len(session.tasks_queue) == 0
         assert len(session.last_batch) == 2
         assert len(session.history) == 2
@@ -141,13 +142,13 @@ class TestFullWorkflow:
 
         assert len(session.tasks_queue) == 2
 
-        self.repo.save_session(session)
+        await self.repo.save_session(session)
 
         # 7. Сбрасываем очередь
-        task_count = self.reset_queue.execute(123, 456)
+        task_count = await self.reset_queue.execute(123, 456)
 
         # Проверяем, что очередь очищена
-        session = self.repo.get_session(123, 456)
+        session = await self.repo.get_session(123, 456)
         assert len(session.tasks_queue) == 0
         assert session.current_task_index == 0
         assert session.current_batch_started_at is None
@@ -162,7 +163,8 @@ class TestFullWorkflow:
         assert session.last_batch[0].jira_key == task1.jira_key
         assert session.last_batch[1].jira_key == task2.jira_key
 
-    def test_needs_review_functionality(self):
+    @pytest.mark.asyncio
+    async def test_needs_review_functionality(self):
         """Test 'needs review' functionality - task moved to end of queue."""
         session = Session(chat_id=123, topic_id=456)
 
@@ -179,10 +181,10 @@ class TestFullWorkflow:
         # Добавляем голоса в task1
         task1.votes[1] = "5"
 
-        self.repo.save_session(session)
+        await self.repo.save_session(session)
 
         # Симулируем "Нужен пересмотр" - возвращаем task1 в конец
-        session = self.repo.get_session(123, 456)
+        session = await self.repo.get_session(123, 456)
         current_task = session.tasks_queue[session.current_task_index]
         assert current_task.jira_key == task1.jira_key
 
@@ -197,9 +199,10 @@ class TestFullWorkflow:
         assert session.tasks_queue[-1].jira_key == task1.jira_key  # Последняя теперь task1
         assert len(session.tasks_queue[-1].votes) == 0  # Голоса очищены (используем объект из репозитория)
 
-        self.repo.save_session(session)
+        await self.repo.save_session(session)
 
-    def test_voting_lists_display(self):
+    @pytest.mark.asyncio
+    async def test_voting_lists_display(self):
         """Test that voting lists (voted/waiting) are correctly calculated."""
         session = Session(chat_id=123, topic_id=456)
 
@@ -217,19 +220,19 @@ class TestFullWorkflow:
         session.tasks_queue.append(task)
         session.current_task_index = 0
 
-        self.repo.save_session(session)
+        await self.repo.save_session(session)
 
         # Eligible voters: lead (1) and participants (2, 3), but NOT admin (4)
-        session = self.repo.get_session(123, 456)
+        session = await self.repo.get_session(123, 456)
         eligible_voters = [uid for uid in session.participants if session.can_vote(uid)]
         assert set(eligible_voters) == {1, 2, 3}
         assert 4 not in eligible_voters
 
         # Голосуют lead и participant1
-        self.cast_vote.execute(123, 456, 1, "5")
-        self.cast_vote.execute(123, 456, 2, "8")
+        await self.cast_vote.execute(123, 456, 1, "5")
+        await self.cast_vote.execute(123, 456, 2, "8")
 
-        session = self.repo.get_session(123, 456)
+        session = await self.repo.get_session(123, 456)
         voted_user_ids = set(session.current_task.votes.keys())
         waiting_user_ids = [uid for uid in eligible_voters if uid not in voted_user_ids]
 
