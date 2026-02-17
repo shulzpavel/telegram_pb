@@ -377,12 +377,14 @@ async def handle_vote(callback: types.CallbackQuery, container: DIContainer) -> 
         await _send_access_denied(callback, "❌ Администраторы не участвуют в голосовании.", container)
         return
 
-    # Проверка актуальности кнопки (защита от устаревших сообщений)
-    if not session.is_voting_active:
+    # Проверка актуальности кнопки (message_id в приоритете — если совпадает, это текущее голосование)
+    msg_id = callback.message.message_id if callback.message else None
+    if session.active_vote_message_id is not None and msg_id == session.active_vote_message_id:
+        pass  # кнопка актуальная, голосование активно
+    elif not session.is_voting_active:
         await callback.answer("⏹️ Голосование закрыто.")
         return
-    msg_id = callback.message.message_id if callback.message else None
-    if session.active_vote_message_id is None or msg_id != session.active_vote_message_id:
+    elif session.active_vote_message_id is None or msg_id != session.active_vote_message_id:
         await callback.answer("⏹️ Кнопка устарела.")
         return
 
