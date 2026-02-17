@@ -31,6 +31,17 @@ async def main(use_polling: bool = True) -> None:
     # Setup routers with DI
     setup_routers(dp, container)
 
+    # Фоновая проверка доступности сервисов (раз в 5 мин, без спама)
+    health_task = None
+    try:
+        from app.adapters.metrics_null import NullMetricsRepository
+        if not isinstance(container.metrics, NullMetricsRepository):
+            from app.services.health_checker import health_check_loop
+            health_task = asyncio.create_task(health_check_loop(container.metrics))
+            print("✅ Service health checks enabled (every 5 min)")
+    except Exception:
+        pass
+
     try:
         if use_polling:
             print("✅ Bot is polling. Waiting for messages...")
@@ -46,7 +57,12 @@ async def main(use_polling: bool = True) -> None:
             print("✅ Bot launched without polling (assumed secondary instance). Staying idle...")
             await asyncio.Future()
     finally:
-        # Cleanup resources
+        if health_task and not health_task.done():
+            health_task.cancel()
+            try:
+                await health_task
+            except asyncio.CancelledError:
+                pass
         await container.cleanup()
         await bot.session.close()
 

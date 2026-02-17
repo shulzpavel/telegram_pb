@@ -32,6 +32,9 @@ docker logs telegram-pb-grafana-init
 | Errors per minute | График ошибок в минуту |
 | Top actions (last 24h) | Топ событий: vote, menu_click, jql_query, update_jira_sp, handler_error |
 | Recent errors | Таблица последних ошибок (ts, event, payload) |
+| Services down (15m) | Количество сбоев сервисов (voting/jira) за 15 мин |
+| Service health failures | График сбоев health check |
+| Last health per service | Последняя проверка каждого сервиса |
 
 ## Настройка алертов (Alertmanager)
 
@@ -70,7 +73,10 @@ Grafana имеет встроенный Alertmanager — **Alerting → Contact 
 |---------|--------|---------|----------|
 | Error spike | `SELECT count(*) FROM bot_events WHERE status='error' AND ts > now()-interval '5m'` | Last > 5 | Много ошибок |
 | Handler errors | `SELECT count(*) FROM bot_events WHERE event='handler_error' AND ts > now()-interval '10m'` | Last > 0 | Ошибки обработчиков |
+| **Service unavailable** | `SELECT count(*) FROM bot_events WHERE event='service_health' AND status='error' AND ts > now()-interval '10m'` | Last > 0 | Voting/Jira недоступны или таймаут |
 | No activity (опционально) | `SELECT count(*) FROM bot_events WHERE ts > now()-interval '30m'` | Last < 1 | Бот «молчит» (осторожно: ночь/выходные) |
+
+Подробнее см. **docs/GRAFANA_ALERTING.md** — рекомендации по алертингу и обогащению без спама.
 
 ## Переменные в .env
 
