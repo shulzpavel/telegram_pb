@@ -10,6 +10,7 @@
         "gridPos": {"h": 4, "w": 6, "x": 0, "y": 0},
         "targets": [
           {
+            "datasource": {"type": "postgres", "uid": "postgres"},
             "rawSql": "SELECT count(*) as cnt FROM bot_events WHERE ts > now() - interval '1 hour'",
             "format": "table",
             "refId": "A"
@@ -22,6 +23,7 @@
         "gridPos": {"h": 4, "w": 6, "x": 6, "y": 0},
         "targets": [
           {
+            "datasource": {"type": "postgres", "uid": "postgres"},
             "rawSql": "SELECT count(*) as cnt FROM bot_events WHERE ts > now() - interval '1 hour' AND status = 'error'",
             "format": "table",
             "refId": "A"
@@ -34,6 +36,7 @@
         "gridPos": {"h": 8, "w": 12, "x": 0, "y": 4},
         "targets": [
           {
+            "datasource": {"type": "postgres", "uid": "postgres"},
             "rawSql": "SELECT date_trunc('minute', ts) as time, count(*) as events FROM bot_events WHERE $__timeFilter(ts) GROUP BY 1 ORDER BY 1",
             "format": "time_series",
             "refId": "A"
@@ -46,6 +49,7 @@
         "gridPos": {"h": 8, "w": 12, "x": 12, "y": 4},
         "targets": [
           {
+            "datasource": {"type": "postgres", "uid": "postgres"},
             "rawSql": "SELECT date_trunc('minute', ts) as time, count(*) as errors FROM bot_events WHERE $__timeFilter(ts) AND status = 'error' GROUP BY 1 ORDER BY 1",
             "format": "time_series",
             "refId": "A"
@@ -58,6 +62,7 @@
         "gridPos": {"h": 8, "w": 12, "x": 0, "y": 12},
         "targets": [
           {
+            "datasource": {"type": "postgres", "uid": "postgres"},
             "rawSql": "SELECT event as metric, count(*) as value FROM bot_events WHERE ts > now() - interval '24 hours' GROUP BY event ORDER BY value DESC LIMIT 10",
             "format": "table",
             "refId": "A"
@@ -70,6 +75,7 @@
         "gridPos": {"h": 8, "w": 12, "x": 12, "y": 12},
         "targets": [
           {
+            "datasource": {"type": "postgres", "uid": "postgres"},
             "rawSql": "SELECT ts, event, status, payload FROM bot_events WHERE status = 'error' ORDER BY ts DESC LIMIT 20",
             "format": "table",
             "refId": "A"
