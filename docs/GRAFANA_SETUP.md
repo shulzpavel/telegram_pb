@@ -7,6 +7,13 @@
 3. Grafana: http://localhost:3000 — логин `admin`, пароль `admin` (или `GRAFANA_ADMIN_PASSWORD` из `.env`)
 4. Дашборд **Telegram PB Overview** уже загружен в папку "Telegram PB"
 
+## Если панели пустые или с ошибками
+
+1. **Datasource** — Connections → PostgreSQL: нажмите "Save & test". Должно быть "Connection successful".
+2. **Таблица bot_events** — метрики пишет только gateway при наличии `POSTGRES_DSN`. В docker-compose DSN задаётся автоматически; при ручном запуске проверьте `.env`.
+3. **Тест данных** — в Grafana: Explore → PostgreSQL → выполните `SELECT count(*) FROM bot_events`. Если 0 — бот ещё не писал события (сделайте действие в боте).
+4. **Панели Events/Errors (last 1h)** показывают 0 при отсутствии данных за последний час — это нормально.
+
 ## Что выводится на дашборде
 
 | Панель | Описание |

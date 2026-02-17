@@ -34,7 +34,7 @@
         "gridPos": {"h": 8, "w": 12, "x": 0, "y": 4},
         "targets": [
           {
-            "rawSql": "SELECT $__timeGroup(ts, '1m') as time, count(*) as events FROM bot_events WHERE $__timeFilter(ts) GROUP BY 1 ORDER BY 1",
+            "rawSql": "SELECT date_trunc('minute', ts) as time, count(*) as events FROM bot_events WHERE $__timeFilter(ts) GROUP BY 1 ORDER BY 1",
             "format": "time_series",
             "refId": "A"
           }
@@ -46,7 +46,7 @@
         "gridPos": {"h": 8, "w": 12, "x": 12, "y": 4},
         "targets": [
           {
-            "rawSql": "SELECT $__timeGroup(ts, '1m') as time, count(*) as errors FROM bot_events WHERE $__timeFilter(ts) AND status = 'error' GROUP BY 1 ORDER BY 1",
+            "rawSql": "SELECT date_trunc('minute', ts) as time, count(*) as errors FROM bot_events WHERE $__timeFilter(ts) AND status = 'error' GROUP BY 1 ORDER BY 1",
             "format": "time_series",
             "refId": "A"
           }
