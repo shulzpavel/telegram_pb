@@ -73,16 +73,9 @@ async def cmd_start_help(msg: types.Message, container: DIContainer) -> None:
             msg.answer,
             f"👋 Добро пожаловать! Ваша роль: {_format_role_label(participant.role)}",
             reply_markup=get_main_menu(session, can_manage),
-            message_thread_id=topic_id,
         )
     else:
-        await safe_call(
-            msg.answer,
-            text,
-            parse_mode="Markdown",
-            reply_markup=get_main_menu(session, can_manage),
-            message_thread_id=topic_id,
-        )
+        await safe_call(msg.answer, text, parse_mode="Markdown", reply_markup=get_main_menu(session, can_manage))
 
 
 @router.message(Command("join"))
@@ -93,18 +86,18 @@ async def cmd_join(msg: types.Message, container: DIContainer) -> None:
         return
 
     if not msg.text:
-        await safe_call(msg.answer, "❌ Использование: /join токен", parse_mode=None, message_thread_id=topic_id)
+        await safe_call(msg.answer, "❌ Использование: /join токен", parse_mode=None)
         return
 
     args = msg.text.split()
     if len(args) != 2:
-        await safe_call(msg.answer, "❌ Использование: /join токен", parse_mode=None, message_thread_id=topic_id)
+        await safe_call(msg.answer, "❌ Использование: /join токен", parse_mode=None)
         return
 
     token = args[1]
     role = _resolve_role_by_token(token)
     if role is None:
-        await safe_call(msg.answer, "❌ Неверный токен.", parse_mode=None, message_thread_id=topic_id)
+        await safe_call(msg.answer, "❌ Неверный токен.", parse_mode=None)
         return
 
     user_id = msg.from_user.id
@@ -120,14 +113,8 @@ async def cmd_join(msg: types.Message, container: DIContainer) -> None:
     await safe_call(
         msg.answer,
         f"✅ {msg.from_user.full_name} присоединился как {_format_role_label(role)}.",
-        message_thread_id=topic_id,
     )
-    await safe_call(
-        msg.answer,
-        "📌 Главное меню:",
-        reply_markup=get_main_menu(session, can_manage),
-        message_thread_id=topic_id,
-    )
+    await safe_call(msg.answer, "📌 Главное меню:", reply_markup=get_main_menu(session, can_manage))
 
 
 @router.message(Command("results", "last_batch"))
@@ -141,12 +128,12 @@ async def cmd_results(msg: types.Message, container: DIContainer) -> None:
 
     user_id = msg.from_user.id
     if user_id not in session.participants:
-        await safe_call(msg.answer, "❌ Вы не зарегистрированы через /join.", message_thread_id=topic_id)
+        await safe_call(msg.answer, "❌ Вы не зарегистрированы через /join.")
         return
 
     batch_results = await container.show_results.get_batch_results(chat_id, topic_id)
     if not batch_results:
-        await safe_call(msg.answer, "📭 Нет результатов последнего батча.", message_thread_id=topic_id)
+        await safe_call(msg.answer, "📭 Нет результатов последнего батча.")
         return
 
     # Import here to avoid circular dependency
