@@ -8,7 +8,12 @@
 4. Дашборд **Telegram PB Overview** уже загружен в папку "Telegram PB"
 
 ### Если дашборд не появился
-**Ручной импорт:** Dashboards → New → Import → Upload JSON file → выбери `docs/grafana-dashboard-telegram-pb.json`, затем укажи PostgreSQL как datasource. Либо скопируй содержимое файла и вставь в "Import via panel json".
+Сервис `grafana-init` импортирует дашборд через API при первом запуске. Проверь логи:
+```bash
+docker logs telegram-pb-grafana-init
+```
+
+**Ручной импорт:** Dashboards → New → Import → Upload JSON file → выбери `docs/grafana-dashboard-telegram-pb.json`, затем укажи PostgreSQL как datasource.
 
 ## Если панели пустые или с ошибками
 
