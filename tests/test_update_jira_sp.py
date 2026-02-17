@@ -106,8 +106,8 @@ class TestShowBatchResultsSP:
         task2.votes = {1: "3", 2: "3"}
         
         session.last_batch = [task1, task2]
-        self.repo.save_session(session)
-        
+        # Тест проверяет VotingPolicy напрямую, сохранение в repo не требуется
+
         # Проверяем, что SP правильно вычисляются
         from app.usecases.show_results import VotingPolicy
         policy = VotingPolicy()

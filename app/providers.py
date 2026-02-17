@@ -15,10 +15,12 @@ from app.ports.notifier import Notifier
 from app.ports.session_repository import SessionRepository
 from app.ports.metrics_repository import MetricsRepository
 from app.usecases.add_tasks import AddTasksFromJiraUseCase
+from app.usecases.advance_task import AdvanceToNextTaskUseCase
 from app.usecases.cast_vote import CastVoteUseCase
 from app.usecases.finish_batch import FinishBatchUseCase
 from app.usecases.join_session import JoinSessionUseCase
 from app.usecases.leave_session import LeaveSessionUseCase
+from app.usecases.needs_review import NeedsReviewUseCase
 from app.usecases.reset_queue import ResetQueueUseCase
 from app.usecases.show_results import ShowResultsUseCase
 from app.usecases.start_batch import StartBatchUseCase
@@ -77,6 +79,19 @@ class DIContainer:
         self.busy_ops: set[Tuple] = set()
         self._busy_locks: Dict[Tuple, asyncio.Lock] = {}
 
+        # Use cases
+        self.add_tasks = AddTasksFromJiraUseCase(self._jira_client, self._session_repo)
+        self.advance_task = AdvanceToNextTaskUseCase(self._session_repo)
+        self.start_batch = StartBatchUseCase(self._session_repo)
+        self.cast_vote = CastVoteUseCase(self._session_repo)
+        self.finish_batch = FinishBatchUseCase(self._session_repo)
+        self.needs_review = NeedsReviewUseCase(self._session_repo)
+        self.show_results = ShowResultsUseCase(self._session_repo)
+        self.join_session = JoinSessionUseCase(self._session_repo)
+        self.leave_session = LeaveSessionUseCase(self._session_repo)
+        self.reset_queue = ResetQueueUseCase(self._session_repo)
+        self.update_jira_sp = UpdateJiraStoryPointsUseCase(self._jira_client, self._session_repo)
+
     async def acquire_busy(self, key: Tuple) -> asyncio.Lock:
         """Acquire busy lock for key. Returns lock object."""
         if key not in self._busy_locks:
@@ -86,17 +101,6 @@ class DIContainer:
     def release_busy(self, key: Tuple) -> None:
         """Release busy flag for key."""
         self.busy_ops.discard(key)
-
-        # Use cases
-        self.add_tasks = AddTasksFromJiraUseCase(self._jira_client, self._session_repo)
-        self.start_batch = StartBatchUseCase(self._session_repo)
-        self.cast_vote = CastVoteUseCase(self._session_repo)
-        self.finish_batch = FinishBatchUseCase(self._session_repo)
-        self.show_results = ShowResultsUseCase(self._session_repo)
-        self.join_session = JoinSessionUseCase(self._session_repo)
-        self.leave_session = LeaveSessionUseCase(self._session_repo)
-        self.reset_queue = ResetQueueUseCase(self._session_repo)
-        self.update_jira_sp = UpdateJiraStoryPointsUseCase(self._jira_client, self._session_repo)
 
     @property
     def jira_client(self) -> JiraClient:

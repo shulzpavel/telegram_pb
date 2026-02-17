@@ -54,10 +54,10 @@ class TestE2EHandlers:
             if temp_file.exists():
                 temp_file.unlink()
             repo = FileSessionRepository(temp_file)
-            repo.save_session(session)
+            await repo.save_session(session)
             finish_batch = FinishBatchUseCase(repo)
-            completed_tasks = finish_batch.execute(123, 456)
-            session = repo.get_session(123, 456)
+            completed_tasks = await finish_batch.execute(123, 456)
+            session = await repo.get_session(123, 456)
             if temp_file.exists():
                 temp_file.unlink()
             assert len(completed_tasks) == 1
