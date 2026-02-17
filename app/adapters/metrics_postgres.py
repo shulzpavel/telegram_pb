@@ -2,11 +2,14 @@
 
 import asyncio
 import json
+import logging
 from typing import Any, Dict, Optional
 
 import asyncpg
 
 from app.ports.metrics_repository import MetricsRepository
+
+logger = logging.getLogger(__name__)
 
 
 class PostgresMetricsRepository(MetricsRepository):
@@ -57,20 +60,24 @@ class PostgresMetricsRepository(MetricsRepository):
         status: str = "ok",
         payload: Optional[Dict[str, Any]] = None,
     ) -> None:
-        pool = await self._get_pool()
-        async with pool.acquire() as conn:
-            await conn.execute(
-                f"""
-                INSERT INTO {self.table} (event, status, chat_id, topic_id, user_id, payload)
-                VALUES ($1, $2, $3, $4, $5, $6)
-                """,
-                event,
-                status,
-                chat_id,
-                topic_id,
-                user_id,
-                json.dumps(payload or {}),
-            )
+        """Record event. Swallows errors so bot works even when Postgres is unreachable."""
+        try:
+            pool = await self._get_pool()
+            async with pool.acquire() as conn:
+                await conn.execute(
+                    f"""
+                    INSERT INTO {self.table} (event, status, chat_id, topic_id, user_id, payload)
+                    VALUES ($1, $2, $3, $4, $5, $6)
+                    """,
+                    event,
+                    status,
+                    chat_id,
+                    topic_id,
+                    user_id,
+                    json.dumps(payload or {}),
+                )
+        except Exception as exc:
+            logger.debug("Metrics record_event failed (Postgres unavailable): %s", exc)
 
     async def close(self) -> None:
         if self._pool:
