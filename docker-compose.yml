@@ -124,7 +124,7 @@ services:
     restart: unless-stopped
 
   grafana-init:
-    image: curlimages/curl:8
+    image: curlimages/curl:latest
     container_name: telegram-pb-grafana-init
     entrypoint: ["/bin/sh", "-c"]
     command:
