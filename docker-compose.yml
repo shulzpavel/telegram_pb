@@ -84,12 +84,13 @@ services:
       context: .
       dockerfile: services/gateway/Dockerfile
       network: host
+      args:
+        PIP_DEFAULT_TIMEOUT: 120
     container_name: telegram-gateway
     environment:
       - BOT_TOKEN=${BOT_TOKEN}
       - JIRA_SERVICE_URL=http://jira-service:8001
       - VOTING_SERVICE_URL=http://voting-service:8002
-      - POSTGRES_DSN=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-telegram_pb}
       - USER_TOKEN=${USER_TOKEN}
       - LEAD_TOKEN=${LEAD_TOKEN}
       - ADMIN_TOKEN=${ADMIN_TOKEN}

@@ -1,0 +1,4 @@
+# Минимальный набор без asyncpg — для режима без метрик (NullMetrics)
+aiogram==3.2.0
+python-dotenv
+aiohttp>=3.9.0
