@@ -15,6 +15,7 @@ RUN PIP_INDEX_URL=${PIP_INDEX_URL} \
 COPY app/ ./app/
 COPY run.py .
 COPY config.py .
+COPY session_store.py .
 
 # Expose port (if needed for health checks)
 EXPOSE 8080
