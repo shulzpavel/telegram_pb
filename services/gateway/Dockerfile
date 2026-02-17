@@ -5,8 +5,8 @@ ARG PIP_DEFAULT_TIMEOUT=60
 
 WORKDIR /app
 
-# Install dependencies
-COPY requirements.txt .
+# Install dependencies (minimal = без asyncpg, для режима без метрик)
+COPY services/gateway/requirements-minimal.txt requirements.txt
 RUN PIP_INDEX_URL=${PIP_INDEX_URL} \
     PIP_DEFAULT_TIMEOUT=${PIP_DEFAULT_TIMEOUT} \
     pip install --no-cache-dir --default-timeout=${PIP_DEFAULT_TIMEOUT} -i ${PIP_INDEX_URL} -r requirements.txt
