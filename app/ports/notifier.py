@@ -15,8 +15,9 @@ class Notifier(ABC):
         reply_markup: Optional[Any] = None,
         parse_mode: Optional[str] = None,
         disable_web_page_preview: bool = False,
+        message_thread_id: Optional[int] = None,
     ) -> Optional[Any]:
-        """Send text message."""
+        """Send text message. message_thread_id: topic/thread for forum groups."""
         pass
 
     @abstractmethod
@@ -43,8 +44,9 @@ class Notifier(ABC):
         document: Any,
         caption: Optional[str] = None,
         reply_markup: Optional[Any] = None,
+        message_thread_id: Optional[int] = None,
     ) -> Optional[Any]:
-        """Send document."""
+        """Send document. message_thread_id: topic/thread for forum groups."""
         pass
 
     @abstractmethod

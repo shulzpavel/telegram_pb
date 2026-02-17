@@ -97,6 +97,7 @@ async def handle_menu(callback: types.CallbackQuery, container: DIContainer) -> 
             chat_id=chat_id,
             text=PROMPT_JQL,
             reply_markup=get_back_keyboard(),
+            message_thread_id=topic_id,
         )
 
     elif action == "summary":
@@ -111,6 +112,7 @@ async def handle_menu(callback: types.CallbackQuery, container: DIContainer) -> 
             chat_id=chat_id,
             text="📌 Главное меню:",
             reply_markup=get_main_menu(session, can_manage),
+            message_thread_id=topic_id,
         )
 
     elif action == "show_participants":
@@ -119,6 +121,7 @@ async def handle_menu(callback: types.CallbackQuery, container: DIContainer) -> 
                 chat_id=chat_id,
                 text="⛔ Участников пока нет.",
                 reply_markup=get_back_keyboard(),
+                message_thread_id=topic_id,
             )
         else:
             lines = ["👥 Участники:"]
@@ -128,6 +131,7 @@ async def handle_menu(callback: types.CallbackQuery, container: DIContainer) -> 
                 chat_id=chat_id,
                 text="\n".join(lines),
                 reply_markup=get_back_keyboard(),
+                message_thread_id=topic_id,
             )
 
     elif action == "leave":
@@ -136,6 +140,7 @@ async def handle_menu(callback: types.CallbackQuery, container: DIContainer) -> 
                 chat_id=chat_id,
                 text="🚪 Вы покинули сессию.",
                 reply_markup=get_back_keyboard(),
+                message_thread_id=topic_id,
             )
 
     elif action == "kick_participant":
@@ -144,6 +149,7 @@ async def handle_menu(callback: types.CallbackQuery, container: DIContainer) -> 
                 chat_id=chat_id,
                 text="⛔ Участников пока нет.",
                 reply_markup=get_back_keyboard(),
+                message_thread_id=topic_id,
             )
             return
         buttons = [
@@ -161,6 +167,7 @@ async def handle_menu(callback: types.CallbackQuery, container: DIContainer) -> 
             chat_id=chat_id,
             text="👤 Выберите участника для удаления:",
             reply_markup=keyboard,
+            message_thread_id=topic_id,
         )
 
     elif action == "reset_queue":
@@ -173,6 +180,7 @@ async def handle_menu(callback: types.CallbackQuery, container: DIContainer) -> 
                 chat_id=chat_id,
                 text="📭 Нет результатов последнего батча.",
                 reply_markup=get_back_keyboard(),
+                message_thread_id=topic_id,
             )
         else:
             await _show_batch_results(callback.message, session, container)
@@ -187,6 +195,7 @@ async def _handle_reset_queue(msg: types.Message, session: Session, container: D
             chat_id=session.chat_id,
             text="❌ Очередь задач пуста, нечего сбрасывать.",
             reply_markup=get_back_keyboard(),
+            message_thread_id=session.topic_id,
         )
         return
 
@@ -210,6 +219,7 @@ async def _handle_reset_queue(msg: types.Message, session: Session, container: D
         chat_id=session.chat_id,
         text=confirmation_text,
         reply_markup=keyboard,
+        message_thread_id=session.topic_id,
     )
 
 
@@ -243,6 +253,7 @@ async def handle_confirm_reset_queue(callback: types.CallbackQuery, container: D
             chat_id=chat_id,
             text="ℹ️ Очередь задач уже пуста, нечего сбрасывать.",
             reply_markup=get_main_menu(session, can_manage),
+            message_thread_id=topic_id,
         )
         await callback.answer("ℹ️ Очередь уже пуста")
         return
@@ -275,6 +286,7 @@ async def handle_confirm_reset_queue(callback: types.CallbackQuery, container: D
         chat_id=chat_id,
         text=message_text,
         reply_markup=get_main_menu(session, can_manage),
+        message_thread_id=topic_id,
     )
     await callback.answer("✅ Очередь сброшена")
 
@@ -286,6 +298,7 @@ async def _handle_start_voting(msg: types.Message, session: Session, container: 
             chat_id=session.chat_id,
             text="❌ Нет задач для голосования.",
             reply_markup=get_back_keyboard(),
+            message_thread_id=session.topic_id,
         )
         return
 
@@ -294,6 +307,7 @@ async def _handle_start_voting(msg: types.Message, session: Session, container: 
             chat_id=session.chat_id,
             text="ℹ️ Голосование уже запущено.",
             reply_markup=get_back_keyboard(),
+            message_thread_id=session.topic_id,
         )
         return
 
@@ -331,12 +345,14 @@ async def kick_user(callback: types.CallbackQuery, container: DIContainer) -> No
                 text=f"🚫 Участник <b>{participant.name}</b> удалён из сессии.",
                 parse_mode="HTML",
                 reply_markup=get_back_keyboard(),
+                message_thread_id=topic_id,
             )
         else:
             await container.notifier.send_message(
                 chat_id=chat_id,
                 text="❌ Участник уже был удалён.",
                 reply_markup=get_back_keyboard(),
+                message_thread_id=topic_id,
             )
 
     await callback.answer()
@@ -481,7 +497,10 @@ async def handle_update_jira_sp(callback: types.CallbackQuery, container: DICont
     status_msg = None
     try:
         status_msg = await container.notifier.send_message(
-            chat_id=chat_id, text="⏳ Обновляю Story Points...", reply_markup=None
+            chat_id=chat_id,
+            text="⏳ Обновляю Story Points...",
+            reply_markup=None,
+            message_thread_id=topic_id,
         )
 
         skip_errors = callback.data.endswith(":skip_errors")
@@ -566,6 +585,7 @@ async def handle_update_jira_sp(callback: types.CallbackQuery, container: DICont
                 chat_id=chat_id,
                 text=summary_text,
                 reply_markup=get_back_keyboard(),
+                message_thread_id=topic_id,
             )
 
     except Exception as e:
@@ -586,12 +606,14 @@ async def handle_update_jira_sp(callback: types.CallbackQuery, container: DICont
                     chat_id=chat_id,
                     text=error_text,
                     reply_markup=get_back_keyboard(),
+                    message_thread_id=topic_id,
                 )
         else:
             await container.notifier.send_message(
                 chat_id=chat_id,
                 text=error_text,
                 reply_markup=get_back_keyboard(),
+                message_thread_id=topic_id,
             )
         
         # Логируем ошибку
@@ -611,6 +633,7 @@ async def _show_day_summary(msg: types.Message, session: Session, container: DIC
             chat_id=session.chat_id,
             text="📭 За сегодня ещё не было задач.",
             reply_markup=get_back_keyboard(),
+            message_thread_id=session.topic_id,
         )
         return
 
@@ -638,6 +661,7 @@ async def _show_day_summary(msg: types.Message, session: Session, container: DIC
         document=file,
         caption="📊 Итоги дня",
         reply_markup=get_back_keyboard(),
+        message_thread_id=session.topic_id,
     )
     output_path.unlink(missing_ok=True)
 
@@ -703,6 +727,7 @@ async def _start_next_task(
         text=text,
         reply_markup=markup,
         disable_web_page_preview=True,
+        message_thread_id=session.topic_id,
     )
     session.active_vote_message_id = sent.message_id if sent else None
     await container.session_repo.save_session(session)
@@ -718,6 +743,7 @@ async def _finish_batch(msg: types.Message, session: Session, container: DIConta
             await container.notifier.send_message(
                 chat_id=session.chat_id,
                 text="📭 Список задач пуст. Добавьте задачи и начните заново.",
+                message_thread_id=session.topic_id,
             )
         return
 
@@ -784,6 +810,7 @@ async def _show_batch_results(msg: types.Message, session: Session, container: D
                     chat_id=session.chat_id,
                     text="\n".join(current_message),
                     reply_markup=None,
+                    message_thread_id=session.topic_id,
                 )
                 # Начинаем новое сообщение
                 current_message = [message_parts[0]]  # Заголовок
@@ -798,6 +825,7 @@ async def _show_batch_results(msg: types.Message, session: Session, container: D
                 chat_id=session.chat_id,
                 text="\n".join(current_message),
                 reply_markup=get_results_keyboard(),
+                message_thread_id=session.topic_id,
             )
     else:
         # Отправляем одно сообщение
@@ -805,6 +833,7 @@ async def _show_batch_results(msg: types.Message, session: Session, container: D
             chat_id=session.chat_id,
             text=message_text,
             reply_markup=get_results_keyboard(),
+            message_thread_id=session.topic_id,
         )
 
     # Также создаем файл для детального просмотра
@@ -835,5 +864,6 @@ async def _show_batch_results(msg: types.Message, session: Session, container: D
         document=file,
         caption=caption,
         reply_markup=None,
+        message_thread_id=session.topic_id,
     )
     output_path.unlink(missing_ok=True)

@@ -21,16 +21,20 @@ class TelegramNotifier(Notifier):
         reply_markup: Optional[Any] = None,
         parse_mode: Optional[str] = None,
         disable_web_page_preview: bool = False,
+        message_thread_id: Optional[int] = None,
     ) -> Optional[Any]:
-        """Send text message."""
+        """Send text message. message_thread_id: topic/thread for forum groups."""
         try:
-            return await self.bot.send_message(
+            kwargs = dict(
                 chat_id=chat_id,
                 text=text,
                 reply_markup=reply_markup,
                 parse_mode=parse_mode,
                 disable_web_page_preview=disable_web_page_preview,
             )
+            if message_thread_id is not None:
+                kwargs["message_thread_id"] = message_thread_id
+            return await self.bot.send_message(**kwargs)
         except Exception:
             return None
 
@@ -68,15 +72,19 @@ class TelegramNotifier(Notifier):
         document: Any,
         caption: Optional[str] = None,
         reply_markup: Optional[Any] = None,
+        message_thread_id: Optional[int] = None,
     ) -> Optional[Any]:
-        """Send document."""
+        """Send document. message_thread_id: topic/thread for forum groups."""
         try:
-            return await self.bot.send_document(
+            kwargs = dict(
                 chat_id=chat_id,
                 document=document,
                 caption=caption,
                 reply_markup=reply_markup,
             )
+            if message_thread_id is not None:
+                kwargs["message_thread_id"] = message_thread_id
+            return await self.bot.send_document(**kwargs)
         except Exception:
             return None
 
