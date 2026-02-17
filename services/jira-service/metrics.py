@@ -4,6 +4,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 
 router = APIRouter()
+metrics_router = router  # alias for main.py
 
 
 class MetricsResponse(BaseModel):
