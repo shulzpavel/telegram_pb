@@ -651,10 +651,10 @@ async def handle_update_jira_sp(callback: types.CallbackQuery, container: DICont
 
 
 async def _show_day_summary(msg: types.Message, session: Session, container: DIContainer) -> None:
-    """Show day summary."""
-    history, total_sp = await container.show_results.get_day_summary(session.chat_id, session.topic_id)
-    
-    if not history:
+    """Show day summary with breakdown by batches."""
+    batches, total_sp = await container.show_results.get_day_summary(session.chat_id, session.topic_id)
+
+    if not batches:
         await container.notifier.send_message(
             chat_id=session.chat_id,
             text="📭 За сегодня ещё не было задач.",
@@ -667,19 +667,37 @@ async def _show_day_summary(msg: types.Message, session: Session, container: DIC
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     with output_path.open("w", encoding="utf-8") as fh:
-        for index, task in enumerate(history, start=1):
-            fh.write(f"{index}. {task.text}\n")
-            for user_id, vote in task.votes.items():
-                participant = session.participants.get(user_id)
-                name = participant.name if participant else f"ID {user_id}"
-                if vote == "skip":
-                    fh.write(f"  - {name}: ⏭️ Пропущено\n")
+        for batch_num, batch_tasks in enumerate(batches, start=1):
+            fh.write(f"{'='*50}\n")
+            fh.write(f"📦 Батч {batch_num}\n")
+            jqls = [t.jql for t in batch_tasks if t.jql]
+            if jqls:
+                unique_jqls = list(dict.fromkeys(jqls))
+                if len(unique_jqls) == 1:
+                    fh.write(f"JQL: {unique_jqls[0]}\n")
                 else:
-                    fh.write(f"  - {name}: {vote}\n")
-            max_vote = _policy.get_max_vote(task.votes)
-            fh.write(f"Итог SP: {max_vote}\n")
-            fh.write("\n")
-        fh.write(f"Всего SP за день: {total_sp}\n")
+                    for j in unique_jqls:
+                        fh.write(f"JQL: {j}\n")
+            fh.write(f"{'='*50}\n")
+            batch_sp = 0
+            for idx, task in enumerate(batch_tasks, start=1):
+                task_header = f"{idx}. {task.text}"
+                if task.jira_key:
+                    task_header += f" ({task.jira_key})"
+                fh.write(f"\n{task_header}\n")
+                for user_id, vote in task.votes.items():
+                    participant = session.participants.get(user_id)
+                    name = participant.name if participant else f"ID {user_id}"
+                    if vote == "skip":
+                        fh.write(f"  - {name}: ⏭️ Пропущено\n")
+                    else:
+                        fh.write(f"  - {name}: {vote}\n")
+                sp = _policy.get_max_vote(task.votes)
+                batch_sp += sp
+                fh.write(f"  Итог SP по задаче: {sp}\n")
+            fh.write(f"\n📈 Сумма SP за батч {batch_num}: {batch_sp}\n\n")
+        fh.write(f"{'='*50}\n")
+        fh.write(f"📊 Всего SP за день: {total_sp}\n")
 
     file = FSInputFile(str(output_path))
     await container.notifier.send_document(
