@@ -29,6 +29,9 @@ class SessionResponse(BaseModel):
     history: List[dict]
     last_batch: List[dict]
     batch_completed: bool
+    active_vote_message_id: Optional[int] = None
+    current_batch_id: Optional[str] = None
+    current_batch_started_at: Optional[str] = None
 
 
 class GetSessionRequest(BaseModel):
@@ -97,6 +100,9 @@ async def get_session(
         history=[t.to_dict() for t in session.history],
         last_batch=[t.to_dict() for t in session.last_batch],
         batch_completed=session.batch_completed,
+        active_vote_message_id=session.active_vote_message_id,
+        current_batch_id=session.current_batch_id,
+        current_batch_started_at=session.current_batch_started_at,
     )
 
 
