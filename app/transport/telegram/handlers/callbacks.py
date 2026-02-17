@@ -13,6 +13,7 @@ from app.keyboards import (
     get_back_keyboard,
     get_main_menu,
     get_results_keyboard,
+    get_voting_active_keyboard,
 )
 from app.providers import DIContainer
 from app.usecases.show_results import VotingPolicy
@@ -78,7 +79,7 @@ async def handle_menu(callback: types.CallbackQuery, container: DIContainer) -> 
     )
 
     # Для некоторых действий не требуется права управления
-    if action not in ["main", "summary", "show_participants", "leave", "last_batch"]:
+    if action not in ["main", "summary", "show_participants", "leave", "last_batch", "continue_voting"]:
         if not session.can_manage(user_id):
             await _send_access_denied(
                 callback,
@@ -105,6 +106,21 @@ async def handle_menu(callback: types.CallbackQuery, container: DIContainer) -> 
 
     elif action == "start_voting":
         await _handle_start_voting(callback.message, session, container, user_id=user_id)
+
+    elif action == "continue_voting":
+        if session.is_voting_active and session.current_task:
+            await _start_next_task(
+                callback.message, session, container, user_id=callback.from_user.id
+            )
+            await callback.answer()
+        else:
+            await container.notifier.send_message(
+                chat_id=chat_id,
+                text="ℹ️ Голосование не активно.",
+                reply_markup=get_back_keyboard(),
+                message_thread_id=topic_id,
+            )
+            await callback.answer()
 
     elif action == "main":
         can_manage = session.can_manage(user_id)
@@ -305,8 +321,8 @@ async def _handle_start_voting(msg: types.Message, session: Session, container: 
     if session.is_voting_active:
         await container.notifier.send_message(
             chat_id=session.chat_id,
-            text="ℹ️ Голосование уже запущено.",
-            reply_markup=get_back_keyboard(),
+            text="ℹ️ Голосование уже запущено. Нажмите «Продолжить», чтобы увидеть текущую задачу.",
+            reply_markup=get_voting_active_keyboard(),
             message_thread_id=session.topic_id,
         )
         return

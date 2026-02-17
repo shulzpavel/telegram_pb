@@ -44,9 +44,12 @@ def get_main_menu(session=None, can_manage: bool = False) -> types.InlineKeyboar
         ],
     ]
     
-    # Показываем кнопку "Начать" если есть задачи и голосование не активно
-    if session and session.tasks_queue and not session.is_voting_active:
-        rows.insert(1, [types.InlineKeyboardButton(text="▶️ Начать", callback_data="menu:start_voting")])
+    # Показываем кнопку "Начать" или "Продолжить" в зависимости от состояния
+    if session and session.tasks_queue:
+        if session.is_voting_active:
+            rows.insert(1, [types.InlineKeyboardButton(text="▶️ Продолжить", callback_data="menu:continue_voting")])
+        else:
+            rows.insert(1, [types.InlineKeyboardButton(text="▶️ Начать", callback_data="menu:start_voting")])
     
     # Показываем кнопку "Результаты последнего батча" если есть результаты
     if session and session.last_batch:
@@ -66,8 +69,26 @@ def get_back_keyboard() -> types.InlineKeyboardMarkup:
     )
 
 
-def get_tasks_added_keyboard() -> types.InlineKeyboardMarkup:
-    """Get keyboard for when tasks are added (Back + Start buttons)."""
+def get_voting_active_keyboard() -> types.InlineKeyboardMarkup:
+    """Get keyboard when voting is active (Back + Continue buttons)."""
+    return types.InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                types.InlineKeyboardButton(text="⬅️ Назад", callback_data="menu:main"),
+                types.InlineKeyboardButton(text="▶️ Продолжить", callback_data="menu:continue_voting"),
+            ]
+        ]
+    )
+
+
+def get_tasks_added_keyboard(session=None) -> types.InlineKeyboardMarkup:
+    """Get keyboard for when tasks are added. Shows Start or Continue depending on voting state.
+    
+    Args:
+        session: Session to check - if voting is active, shows Continue instead of Start.
+    """
+    if session and session.is_voting_active:
+        return get_voting_active_keyboard()
     return types.InlineKeyboardMarkup(
         inline_keyboard=[
             [

@@ -1,8 +1,13 @@
 # Grafana дашборды для Telegram Planning Poker Bot
 
+## Быстрый старт
+Grafana поднимается вместе с ботом (`docker compose up -d`). Откройте http://localhost:3000 — логин `admin`, пароль `admin` (или из `.env`).
+
+→ **Пошаговая настройка и алерты:** [GRAFANA_SETUP.md](./GRAFANA_SETUP.md)
+
 ## Источник данных
 - **PostgreSQL** — таблица `bot_events`, создаётся автоматически адаптером `PostgresMetricsRepository` при наличии `POSTGRES_DSN`.
-- В Grafana добавьте Data Source `PostgreSQL` и укажите ту же DSN/учётку, что использует бот.
+- Data Source `PostgreSQL` настраивается автоматически при запуске (provisioning).
 
 ## Предлагаемые дашборды
 
