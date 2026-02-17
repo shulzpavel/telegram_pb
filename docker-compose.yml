@@ -83,6 +83,7 @@ services:
     build:
       context: .
       dockerfile: services/gateway/Dockerfile
+      network: host
     container_name: telegram-gateway
     environment:
       - BOT_TOKEN=${BOT_TOKEN}

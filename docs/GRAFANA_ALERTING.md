@@ -18,29 +18,47 @@ Gateway раз в **5 минут** проверяет voting-service и jira-ser
 
 ---
 
-## Настройка алертов в Grafana
+## Код для алертов (Grafana Alert rules)
 
-### Шаг 1: Contact point
-**Alerting** → **Contact points** → **New contact point**  
-Укажи Email или Telegram (токен бота + chat_id) и сохрани.
+**Datasource:** PostgreSQL. Вставь SQL в Query, условие: **Reduce Last** → **IS ABOVE** N.
 
-### Шаг 2: Создать правила
+### A — Сервис недоступен
 
-**Alerting** → **Alert rules** → **New alert rule**
+```sql
+SELECT count(*) as value
+FROM bot_events
+WHERE event = 'service_health'
+  AND status = 'error'
+  AND ts > now() - interval '10 minutes'
+```
 
-| Правило | Запрос (PostgreSQL) | Условие | Для чего |
-|---------|---------------------|---------|----------|
-| **Сервис недоступен** | `SELECT count(*) FROM bot_events WHERE event='service_health' AND status='error' AND ts > now() - interval '10 minutes'` | Last > 0 | Voting/Jira падали |
-| **Всплеск ошибок** | `SELECT count(*) FROM bot_events WHERE status='error' AND ts > now() - interval '5 minutes'` | Last > 5 | Много handler_error |
-| **Handler errors** | `SELECT count(*) FROM bot_events WHERE event='handler_error' AND ts > now() - interval '10 minutes'` | Last > 0 | Ошибки в боте |
-| **Бот молчит** (осторожно) | `SELECT count(*) FROM bot_events WHERE ts > now() - interval '1 hour'` | Last < 1 | Нет событий час (может сработать ночью) |
+**Condition:** Last IS ABOVE `0`
 
-Для каждого правила:
-1. **Set a query** — Datasource: PostgreSQL, вставь SQL
-2. **Set a condition** — Reduce: Last, IS ABOVE N (или IS BELOW для «бот молчит»)
-3. **Set evaluation** — Evaluate every: 1m, For: 2m
-4. **Add annotations** — Summary: краткое описание
-5. Сохранить
+---
+
+### B — Всплеск ошибок
+
+```sql
+SELECT count(*) as value
+FROM bot_events
+WHERE status = 'error'
+  AND ts > now() - interval '5 minutes'
+```
+
+**Condition:** Last IS ABOVE `5`
+
+---
+
+### C — Handler errors
+
+```sql
+SELECT count(*) as value
+FROM bot_events
+WHERE event = 'handler_error'
+  AND ts > now() - interval '10 minutes'
+```
+
+**Condition:** Last IS ABOVE `0`
 
 ---
 
