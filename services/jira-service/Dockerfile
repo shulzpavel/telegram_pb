@@ -20,7 +20,7 @@ RUN PIP_INDEX_URL=${PIP_INDEX_URL} \
     pip install --no-cache-dir --default-timeout=${PIP_DEFAULT_TIMEOUT} -i ${PIP_INDEX_URL} -r requirements.txt
 
 # Copy service code
-COPY services/jira-service/ ./services/jira-service/
+COPY services/jira-service/ ./services/jira_service/
 COPY app/ ./app/
 COPY config.py .
 
