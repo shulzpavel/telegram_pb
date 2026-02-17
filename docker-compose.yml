@@ -124,29 +124,29 @@ services:
     restart: unless-stopped
 
   grafana-init:
-    image: curlimages/curl:latest
+    image: alpine:3.19
     container_name: telegram-pb-grafana-init
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
-        echo "Waiting for Grafana..."
-        for i in 1 2 3 4 5 6 7 8 9 10; do
-          if curl -sf -u "$${GRAFANA_ADMIN_USER:-admin}:$${GRAFANA_ADMIN_PASSWORD:-admin}" "http://grafana:3000/api/health" 2>/dev/null; then
-            echo "Grafana ready"
-            break
+        apk add --no-cache curl
+        echo "Waiting for Grafana (may take 30s)..."
+        sleep 5
+        for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
+          if curl -sf -u "$${GRAFANA_USER:-admin}:$${GRAFANA_PASS:-admin}" "http://grafana:3000/api/health" 2>/dev/null; then
+            echo "Grafana ready"; break
           fi
           sleep 2
         done
         echo "Importing dashboard..."
-        curl -sf -X POST -H "Content-Type: application/json" \
-          -u "$${GRAFANA_ADMIN_USER:-admin}:$${GRAFANA_ADMIN_PASSWORD:-admin}" \
-          -d @/dashboards/telegram-pb-api.json \
-          "http://grafana:3000/api/dashboards/db" && echo "Dashboard imported" || echo "Import failed"
+        curl -sf -X POST -H "Content-Type: application/json" -u "$${GRAFANA_USER:-admin}:$${GRAFANA_PASS:-admin}" \
+          -d @/dashboards/telegram-pb-api.json "http://grafana:3000/api/dashboards/db" \
+          && echo "Dashboard imported" || echo "Import failed"
     volumes:
       - ./docs/grafana-dashboard-telegram-pb.json:/dashboards/telegram-pb-api.json:ro
     environment:
-      - GRAFANA_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
-      - GRAFANA_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
+      - GRAFANA_USER=${GRAFANA_ADMIN_USER:-admin}
+      - GRAFANA_PASS=${GRAFANA_ADMIN_PASSWORD:-admin}
     depends_on:
       grafana:
         condition: service_started
