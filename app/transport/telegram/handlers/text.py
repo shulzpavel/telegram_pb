@@ -31,6 +31,7 @@ async def handle_text_input(msg: types.Message, container: DIContainer) -> None:
             text="⚠️ Вы не авторизованы. Используйте команду /join с токеном от администратора.",
             parse_mode=None,
             reply_markup=get_main_menu(session, can_manage),
+            message_thread_id=topic_id,
         )
         return
 
@@ -40,6 +41,7 @@ async def handle_text_input(msg: types.Message, container: DIContainer) -> None:
             text="❌ Только лидеры и администраторы могут добавлять задачи.",
             reply_markup=get_back_keyboard(),
             parse_mode=None,
+            message_thread_id=topic_id,
         )
         return
 
@@ -57,6 +59,7 @@ async def handle_text_input(msg: types.Message, container: DIContainer) -> None:
             text="⏳ Идёт обработка предыдущего запроса. Подожди пару секунд.",
             reply_markup=get_back_keyboard(),
             parse_mode=None,
+            message_thread_id=topic_id,
         )
         return
     await lock.acquire()
@@ -66,6 +69,7 @@ async def handle_text_input(msg: types.Message, container: DIContainer) -> None:
         chat_id=chat_id,
         text="⏳ Ожидайте, идёт поиск задач в Jira...",
         reply_markup=None,
+        message_thread_id=topic_id,
     )
 
     try:
@@ -107,6 +111,7 @@ async def handle_text_input(msg: types.Message, container: DIContainer) -> None:
                     text=message,
                     reply_markup=keyboard,
                     parse_mode=None,
+                    message_thread_id=topic_id,
                 )
         else:
             print(f"[Jira] ERROR: Не удалось получить задачи. JQL: {jql}")
@@ -125,6 +130,7 @@ async def handle_text_input(msg: types.Message, container: DIContainer) -> None:
                     text=error_text,
                     reply_markup=get_back_keyboard(),
                     parse_mode=None,
+                    message_thread_id=topic_id,
                 )
         return
 
@@ -163,4 +169,5 @@ async def handle_text_input(msg: types.Message, container: DIContainer) -> None:
             text=response_text,
             reply_markup=get_tasks_added_keyboard(),
             parse_mode=None,
+            message_thread_id=topic_id,
         )
