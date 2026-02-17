@@ -377,6 +377,15 @@ async def handle_vote(callback: types.CallbackQuery, container: DIContainer) -> 
         await _send_access_denied(callback, "❌ Администраторы не участвуют в голосовании.", container)
         return
 
+    # Проверка актуальности кнопки (защита от устаревших сообщений)
+    if not session.is_voting_active:
+        await callback.answer("⏹️ Голосование закрыто.")
+        return
+    msg_id = callback.message.message_id if callback.message else None
+    if session.active_vote_message_id is None or msg_id != session.active_vote_message_id:
+        await callback.answer("⏹️ Кнопка устарела.")
+        return
+
     value = callback.data.split(":", maxsplit=1)[1]
 
     await container.metrics.record_event(
@@ -424,12 +433,27 @@ async def handle_vote(callback: types.CallbackQuery, container: DIContainer) -> 
             await _update_vote_message(session, container, user_id)
 
         if await container.cast_vote.all_voters_voted(chat_id, topic_id):
-            batch_finished, _ = await container.advance_task.execute(chat_id, topic_id)
-            session = await container.session_repo.get_session(chat_id, topic_id)
-            if batch_finished:
-                await _finish_batch(callback.message, session, container)
-            else:
-                await _start_next_task(callback.message, session, container, user_id=user_id)
+            vote_advance_key = _busy_key(chat_id, topic_id, "vote_advance")
+            lock = await container.acquire_busy(vote_advance_key)
+            try:
+                if lock.locked():
+                    return
+                await lock.acquire()
+                # Двойная проверка: другой handler мог уже advance
+                if not await container.cast_vote.all_voters_voted(chat_id, topic_id):
+                    return
+                session = await container.session_repo.get_session(chat_id, topic_id)
+                if not session.current_task:
+                    return
+                batch_finished, _ = await container.advance_task.execute(chat_id, topic_id)
+                session = await container.session_repo.get_session(chat_id, topic_id)
+                if batch_finished:
+                    await _finish_batch(callback.message, session, container)
+                else:
+                    await _start_next_task(callback.message, session, container, user_id=user_id)
+            finally:
+                lock.release()
+                container.release_busy(vote_advance_key)
 
 
 async def _update_vote_message(session: Session, container: DIContainer, user_id: int) -> None:

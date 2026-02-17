@@ -25,6 +25,9 @@ class CastVoteUseCase:
         if not session.current_task:
             return False
         
+        if not session.is_voting_active:
+            return False
+        
         if not session.can_vote(user_id):
             return False
         

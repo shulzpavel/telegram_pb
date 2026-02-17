@@ -63,6 +63,9 @@ test_*.json
 *_test.json
 *_state.json
 
+# Tests (run locally only)
+tests/
+
 # Temporary files
 *.tmp
 *.temp

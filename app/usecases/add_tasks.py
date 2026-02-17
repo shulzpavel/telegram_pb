@@ -30,6 +30,9 @@ class AddTasksFromJiraUseCase:
         for task in session.last_batch:
             if task.jira_key:
                 existing_keys.add(task.jira_key)
+        for task in session.history:
+            if task.jira_key:
+                existing_keys.add(task.jira_key)
 
         added: List[Task] = []
         skipped: List[str] = []
