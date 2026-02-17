@@ -9,7 +9,7 @@ from app.keyboards import get_back_keyboard, get_main_menu
 from app.providers import DIContainer
 from app.utils.context import extract_context
 from app.utils.telegram import safe_call
-from config import ADMIN_TOKEN, LEAD_TOKEN, USER_TOKEN, UserRole, is_supported_thread
+from config import INSTRUCTION_URL, UserRole, is_supported_thread
 
 router = Router()
 
@@ -22,6 +22,8 @@ ROLE_TITLES = {
 
 def _resolve_role_by_token(token: str) -> Optional[UserRole]:
     """Resolve user role by token."""
+    from config import ADMIN_TOKEN, LEAD_TOKEN, USER_TOKEN
+
     if token == ADMIN_TOKEN:
         return UserRole.ADMIN
     if token == LEAD_TOKEN:
@@ -48,34 +50,23 @@ async def cmd_start_help(msg: types.Message, container: DIContainer) -> None:
     participant = session.participants.get(user_id)
 
     text = (
-        "🤖 Привет! Я бот для планирования задач Planning Poker.\n\n"
-        "Роли и токены:\n"
-        f"• Участник: `/join {USER_TOKEN}`\n"
-        f"• Лидер: `/join {LEAD_TOKEN}`\n"
-        f"• Администратор: `/join {ADMIN_TOKEN}`\n\n"
-        "Возможности:\n"
-        "— 🆕 Добавление задач из Jira по JQL\n"
-        "— 📋 Итоги текущего банча\n"
-        "— 📊 Итоги дня\n"
-        "— 📊 Результаты последнего батча (/results)\n"
-        "— 👥 Просмотр участников\n"
-        "— 🚪 Покинуть сессию\n"
-        "— 🗑️ Удалить участника (лидеры и админы)\n\n"
-        "Голосование:\n"
-        "• Участники и лидеры голосуют\n"
-        "• Администраторы не голосуют\n"
-        "• Лидеры управляют сессией"
+        "👋 Привет! Я Planning Poker бот — помогаю оценивать задачи в команде.\n\n"
+        "**Что умею:** задачи из Jira, голосование по фибоначчи, итоги по батчам и дню. "
+        "Подключись через /join (токен даст лид)."
     )
 
     can_manage = participant and session.can_manage(user_id) if participant else False
+    main_kb = get_main_menu(session, can_manage)
+    rows = main_kb.inline_keyboard + [
+        [types.InlineKeyboardButton(text="📖 Показать инструкцию", url=INSTRUCTION_URL)]
+    ]
+    kb_with_help = types.InlineKeyboardMarkup(inline_keyboard=rows)
+
     if participant:
-        await safe_call(
-            msg.answer,
-            f"👋 Добро пожаловать! Ваша роль: {_format_role_label(participant.role)}",
-            reply_markup=get_main_menu(session, can_manage),
-        )
+        welcome_text = f"👋 Добро пожаловать! Ваша роль: {_format_role_label(participant.role)}"
+        await safe_call(msg.answer, welcome_text, reply_markup=kb_with_help)
     else:
-        await safe_call(msg.answer, text, parse_mode="Markdown", reply_markup=get_main_menu(session, can_manage))
+        await safe_call(msg.answer, text, parse_mode="Markdown", reply_markup=kb_with_help)
 
 
 @router.message(Command("join"))

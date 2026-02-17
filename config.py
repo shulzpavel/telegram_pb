@@ -26,6 +26,9 @@ VOTING_SERVICE_URL = os.getenv("VOTING_SERVICE_URL", "http://localhost:8002")
 # Postgres metrics storage
 POSTGRES_DSN = os.getenv("POSTGRES_DSN", "")
 
+# Ссылка на инструкцию (кнопка в приветствии)
+INSTRUCTION_URL = os.getenv("INSTRUCTION_URL", "https://www.youtube.com/watch?v=dQw4w9WgXcQ")
+
 # Redis configuration (for Voting Service)
 REDIS_URL = os.getenv("REDIS_URL", "")
 
