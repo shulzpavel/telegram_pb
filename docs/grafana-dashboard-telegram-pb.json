@@ -1,6 +1,6 @@
 {
   "dashboard": {
-    "uid": "telegram-pb",
+    "uid": "telegram-pb-overview",
     "title": "Telegram PB Overview",
     "timezone": "browser",
     "panels": [
