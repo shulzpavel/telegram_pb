@@ -152,11 +152,18 @@ async def add_tasks(
     else:
         session = repo.get_session(request.chat_id, request.topic_id)
     
-    # Add tasks
+    # Add tasks (антидубль по jira_key)
     from app.domain.task import Task
+    existing_keys = {t.jira_key for t in session.tasks_queue if t.jira_key}
+    existing_keys |= {t.jira_key for t in session.last_batch if t.jira_key}
+    existing_keys |= {t.jira_key for t in session.history if t.jira_key}
     added_count = 0
     for task_data in request.tasks:
         task = Task.from_dict(task_data)
+        if task.jira_key and task.jira_key in existing_keys:
+            continue
+        if task.jira_key:
+            existing_keys.add(task.jira_key)
         session.tasks_queue.append(task)
         added_count += 1
     

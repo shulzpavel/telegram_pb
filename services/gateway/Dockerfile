@@ -16,6 +16,7 @@ COPY app/ ./app/
 COPY run.py .
 COPY config.py .
 COPY session_store.py .
+COPY scripts/ ./scripts/
 
 # Expose port (if needed for health checks)
 EXPOSE 8080
