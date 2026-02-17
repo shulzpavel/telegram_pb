@@ -14,6 +14,7 @@ class Task:
     story_points: Optional[int] = None
     votes: Dict[int, str] = field(default_factory=dict)
     completed_at: Optional[str] = None
+    jql: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert task to dictionary."""
@@ -24,6 +25,7 @@ class Task:
             "story_points": self.story_points,
             "votes": {str(k): v for k, v in self.votes.items()},
             "completed_at": self.completed_at,
+            "jql": self.jql,
         }
 
     @classmethod
@@ -42,6 +44,7 @@ class Task:
             story_points=data.get("story_points"),
             votes=votes,
             completed_at=data.get("completed_at"),
+            jql=data.get("jql"),
         )
 
     @property

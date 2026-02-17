@@ -50,6 +50,7 @@ class AddTasksFromJiraUseCase:
                 summary=issue.get("summary") or jira_key,
                 url=issue.get("url"),
                 story_points=issue.get("story_points"),
+                jql=jql,
             )
             session.tasks_queue.append(task)
             existing_keys.add(jira_key)

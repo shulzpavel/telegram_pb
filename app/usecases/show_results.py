@@ -1,5 +1,6 @@
 """Use case for showing voting results."""
 
+from collections import defaultdict
 from typing import List, Optional, Tuple
 
 from app.domain.session import Session
@@ -74,8 +75,29 @@ class ShowResultsUseCase:
         session = await self.session_repo.get_session(chat_id, topic_id)
         return session.last_batch if session.last_batch else None
 
-    async def get_day_summary(self, chat_id: int, topic_id: Optional[int]) -> Tuple[List[Task], int]:
-        """Get day summary with total story points."""
+    async def get_day_summary(
+        self, chat_id: int, topic_id: Optional[int]
+    ) -> Tuple[List[List[Task]], int]:
+        """Get day summary grouped by batches. Returns (batches, total_sp)."""
         session = await self.session_repo.get_session(chat_id, topic_id)
-        total_sp = sum(self.policy.get_max_vote(task.votes) for task in session.history)
-        return session.history, total_sp
+        if not session.history:
+            return [], 0
+        # Группируем по completed_at (все задачи одного батча имеют один completed_at)
+        by_batch: dict = defaultdict(list)
+        for task in session.history:
+            key = task.completed_at or ""
+            by_batch[key].append(task)
+        # Сохраняем порядок батчей (по первому completed_at в истории)
+        seen = []
+        batches = []
+        for task in session.history:
+            key = task.completed_at or ""
+            if key not in seen:
+                seen.append(key)
+                batches.append(by_batch[key])
+        total_sp = sum(
+            self.policy.get_max_vote(t.votes)
+            for batch in batches
+            for t in batch
+        )
+        return batches, total_sp
