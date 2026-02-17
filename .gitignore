@@ -59,6 +59,7 @@ data/
 !package.json
 !package-lock.json
 !docs/*.json
+!grafana/dashboards/*.json
 test_*.json
 *_test.json
 *_state.json

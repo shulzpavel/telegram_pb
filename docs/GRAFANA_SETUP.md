@@ -7,6 +7,9 @@
 3. Grafana: http://localhost:3000 — логин `admin`, пароль `admin` (или `GRAFANA_ADMIN_PASSWORD` из `.env`)
 4. Дашборд **Telegram PB Overview** уже загружен в папку "Telegram PB"
 
+### Если дашборд не появился
+**Ручной импорт:** Dashboards → New → Import → Upload JSON file → выбери `docs/grafana-dashboard-telegram-pb.json`, затем укажи PostgreSQL как datasource. Либо скопируй содержимое файла и вставь в "Import via panel json".
+
 ## Если панели пустые или с ошибками
 
 1. **Datasource** — Connections → PostgreSQL: нажмите "Save & test". Должно быть "Connection successful".
