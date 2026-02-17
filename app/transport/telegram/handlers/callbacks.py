@@ -64,7 +64,7 @@ async def handle_menu(callback: types.CallbackQuery, container: DIContainer) -> 
     user_id = callback.from_user.id
     participant = session.participants.get(user_id)
     if not participant:
-        await _send_access_denied(callback, "⚠️ Вы не авторизованы. Используйте /join токен.", container)
+        await _send_access_denied(callback, "⚠️ Вы не авторизованы. Используйте /join <токен>.", container)
         return
 
     action = callback.data.split(":", maxsplit=1)[1]
