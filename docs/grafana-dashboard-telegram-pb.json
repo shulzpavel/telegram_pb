@@ -7,7 +7,7 @@
       {
         "type": "stat",
         "title": "Events (last 1h)",
-        "gridPos": {"h": 4, "w": 6, "x": 0, "y": 0},
+        "gridPos": {"h": 4, "w": 5, "x": 0, "y": 0},
         "targets": [
           {
             "datasource": {"type": "postgres", "uid": "postgres"},
@@ -20,7 +20,7 @@
       {
         "type": "stat",
         "title": "Errors (last 1h)",
-        "gridPos": {"h": 4, "w": 6, "x": 6, "y": 0},
+        "gridPos": {"h": 4, "w": 5, "x": 5, "y": 0},
         "targets": [
           {
             "datasource": {"type": "postgres", "uid": "postgres"},
@@ -82,10 +82,50 @@
           }
         ],
         "options": {"showHeader": true}
+      },
+      {
+        "type": "stat",
+        "title": "Services down (15m)",
+        "gridPos": {"h": 4, "w": 6, "x": 10, "y": 0},
+        "targets": [
+          {
+            "datasource": {"type": "postgres", "uid": "postgres"},
+            "rawSql": "SELECT count(*) as cnt FROM bot_events WHERE event='service_health' AND status='error' AND ts > now() - interval '15 minutes'",
+            "format": "table",
+            "refId": "A"
+          }
+        ]
+      },
+      {
+        "type": "timeseries",
+        "title": "Service health failures",
+        "gridPos": {"h": 6, "w": 12, "x": 0, "y": 20},
+        "targets": [
+          {
+            "datasource": {"type": "postgres", "uid": "postgres"},
+            "rawSql": "SELECT date_trunc('minute', ts) as time, count(*) as failures FROM bot_events WHERE event='service_health' AND status='error' AND $__timeFilter(ts) GROUP BY 1 ORDER BY 1",
+            "format": "time_series",
+            "refId": "A"
+          }
+        ]
+      },
+      {
+        "type": "table",
+        "title": "Last health per service",
+        "gridPos": {"h": 6, "w": 12, "x": 12, "y": 20},
+        "targets": [
+          {
+            "datasource": {"type": "postgres", "uid": "postgres"},
+            "rawSql": "SELECT DISTINCT ON (payload->>'service') payload->>'service' as service, status, ts as last_check, payload->>'latency_ms' as latency_ms FROM bot_events WHERE event='service_health' AND ts > now() - interval '2 hours' ORDER BY payload->>'service', ts DESC",
+            "format": "table",
+            "refId": "A"
+          }
+        ],
+        "options": {"showHeader": true}
       }
     ],
     "schemaVersion": 38,
-    "version": 1
+    "version": 2
   },
   "overwrite": true
 }
