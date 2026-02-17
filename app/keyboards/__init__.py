@@ -6,6 +6,7 @@ from app.keyboards.menus import (
     get_main_menu,
     get_results_keyboard,
     get_tasks_added_keyboard,
+    get_voting_active_keyboard,
 )
 
 __all__ = [
@@ -14,4 +15,5 @@ __all__ = [
     "get_main_menu",
     "get_results_keyboard",
     "get_tasks_added_keyboard",
+    "get_voting_active_keyboard",
 ]

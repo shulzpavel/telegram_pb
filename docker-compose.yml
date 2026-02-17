@@ -30,7 +30,7 @@ services:
     environment:
       - VOTING_SERVICE_PORT=8002
       - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
-      - POSTGRES_DSN=${POSTGRES_DSN}
+      - POSTGRES_DSN=${POSTGRES_DSN:-postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-telegram_pb}}
       - STATE_FILE=${STATE_FILE:-/data/state.json}
     volumes:
       - voting-data:/data
@@ -100,7 +100,30 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  grafana:
+    image: grafana/grafana:11.2.0
+    container_name: telegram-pb-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SERVER_ROOT_URL=${GRAFANA_ROOT_URL:-http://localhost:3000}
+      # For datasource provisioning
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
+      - POSTGRES_DB=${POSTGRES_DB:-telegram_pb}
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
 volumes:
   voting-data:
   redis-data:
   postgres-data:
+  grafana-data:

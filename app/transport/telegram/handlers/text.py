@@ -92,8 +92,11 @@ async def handle_text_input(msg: types.Message, container: DIContainer) -> None:
             )
             session = await container.session_repo.get_session(chat_id, topic_id)  # Refresh
             if session.tasks_queue:
-                message = "⚠️ Все найденные задачи уже добавлены. Нажмите «Начать», чтобы запустить голосование."
-                keyboard = get_tasks_added_keyboard()
+                if session.is_voting_active:
+                    message = "ℹ️ Голосование уже идёт. Нажмите «Продолжить», чтобы увидеть текущую задачу."
+                else:
+                    message = "⚠️ Все найденные задачи уже добавлены. Нажмите «Начать», чтобы запустить голосование."
+                keyboard = get_tasks_added_keyboard(session)
             else:
                 message = "⚠️ Все найденные задачи уже были добавлены ранее, а очередь сейчас пуста. Добавьте новые задачи."
                 keyboard = get_back_keyboard()
@@ -135,6 +138,7 @@ async def handle_text_input(msg: types.Message, container: DIContainer) -> None:
         return
 
     session = await container.session_repo.get_session(chat_id, topic_id)  # Refresh after adding
+    keyboard = get_tasks_added_keyboard(session)
     participant = session.participants.get(user_id)
     user_name = participant.name if participant else msg.from_user.full_name or f"User {user_id}"
     audit_log(
@@ -160,14 +164,14 @@ async def handle_text_input(msg: types.Message, container: DIContainer) -> None:
             chat_id=chat_id,
             message_id=status_msg.message_id,
             text=response_text,
-            reply_markup=get_tasks_added_keyboard(),
+            reply_markup=keyboard,
             disable_web_page_preview=True,
         )
     else:
         await container.notifier.send_message(
             chat_id=chat_id,
             text=response_text,
-            reply_markup=get_tasks_added_keyboard(),
+            reply_markup=keyboard,
             parse_mode=None,
             message_thread_id=topic_id,
         )
