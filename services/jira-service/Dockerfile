@@ -23,6 +23,7 @@ RUN PIP_INDEX_URL=${PIP_INDEX_URL} \
 COPY services/jira-service/ ./services/jira_service/
 COPY app/ ./app/
 COPY config.py .
+COPY session_store.py .
 
 # Expose port
 EXPOSE 8001

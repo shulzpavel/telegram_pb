@@ -3,6 +3,7 @@
 from fastapi import APIRouter
 
 router = APIRouter()
+metrics_router = router  # alias for main.py
 
 
 @router.get("/", response_model=dict)
