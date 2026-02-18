@@ -65,7 +65,7 @@ async def handle_menu(callback: types.CallbackQuery, container: DIContainer) -> 
     user_id = callback.from_user.id
     participant = session.participants.get(user_id)
     if not participant:
-        await _send_access_denied(callback, "⚠️ Вы не авторизованы. Используйте /join <токен>.", container)
+        await _send_access_denied(callback, "⚠️ Необходимо авторизоваться, введи уже токен, натяни улыбку и сделай вид, что тебе очень нравится покер планирование.", container)
         return
 
     action = callback.data.split(":", maxsplit=1)[1]
@@ -90,9 +90,12 @@ async def handle_menu(callback: types.CallbackQuery, container: DIContainer) -> 
 
     if action == "new_task":
         PROMPT_JQL = (
-            "✏️ Отправь JQL запрос из Jira (например: \n"
+            "📌 Вставь JQL-запрос из Jira.\n"
+            "Это строка фильтра из поиска Jira.\n"
+            "Примеры:\n"
             "• key = FLEX-365\n"
-            "• project = FLEX ORDER BY created DESC)"
+            "• issue in linkedIssues(\"BTBMGLBL-348\") / план\n\n"
+            "После отправки, бот загрузит задачи."
         )
         await container.notifier.send_message(
             chat_id=chat_id,
@@ -252,7 +255,7 @@ async def handle_confirm_reset_queue(callback: types.CallbackQuery, container: D
     user_id = callback.from_user.id
     participant = session.participants.get(user_id)
     if not participant:
-        await _send_access_denied(callback, "⚠️ Вы не авторизованы. Используйте /join <токен>.", container)
+        await _send_access_denied(callback, "⚠️ Необходимо авторизоваться, введи уже токен, натяни улыбку и сделай вид, что тебе очень нравится покер планирование.", container)
         return
 
     if not session.can_manage(user_id):

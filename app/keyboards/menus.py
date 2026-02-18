@@ -34,7 +34,7 @@ def get_main_menu(session=None, can_manage: bool = False) -> types.InlineKeyboar
     """
     rows = [
         [
-            types.InlineKeyboardButton(text="🆕 Список задач", callback_data="menu:new_task"),
+            types.InlineKeyboardButton(text="📝 Загрузить задачи из Jira", callback_data="menu:new_task"),
             types.InlineKeyboardButton(text="📋 Итоги дня", callback_data="menu:summary"),
         ],
         [

@@ -28,7 +28,7 @@ async def handle_text_input(msg: types.Message, container: DIContainer) -> None:
         can_manage = False
         await container.notifier.send_message(
             chat_id=chat_id,
-            text="⚠️ Вы не авторизованы. Используйте команду /join с токеном от администратора.",
+            text="⚠️ Необходимо авторизоваться, введи уже токен, натяни улыбку и сделай вид, что тебе очень нравится покер планирование.",
             parse_mode=None,
             reply_markup=get_main_menu(session, can_manage),
             message_thread_id=topic_id,
@@ -156,6 +156,17 @@ async def handle_text_input(msg: types.Message, container: DIContainer) -> None:
     )
 
     response = [f"✅ Добавлено {len(added)} задач из Jira."]
+    if added:
+        max_show = 25
+        max_len = 80
+        names = []
+        for t in added[:max_show]:
+            s = (t.summary or t.jira_key) or ""
+            names.append("• " + (s[:max_len] + "…" if len(s) > max_len else s))
+        if len(added) > max_show:
+            response.append("\n".join(names) + f"\n... и ещё {len(added) - max_show}")
+        else:
+            response.append("\n".join(names))
     if skipped:
         response.append("⚠️ Пропущены уже добавленные: " + ", ".join(skipped))
     response_text = "\n".join(response)
