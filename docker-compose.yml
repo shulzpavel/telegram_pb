@@ -2,7 +2,7 @@ services:
   jira-service:
     build:
       context: .
-      dockerfile: services/jira-service/Dockerfile
+      dockerfile: backend/services/jira_service/Dockerfile
     container_name: jira-service
     ports:
       - "8001:8001"
@@ -23,7 +23,7 @@ services:
   voting-service:
     build:
       context: .
-      dockerfile: services/voting-service/Dockerfile
+      dockerfile: backend/services/voting_service/Dockerfile
     container_name: voting-service
     ports:
       - "8002:8002"
@@ -32,6 +32,12 @@ services:
       - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
       - POSTGRES_DSN=${POSTGRES_DSN:-postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-telegram_pb}}
       - STATE_FILE=${STATE_FILE:-/data/state.json}
+      - CMS_USERNAME=${CMS_USERNAME:-admin}
+      - CMS_PASSWORD=${CMS_PASSWORD:-}
+      - CMS_COOKIE_SECURE=${CMS_COOKIE_SECURE:-false}
+      - WEB_UI_URL=${WEB_UI_URL:-}
+      - CORS_ORIGINS=${CORS_ORIGINS:-}
+      - ENABLE_DEMO_SESSION=${ENABLE_DEMO_SESSION:-true}
     volumes:
       - voting-data:/data
     depends_on:
@@ -82,7 +88,7 @@ services:
   gateway:
     build:
       context: .
-      dockerfile: services/gateway/Dockerfile
+      dockerfile: backend/services/gateway/Dockerfile
       network: host
       args:
         PIP_DEFAULT_TIMEOUT: 120
@@ -95,9 +101,61 @@ services:
       - LEAD_TOKEN=${LEAD_TOKEN}
       - ADMIN_TOKEN=${ADMIN_TOKEN}
       - SUPPORTED_TOPICS=${SUPPORTED_TOPICS}
+      - WEB_UI_URL=${WEB_UI_URL:-}
+      - CMS_USERNAME=${CMS_USERNAME:-admin}
+      - CMS_PASSWORD=${CMS_PASSWORD:-}
     depends_on:
       jira-service:
         condition: service_healthy
+      voting-service:
+        condition: service_healthy
+    restart: unless-stopped
+
+  lark-gateway:
+    build:
+      context: .
+      dockerfile: backend/services/gateway/Dockerfile
+      network: host
+      args:
+        PIP_DEFAULT_TIMEOUT: 120
+    container_name: lark-gateway
+    command: ["python", "-m", "app.main_lark"]
+    ports:
+      - "8080:8080"
+    environment:
+      - LARK_APP_ID=${LARK_APP_ID}
+      - LARK_APP_SECRET=${LARK_APP_SECRET}
+      - LARK_VERIFICATION_TOKEN=${LARK_VERIFICATION_TOKEN}
+      - LARK_ENCRYPT_KEY=${LARK_ENCRYPT_KEY}
+      - LARK_WEBHOOK_PORT=8080
+      - JIRA_SERVICE_URL=http://jira-service:8001
+      - VOTING_SERVICE_URL=http://voting-service:8002
+      - USER_TOKEN=${USER_TOKEN}
+      - LEAD_TOKEN=${LEAD_TOKEN}
+      - ADMIN_TOKEN=${ADMIN_TOKEN}
+      - POSTGRES_DSN=${POSTGRES_DSN}
+      - WEB_UI_URL=${WEB_UI_URL:-}
+    depends_on:
+      jira-service:
+        condition: service_healthy
+      voting-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ./frontend/web
+      dockerfile: Dockerfile
+    container_name: poker-web
+    ports:
+      - "3001:80"
+    depends_on:
       voting-service:
         condition: service_healthy
     restart: unless-stopped
@@ -118,8 +176,8 @@ services:
       - POSTGRES_DB=${POSTGRES_DB:-telegram_pb}
     volumes:
       - grafana-data:/var/lib/grafana
-      - ./grafana/provisioning:/etc/grafana/provisioning
-      - ./grafana/dashboards:/var/lib/grafana/dashboards
+      - ./infra/grafana/provisioning:/etc/grafana/provisioning
+      - ./infra/grafana/dashboards:/var/lib/grafana/dashboards
     depends_on:
       postgres:
         condition: service_healthy
@@ -147,7 +205,7 @@ services:
         echo "$$OUT"
         echo "$$OUT" | grep -q "HTTP_CODE:200" && echo "Dashboard imported OK" || echo "Import failed - check response above"
     volumes:
-      - ./docs/grafana-dashboard-telegram-pb.json:/dashboards/telegram-pb-api.json:ro
+      - ./infra/grafana/import/telegram-pb-api-import.json:/dashboards/telegram-pb-api.json:ro
     environment:
       - GRAFANA_USER=${GRAFANA_ADMIN_USER:-admin}
       - GRAFANA_PASS=${GRAFANA_ADMIN_PASSWORD:-admin}

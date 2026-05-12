@@ -1,0 +1,17 @@
+.git
+.claude
+.claire
+.pytest_cache
+__pycache__
+*.pyc
+.env
+.env.*
+
+frontend/web/node_modules
+frontend/web/dist
+frontend/web/.vite
+frontend/web/.claude
+
+web
+data
+docker-wheels

@@ -1,0 +1,11 @@
+{
+	email {$ACME_EMAIL}
+}
+
+{$APP_DOMAIN} {
+	encode zstd gzip
+
+	reverse_proxy /api/* voting-service:8002
+	reverse_proxy /health/* voting-service:8002
+	reverse_proxy web:80
+}
