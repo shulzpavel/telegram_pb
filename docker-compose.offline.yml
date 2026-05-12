@@ -2,4 +2,4 @@
 services:
   gateway:
     build:
-      dockerfile: services/gateway/Dockerfile.offline
+      dockerfile: backend/services/gateway/Dockerfile.offline

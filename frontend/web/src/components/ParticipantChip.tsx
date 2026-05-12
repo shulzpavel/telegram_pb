@@ -1,0 +1,65 @@
+import { motion, useReducedMotion } from "framer-motion";
+import { LoadingDots } from "../design-system";
+
+interface ParticipantChipProps {
+  name: string;
+  voted: boolean;
+}
+
+const AVATAR_COLORS = [
+  "bg-blue/15 text-blue",
+  "bg-purple/15 text-purple",
+  "bg-green/15 text-green",
+  "bg-amber/15 text-amber",
+  "bg-red/15 text-red",
+];
+
+function colorForName(name: string): string {
+  let hash = 0;
+  for (const ch of name) hash = (hash * 31 + ch.charCodeAt(0)) & 0xffffffff;
+  return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length];
+}
+
+function initials(name: string): string {
+  return name
+    .trim()
+    .split(/\s+/)
+    .map((w) => w[0]?.toUpperCase() ?? "")
+    .slice(0, 2)
+    .join("");
+}
+
+export default function ParticipantChip({ name, voted }: ParticipantChipProps) {
+  const color = colorForName(name);
+  const reduceMotion = useReducedMotion();
+
+  return (
+    <div className="flex min-h-10 items-center gap-2 rounded-lg border border-line bg-surface px-2.5 py-1.5 shadow-sm">
+      <div className="relative shrink-0">
+        <div className={`w-7 h-7 rounded-full flex items-center justify-center text-2xs font-bold ${color}`}>
+          {initials(name)}
+        </div>
+        {/* Voted indicator */}
+        <motion.div
+          className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-green border-2 border-surface flex items-center justify-center"
+          initial={{ scale: 0 }}
+          animate={{ scale: voted ? 1 : 0 }}
+          transition={{ duration: reduceMotion ? 0 : 0.16 }}
+        >
+          <svg width="6" height="5" viewBox="0 0 6 5" fill="none">
+            <path d="M0.75 2.5L2.25 4L5.25 1" stroke="white" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </motion.div>
+      </div>
+
+      <span className={`text-xs font-medium leading-none transition-colors duration-200 ${voted ? "text-ink2" : "text-ink3"}`}>
+        {name}
+      </span>
+
+      {/* Waiting indicator */}
+      {!voted && (
+        <LoadingDots className="ml-0.5 text-ink4" />
+      )}
+    </div>
+  );
+}

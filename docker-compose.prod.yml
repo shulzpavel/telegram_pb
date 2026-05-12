@@ -1,0 +1,145 @@
+services:
+  caddy:
+    image: caddy:2-alpine
+    container_name: poker-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      - APP_DOMAIN=${APP_DOMAIN}
+      - ACME_EMAIL=${ACME_EMAIL}
+    volumes:
+      - ./infra/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      web:
+        condition: service_started
+      voting-service:
+        condition: service_healthy
+
+  web:
+    build:
+      context: ./frontend/web
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: ""
+        VITE_WS_URL: ""
+    container_name: poker-web
+    restart: unless-stopped
+    depends_on:
+      voting-service:
+        condition: service_healthy
+
+  voting-service:
+    build:
+      context: .
+      dockerfile: backend/services/voting_service/Dockerfile
+      args:
+        PIP_DEFAULT_TIMEOUT: 120
+    container_name: voting-service
+    restart: unless-stopped
+    environment:
+      - VOTING_SERVICE_PORT=8002
+      - REDIS_URL=redis://redis:6379/0
+      - POSTGRES_DSN=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      - STATE_FILE=/data/state.json
+      - CMS_USERNAME=${CMS_USERNAME}
+      - CMS_PASSWORD=${CMS_PASSWORD}
+      - CMS_COOKIE_SECURE=true
+      - WEB_UI_URL=https://${APP_DOMAIN}
+      - CORS_ORIGINS=https://${APP_DOMAIN}
+      - ENABLE_DEMO_SESSION=${ENABLE_DEMO_SESSION:-false}
+    volumes:
+      - voting-data:/data
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  jira-service:
+    build:
+      context: .
+      dockerfile: backend/services/jira_service/Dockerfile
+    container_name: jira-service
+    restart: unless-stopped
+    environment:
+      - JIRA_SERVICE_PORT=8001
+      - JIRA_URL=${JIRA_URL}
+      - JIRA_USERNAME=${JIRA_USERNAME}
+      - JIRA_API_TOKEN=${JIRA_API_TOKEN}
+      - STORY_POINTS_FIELD=${STORY_POINTS_FIELD}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  gateway:
+    build:
+      context: .
+      dockerfile: backend/services/gateway/Dockerfile
+      args:
+        PIP_DEFAULT_TIMEOUT: 120
+    container_name: telegram-gateway
+    restart: unless-stopped
+    environment:
+      - BOT_TOKEN=${BOT_TOKEN}
+      - JIRA_SERVICE_URL=http://jira-service:8001
+      - VOTING_SERVICE_URL=http://voting-service:8002
+      - USER_TOKEN=${USER_TOKEN}
+      - LEAD_TOKEN=${LEAD_TOKEN}
+      - ADMIN_TOKEN=${ADMIN_TOKEN}
+      - SUPPORTED_TOPICS=${SUPPORTED_TOPICS}
+      - WEB_UI_URL=https://${APP_DOMAIN}
+      - POSTGRES_DSN=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+    depends_on:
+      jira-service:
+        condition: service_healthy
+      voting-service:
+        condition: service_healthy
+
+  redis:
+    image: redis:7-alpine
+    container_name: voting-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  postgres:
+    image: postgres:15-alpine
+    container_name: voting-postgres
+    restart: unless-stopped
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  caddy-data:
+  caddy-config:
+  voting-data:
+  redis-data:
+  postgres-data:

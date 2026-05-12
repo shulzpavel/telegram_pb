@@ -1,389 +1,96 @@
-# 🃏 Telegram Planning Poker Bot
+# Planning Poker
 
-Бот для планирования задач по методу **Planning Poker**. Поддерживает голосование в групповых чатах Telegram с использованием инлайн-кнопок, авторизацией по токену, подсчётом средней оценки и автоматическим выводом итогов сессии.
+Planning Poker is a manager-led estimation tool with Jira integration, Telegram support, browser voting links, and an admin/audit CMS.
 
-## 🚀 Возможности
+## What Is Included
 
-- Поддержка **групповых Telegram-чатов с топиками**
-- Авторизация участников по `/join <токен>`
-- Оценка задач по шкале **Fibonacci (1, 2, 3, 5, 8, 13)**
-- Поддержка **пакетной отправки задач** (batch mode)
-- Автоматический переход к следующей задаче
-- Автоматическое отображение итогов по банчу с **суммой SP за батч**
-- Поддержка нескольких администраторов
-- Проверка доступа по `chat_id` и `topic_id`
-- Интеграция с **Jira API** для поиска и обновления задач
-- Метрики в Postgres + готовые Grafana дашборды (см. `docs/GRAFANA.md`)
-- Структурированное логирование + audit события
-- **Микросервисная архитектура**: разделение на Jira Service, Voting Service и Telegram Gateway
-- **Модульная архитектура** с четким разделением слоев (domain, usecases, ports, adapters)
-- **Dependency Injection** для легкой замены реализаций
+- Manager web cockpit for session creation, invite links, task queue management, voting control, reveal, and final estimates.
+- Telegram gateway for session control, task loading, voting, results, and Jira Story Points updates.
+- Voting Service API backed by Redis for live state and Postgres for CMS/read models.
+- Jira Service API for Jira search and Story Points writes.
+- React/Vite web app for `/manage`, participant voting links, and `/cms`.
+- CMS with role-based access control for overview, sessions, users, votes, tokens, web participants, audit events, and access management.
+- Docker Compose setup for local and production-like runs.
 
----
+## Repository Layout
 
-## ⚙️ Установка
+```text
+backend/
+  app/                         # bot domain, use cases, adapters, transports
+  services/
+    gateway/                   # Telegram/Lark gateway Docker entrypoints
+    jira_service/              # Jira FastAPI service
+    voting_service/            # Voting, web voting, CMS, RBAC API
+  scripts/                     # backend operational scripts
+frontend/
+  web/                         # React/Vite app
+infra/
+  caddy/                       # production reverse proxy config
+  deploy/                      # production env example and runbook
+  grafana/                     # dashboards and provisioning
+  k8s/                         # Kubernetes manifests
+docs/
+  PRODUCT.md                   # product behavior
+  TECHNICAL.md                 # current technical architecture
+  ROADMAP.md                   # next improvements
+tests/                         # backend tests
+```
 
-Приложение использует микросервисную архитектуру и требует запуска всех сервисов.
-
-### 1. Клонировать репозиторий
+## Local Run
 
 ```bash
-git clone https://github.com/shulzpavel/telegram_pb.git
-cd telegram_pb
+docker compose up -d postgres redis jira-service voting-service web
 ```
 
-### 2. Запустить сервисы через Docker Compose
+Open:
+
+- Web app: `http://localhost:3001`
+- Manager cockpit: `http://localhost:3001/manage`
+- Real demo session: `http://localhost:3001/demo`
+- Manager view for real demo: `http://localhost:3001/manage?demo=1`
+- CMS: `http://localhost:3001/cms`
+- Voting API health: `http://localhost:8002/health/`
+
+For local CMS login, set `CMS_USERNAME` and `CMS_PASSWORD` in `.env`. On startup the Voting Service bootstraps that account as a DB-backed superadmin.
+
+## Development
+
+Backend:
 
 ```bash
-docker-compose up -d
+PYTHONPATH=backend python3 -m pytest -q -p no:cacheprovider
+PYTHONPATH=backend python3 -m compileall -q backend
 ```
 
-Это запустит:
-- **Jira Service** (порт 8001)
-- **Voting Service** (порт 8002)
-- **Redis** (для хранения сессий)
-- **Postgres** (для метрик)
-- **Telegram Gateway** (бот)
-
-### 3. Или запустить вручную
+Frontend:
 
 ```bash
-# Установить зависимости
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-
-# Запустить Jira Service
-python -m services.jira_service.main &
-
-# Запустить Voting Service
-python -m services.voting_service.main &
-
-# Запустить Gateway
-python run.py
+cd frontend/web
+npm ci
+npm run test
+npm run build
+npx playwright install chromium
+npm run test:e2e
 ```
 
----
-
-## 🔐 Настройка `.env`
-
-Создайте `.env` в корне проекта на основе `env.example`:
+Docker config checks:
 
 ```bash
-cp env.example .env
+docker compose config
+docker compose -f docker-compose.prod.yml --env-file infra/deploy/prod.env.example config
 ```
 
-**Важно**: Убедитесь, что указаны URLs микросервисов:
-```bash
-JIRA_SERVICE_URL=http://localhost:8001
-VOTING_SERVICE_URL=http://localhost:8002
-```
+## Production
 
-Отредактируйте `.env` и укажите реальные значения:
+Use Docker Compose production deployment:
 
-```dotenv
-# Telegram Bot Configuration
-BOT_TOKEN=YOUR_TELEGRAM_BOT_TOKEN
+- Runbook: [infra/deploy/PRODUCTION.md](infra/deploy/PRODUCTION.md)
+- Env example: [infra/deploy/prod.env.example](infra/deploy/prod.env.example)
 
-# User Role Tokens
-USER_TOKEN=user_token
-LEAD_TOKEN=lead_token
-ADMIN_TOKEN=admin_token
+The legacy root `DEPLOY.md` only points to the current production runbook.
 
-# Jira Configuration
-JIRA_URL=https://your-domain.atlassian.net
-JIRA_USERNAME=your-email@domain.com
-JIRA_API_TOKEN=YOUR_JIRA_API_TOKEN
-STORY_POINTS_FIELD=customfield_10022
+## Documentation
 
-# Supported Topics (JSON format)
-# Example: {"-1003087077812": ["ALL"]} - allows all topics in chat -1003087077812
-# Example: {"-1003087077812": [1, 2, 3]} - allows specific topics
-SUPPORTED_TOPICS={"-1003087077812": ["ALL"]}
-
-# State File Path
-STATE_FILE=data/state.json
-```
-
-**Важно:** Файл `.env` уже в `.gitignore` и не будет закоммичен в репозиторий.
-
----
-
-## ▶️ Запуск
-
-### Локальный запуск
-
-```bash
-source venv/bin/activate
-python3 run.py
-```
-
-Или через Makefile:
-
-```bash
-make run
-```
-
-### Запуск без polling (для вторичных инстансов)
-
-```bash
-python3 run.py --no-poll
-```
-
----
-
-## 🖥️ Деплой через systemd
-
-### 1. Скопируйте service файл
-
-```bash
-sudo cp telegram-pb-bot.service /etc/systemd/system/
-```
-
-### 2. Отредактируйте service файл
-
-Измените пути в `/etc/systemd/system/telegram-pb-bot.service`:
-
-```ini
-[Service]
-# ВАЖНО: Замените your_username на реальное имя пользователя
-User=your_username
-# ВАЖНО: Замените /path/to/telegram_pb на реальный путь (например: /home/user/telegram_pb)
-WorkingDirectory=/path/to/telegram_pb
-# ВАЖНО: Замените /path/to/telegram_pb на реальный путь
-EnvironmentFile=/path/to/telegram_pb/.env
-# ВАЖНО: Замените /path/to/telegram_pb на реальный путь
-ExecStart=/usr/bin/python3 /path/to/telegram_pb/run.py
-```
-
-### 3. Создайте `.env` файл на сервере
-
-Создайте `.env` файл в рабочей директории с реальными токенами (см. `env.example`).
-
-### 4. Запустите service
-
-```bash
-sudo systemctl daemon-reload
-sudo systemctl enable telegram-pb-bot
-sudo systemctl start telegram-pb-bot
-```
-
-### 5. Проверьте статус
-
-```bash
-sudo systemctl status telegram-pb-bot
-journalctl -u telegram-pb-bot -f
-```
-
----
-
-## 📌 Как пользоваться
-
-### Подключение
-
-1. Участник пишет:  
-   ```
-   /join <токен>
-   ```
-   Доступные токены: `USER_TOKEN`, `LEAD_TOKEN`, `ADMIN_TOKEN` (из `.env`)
-
-2. После подключения пользователь получает главное меню с кнопками:
-   - 🆕 Список задач
-   - ▶️ Начать (появляется если есть задачи и голосование не активно)
-   - 📋 Итоги дня
-   - 👥 Участники
-   - 🚪 Покинуть
-   - 🗑️ Удалить участника
-   - 🗑️ Сбросить очередь (только для лидов/админов, если есть задачи в очереди)
-
-### Добавление задач из Jira
-
-Лидеры и администраторы могут отправлять **JQL запросы** в чат:
-
-```
-project = FLEX AND status = "To Do"
-```
-
-или конкретные ключи задач:
-
-```
-FLEX-123, FLEX-456
-```
-
-Бот:
-- Покажет индикатор "⏳ Ожидайте, идет поиск задач в Jira..." (для больших запросов)
-- Найдет задачи в Jira по запросу
-- Добавит их в очередь голосования
-- Покажет кнопки "Назад" и "Начать" для запуска голосования
-
-### Голосование
-
-- Участники голосуют через инлайн-кнопки (1, 2, 3, 5, 8, 13)
-- **Кнопка "⏭️ Пропустить"** — позволяет пропустить голосование по задаче
-  - Пропущенный голос не учитывается при подсчете Story Points
-  - Пропуск считается как участие в голосовании (для перехода к следующей задаче)
-- После голосования всех участников (или пропуска) бот автоматически переходит к следующей задаче
-- После последней задачи — автоматически присылает итоги с **суммой SP за батч**
-- **Story Points** — в Jira записывается **максимальное** значение из всех голосов
-- Результаты показываются в текстовом сообщении с деталями голосования и итоговой суммой SP
-
-### Обновление Story Points в Jira
-
-После завершения голосования по задаче, лидеры и администраторы могут обновить Story Points в Jira через кнопку "Обновить в Jira".
-
-### Сброс очереди задач
-
-Лидеры и администраторы могут сбросить очередь задач, если добавили не те задачи или нужно начать заново:
-
-1. Нажмите кнопку **"🗑️ Сбросить очередь"** в главном меню (появляется только если есть задачи)
-2. Подтвердите сброс в диалоге
-3. Очередь будет очищена, текущее голосование остановлено
-4. **История голосований сохранится** — можно посмотреть в "📋 Итоги дня"
-
-**Важно:**
-- При сбросе во время активного голосования участники получат уведомление об остановке
-- История (`history`) и последний батч (`last_batch`) не удаляются
-- После сброса можно сразу добавить новые задачи через JQL
-
----
-
-## 🧠 Особенности
-
-- Участники голосуют через инлайн-кнопки (1, 2, 3, 5, 8, 13)
-- **Кнопка "Пропустить"** — участник может пропустить голосование по задаче
-- **Максимальное значение SP** — в Jira записывается максимальная оценка из всех голосов
-- Итоговая сумма — сумма всех **максимальных** значений по задачам
-- **Сброс очереди задач** — лидеры/админы могут сбросить очередь с подтверждением (история сохраняется)
-- Поддерживается несколько чатов и топиков (настраивается через `SUPPORTED_TOPICS`)
-- Голоса не считаются, если пользователь не авторизован
-- **Индикатор загрузки** при поиске задач в Jira (для больших запросов)
-- **Асинхронная работа с Jira API** (не блокирует event loop)
-- **Атомарная запись состояния** (защита от коррупции данных)
-
----
-
-## 🧪 Тестирование
-
-Запуск тестов:
-
-```bash
-make test
-```
-
-Или напрямую:
-
-```bash
-pytest
-```
-
-**Покрытие тестами:** 54 теста покрывают весь функционал:
-- ✅ Модели данных (Session, Task, Participant)
-- ✅ Use cases (добавление задач, голосование, завершение батча)
-- ✅ Voting policy (подсчет SP, средних значений)
-- ✅ Интеграционные сценарии (полный workflow)
-- ✅ Обработка ошибок и busy-флаги
-- ✅ Обработка Jira API (skip errors режим)
-
----
-
-## 📁 Структура проекта
-
-```
-telegram_pb/
-├── app/
-│   ├── adapters/              # Реализации портов (Jira HTTP, File storage, Telegram notifier)
-│   ├── domain/                # Модели данных и бизнес-правила
-│   ├── keyboards/             # Клавиатуры для бота
-│   ├── models/                # Обратная совместимость (реэкспорт из domain)
-│   ├── ports/                 # Интерфейсы (JiraClient, SessionRepository, Notifier)
-│   ├── providers.py           # DI контейнер, сборка адаптеров и use case'ов
-│   ├── transport/telegram/    # Aiogram-транспорт: router, middleware, handlers
-│   ├── usecases/              # Бизнес-сценарии (add_tasks, start_batch, cast_vote, ...)
-│   └── utils/                 # Утилиты (context, audit, telegram helpers)
-├── docs/
-│   ├── TECHNICAL.md           # Техническая документация по архитектуре
-│   └── MICROSERVICES.md       # Документация по микросервисной архитектуре
-├── services/
-│   ├── jira-service/          # Jira Service (FastAPI)
-│   ├── voting-service/        # Voting Service (FastAPI)
-│   └── gateway/               # Telegram Gateway (aiogram)
-├── k8s/                       # Kubernetes манифесты
-└── docker-compose.yml         # Docker Compose для локальной разработки
-├── data/              # Данные состояния (не в git)
-├── tests/             # Тесты
-├── run.py             # Точка входа
-├── session_store.py   # Хранилище сессий (используется адаптером)
-├── config.py          # Конфигурация
-├── requirements.txt   # Зависимости
-├── env.example        # Пример .env файла
-└── telegram-pb-bot.service  # systemd service файл
-```
-
----
-
-## 🔧 Разработка
-
-### Установка зависимостей
-
-```bash
-make install
-```
-
-### Запуск
-
-```bash
-make run
-```
-
-### Тесты
-
-```bash
-make test
-```
-
----
-
-## 🏗️ Микросервисная архитектура
-
-Приложение построено на микросервисной архитектуре с разделением ответственности:
-
-### Сервисы
-
-- **Jira Service** (порт 8001) - управление взаимодействием с Jira API, кеширование запросов
-- **Voting Service** (порт 8002) - управление сессиями и голосованием, хранение в Redis/Postgres
-- **Telegram Gateway** - тонкий клиент к сервисам, обработка Telegram событий (aiogram)
-
-### Запуск
-
-```bash
-# Docker Compose (рекомендуется)
-docker-compose up -d
-
-# Kubernetes
-kubectl apply -f k8s/
-```
-
-### Проверка работы
-
-```bash
-# Health checks
-curl http://localhost:8001/health/
-curl http://localhost:8002/health/
-```
-
-Подробная документация: [`docs/MICROSERVICES.md`](docs/MICROSERVICES.md)
-
----
-
-## ✨ Идеи для расширения
-
-- [x] Интеграция с Jira API (поиск и обновление тикетов)
-- [ ] Поддержка `/history` по всем сессиям
-- [ ] Разделение по спринтам
-- [ ] Экспорт результатов в различные форматы
-
----
-
-## 📝 Лицензия
-
-MIT
+- [docs/PRODUCT.md](docs/PRODUCT.md)
+- [docs/TECHNICAL.md](docs/TECHNICAL.md)
+- [docs/ROADMAP.md](docs/ROADMAP.md)

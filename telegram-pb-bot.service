@@ -12,7 +12,7 @@ WorkingDirectory=/path/to/telegram_pb
 # ВАЖНО: Замените /path/to/telegram_pb на реальный путь к проекту
 EnvironmentFile=/path/to/telegram_pb/.env
 # ВАЖНО: Замените /path/to/telegram_pb на реальный путь к проекту
-ExecStart=/usr/bin/python3 /path/to/telegram_pb/run.py
+ExecStart=/usr/bin/python3 /path/to/telegram_pb/backend/run.py
 Restart=always
 RestartSec=10
 

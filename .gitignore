@@ -7,6 +7,7 @@
 *_secret.txt
 secrets/
 tokens/
+!frontend/web/src/features/cms/tokens/
 
 # Python
 __pycache__/
@@ -22,6 +23,7 @@ downloads/
 eggs/
 .eggs/
 lib/
+!frontend/web/src/shared/lib/
 lib64/
 parts/
 sdist/
@@ -39,6 +41,10 @@ ENV/
 # IDE
 .vscode/
 .idea/
+.claude/
+**/.claude/
+.claire/
+**/.claire/
 *.swp
 *.swo
 
@@ -59,14 +65,19 @@ data/
 *.json
 !package.json
 !package-lock.json
+!tsconfig.json
 !docs/*.json
-!grafana/dashboards/*.json
+!infra/grafana/dashboards/*.json
+!infra/grafana/import/*.json
 test_*.json
 *_test.json
 *_state.json
 
-# Tests (run locally only)
-tests/
+# Frontend generated files
+node_modules/
+frontend/web/node_modules/
+frontend/web/dist/
+frontend/web/.vite/
 
 # Temporary files
 *.tmp
@@ -82,6 +93,7 @@ test_results/
 !README.md
 !DEPLOY.md
 !docs/*.md
+!infra/deploy/*.md
 
 # Setup and demo files
 setup_config.py
@@ -98,3 +110,4 @@ SUMMARY.md
 # Shell scripts (keep only telegram-pb-bot.service)
 *.sh
 !telegram-pb-bot.service
+!backend/scripts/*.sh
