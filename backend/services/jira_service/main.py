@@ -13,6 +13,7 @@ load_dotenv()
 from services.jira_service.api import router
 from services.jira_service.health import health_router
 from services.jira_service.metrics import metrics_router
+from services.common.cors import ALLOWED_CORS_HEADERS, ALLOWED_CORS_METHODS, cors_origins
 
 
 @asynccontextmanager
@@ -33,25 +34,12 @@ app = FastAPI(
 )
 
 
-def _cors_origins() -> list[str]:
-    raw = os.getenv("JIRA_SERVICE_CORS_ORIGINS") or os.getenv("CORS_ORIGINS") or ""
-    origins = [origin.strip() for origin in raw.split(",") if origin.strip()]
-    if origins:
-        return origins
-    return [
-        "http://localhost:3001",
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-    ]
-
-
-# CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=_cors_origins(),
+    allow_origins=cors_origins("JIRA_SERVICE_CORS_ORIGINS", "CORS_ORIGINS"),
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=ALLOWED_CORS_METHODS,
+    allow_headers=ALLOWED_CORS_HEADERS,
 )
 
 # Include routers

@@ -16,6 +16,8 @@ from services.voting_service.health import health_router
 from services.voting_service.metrics import metrics_router
 from services.voting_service.cms_api import cms_router
 from services.voting_service.web_api import web_router, REDIS_URL
+from services.common.cors import ALLOWED_CORS_HEADERS, ALLOWED_CORS_METHODS, cors_origins
+from services.voting_service.security import CSRFMiddleware
 
 
 @asynccontextmanager
@@ -80,25 +82,13 @@ app = FastAPI(
 )
 
 
-def _cors_origins() -> list[str]:
-    raw = os.getenv("CORS_ORIGINS") or os.getenv("WEB_UI_URL", "")
-    origins = [origin.strip() for origin in raw.split(",") if origin.strip()]
-    if origins:
-        return origins
-    return [
-        "http://localhost:3001",
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-    ]
-
-
-# CORS middleware
+app.add_middleware(CSRFMiddleware)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=_cors_origins(),
+    allow_origins=cors_origins("CORS_ORIGINS", "WEB_UI_URL"),
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=ALLOWED_CORS_METHODS,
+    allow_headers=ALLOWED_CORS_HEADERS,
 )
 
 # Include routers

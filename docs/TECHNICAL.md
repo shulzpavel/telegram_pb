@@ -136,10 +136,13 @@ Runtime env:
 
 - `CORS_ORIGINS`: comma-separated browser origins for FastAPI services.
 - `JIRA_SERVICE_CORS_ORIGINS`: optional override for Jira Service CORS origins.
+- `CMS_COOKIE_SECURE`: controls the `Secure` flag on CMS auth and CSRF cookies. Default is `true`; local Docker Compose overrides it to `false` for `http://localhost`.
 - `JIRA_CACHE_MAX_ITEMS`: max in-memory Jira cache entries, default `1000`.
 - `JIRA_UPDATE_CONCURRENCY`: concurrent Jira Story Points writes in skip-errors mode, default `5`.
 - `JIRA_SERVICE_TIMEOUT_SECONDS`: CMS Jira preview/import HTTP timeout, default `30`.
 - `ENABLE_DEMO_SESSION`: enables public real-demo session endpoint, default `true` for local compose and `false` in production compose.
+
+CMS and manager write APIs use cookie auth plus double-submit CSRF protection. Login issues an `httponly` auth cookie and a readable `cms_csrf` cookie; unsafe CMS/manager requests must send the same value in `X-CSRF-Token`.
 
 CMS permissions:
 

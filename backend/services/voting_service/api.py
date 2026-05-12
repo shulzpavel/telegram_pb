@@ -10,6 +10,7 @@ from app.domain.session import Session, SessionFactory
 from app.domain.task import Task
 from app.ports.session_repository import SessionRepository
 from services.voting_service.repository import get_repository
+from services.voting_service.session_helpers import get_repo_session, mutate_repo_session
 
 router = APIRouter()
 
@@ -74,21 +75,6 @@ async def get_repo(request: Request) -> SessionRepository:
     return request.app.state.repository
 
 
-async def _mutate_session(repo: SessionRepository, chat_id: int, topic_id: Optional[int], mutator):
-    if hasattr(repo, "mutate_session"):
-        return await repo.mutate_session(chat_id, topic_id, mutator)
-    if hasattr(repo, "get_session_async"):
-        session = await repo.get_session_async(chat_id, topic_id)
-    else:
-        session = repo.get_session(chat_id, topic_id)
-    result = mutator(session)
-    if hasattr(repo, "save_session_async"):
-        await repo.save_session_async(session)
-    else:
-        repo.save_session(session)
-    return session, result
-
-
 @router.get("/session", response_model=SessionResponse)
 async def get_session(
     chat_id: int,
@@ -98,11 +84,7 @@ async def get_session(
     """Get session."""
     repo = request.app.state.repository
 
-    # Try async method first, fallback to sync
-    if hasattr(repo, "get_session_async"):
-        session = await repo.get_session_async(chat_id, topic_id)
-    else:
-        session = repo.get_session(chat_id, topic_id)
+    session = await get_repo_session(repo, chat_id, topic_id)
 
     return SessionResponse(
         chat_id=session.chat_id,
@@ -164,7 +146,7 @@ async def add_tasks(
             session.bump_tasks_version()
         return added_count
 
-    _, added_count = await _mutate_session(repo, request.chat_id, request.topic_id, mutate)
+    _, added_count = await mutate_repo_session(repo, request.chat_id, request.topic_id, mutate)
 
     return {"success": True, "added": added_count}
 
@@ -185,7 +167,7 @@ async def cast_vote(
         session.current_task.votes[request.user_id] = request.vote_value
         return None
 
-    _, error = await _mutate_session(repo, request.chat_id, request.topic_id, mutate)
+    _, error = await mutate_repo_session(repo, request.chat_id, request.topic_id, mutate)
     if error:
         return {"success": False, "error": error}
     return {"success": True}
@@ -211,7 +193,7 @@ async def start_batch(
         session.bump_tasks_version()
         return None
 
-    _, error = await _mutate_session(repo, request.chat_id, request.topic_id, mutate)
+    _, error = await mutate_repo_session(repo, request.chat_id, request.topic_id, mutate)
     if error:
         return {"success": False, "error": error}
     return {"success": True}
@@ -246,7 +228,7 @@ async def finish_batch(
         session.bump_tasks_version()
         return None, completed_tasks
 
-    _, (error, completed_tasks) = await _mutate_session(repo, request.chat_id, request.topic_id, mutate)
+    _, (error, completed_tasks) = await mutate_repo_session(repo, request.chat_id, request.topic_id, mutate)
     if error:
         return {"success": False, "error": error}
 

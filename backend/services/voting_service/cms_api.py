@@ -25,6 +25,17 @@ from app.usecases.manage_tasks import (
     TaskQueueError,
     UpdateTaskUseCase,
 )
+from services.voting_service.schemas import (
+    JiraImportRequest,
+    JiraPreviewRequest,
+    TaskBulkCreateRequest,
+    TaskCreateRequest,
+    TaskInput,
+    TaskMoveRequest,
+    TaskReorderRequest,
+    TaskUpdateRequest,
+)
+from services.voting_service.session_helpers import get_repo_session, mutate_repo_session
 from services.voting_service.cms_store import DEFAULT_LIMIT, MAX_LIMIT
 from services.voting_service.cms_rbac import (
     PERM_ACCESS_MANAGE,
@@ -38,14 +49,14 @@ from services.voting_service.cms_rbac import (
     PERM_VOTES_VIEW,
     PERM_WEB_VIEW,
 )
+from services.voting_service.security import CMS_COOKIE_NAME, CMS_CSRF_COOKIE_NAME, env_flag, new_csrf_token
 
 cms_router = APIRouter()
 
 CMS_TOKEN_TTL = int(os.getenv("CMS_TOKEN_TTL_SECONDS", str(24 * 3600)))
 CMS_LOGIN_MAX_ATTEMPTS = int(os.getenv("CMS_LOGIN_MAX_ATTEMPTS", "5"))
 CMS_LOGIN_WINDOW_SECONDS = int(os.getenv("CMS_LOGIN_WINDOW_SECONDS", "900"))
-CMS_COOKIE_NAME = "cms_token"
-CMS_COOKIE_SECURE = os.getenv("CMS_COOKIE_SECURE", "false").lower() == "true"
+CMS_COOKIE_SECURE = env_flag("CMS_COOKIE_SECURE", default=True)
 
 
 class LoginRequest(BaseModel):
@@ -83,46 +94,6 @@ class AdminUpdateRequest(BaseModel):
     password: Optional[str] = Field(default=None, min_length=8, max_length=256)
 
 
-class TaskInput(BaseModel):
-    summary: str = Field(min_length=1, max_length=500)
-    jira_key: Optional[str] = Field(default=None, max_length=64)
-    url: Optional[str] = Field(default=None, max_length=1000)
-    story_points: Optional[int] = Field(default=None, ge=0, le=1000)
-
-
-class TaskCreateRequest(TaskInput):
-    expected_version: Optional[int] = Field(default=None, ge=0)
-
-
-class TaskBulkCreateRequest(BaseModel):
-    tasks: list[TaskInput] = Field(min_length=1, max_length=500)
-    expected_version: Optional[int] = Field(default=None, ge=0)
-
-
-class TaskUpdateRequest(TaskInput):
-    expected_version: Optional[int] = Field(default=None, ge=0)
-
-
-class TaskMoveRequest(BaseModel):
-    target_index: int = Field(ge=0)
-    expected_version: Optional[int] = Field(default=None, ge=0)
-
-
-class TaskReorderRequest(BaseModel):
-    ordered_task_ids: list[str] = Field(min_length=1, max_length=5000)
-    expected_version: Optional[int] = Field(default=None, ge=0)
-
-
-class JiraPreviewRequest(BaseModel):
-    jql: str = Field(min_length=1, max_length=5000)
-    max_results: int = Field(default=500, ge=1, le=1000)
-
-
-class JiraImportRequest(JiraPreviewRequest):
-    selected_keys: list[str] = Field(default_factory=list, max_length=1000)
-    expected_version: Optional[int] = Field(default=None, ge=0)
-
-
 @dataclass(frozen=True)
 class CmsPrincipal:
     id: int
@@ -152,29 +123,6 @@ def _get_cms_store(request: Request):
     if not store:
         raise HTTPException(status_code=503, detail="CMS storage is not configured")
     return store
-
-
-async def _get_repo_session(repo, chat_id: int, topic_id: Optional[int]) -> Session:
-    if hasattr(repo, "get_session_async"):
-        return await repo.get_session_async(chat_id, topic_id)
-    return await repo.get_session(chat_id, topic_id)
-
-
-async def _save_repo_session(repo, session: Session) -> None:
-    if hasattr(repo, "save_session_async"):
-        await repo.save_session_async(session)
-        return
-    await repo.save_session(session)
-
-
-async def _mutate_repo_session(repo, chat_id: int, topic_id: Optional[int], mutator):
-    if hasattr(repo, "mutate_session"):
-        _, result = await repo.mutate_session(chat_id, topic_id, mutator)
-        return result
-    session = await _get_repo_session(repo, chat_id, topic_id)
-    result = mutator(session)
-    await _save_repo_session(repo, session)
-    return result
 
 
 async def _session_ref(request: Request, session_id: int) -> tuple[int, Optional[int]]:
@@ -404,6 +352,15 @@ async def cms_login(body: LoginRequest, request: Request, response: Response) ->
         samesite="strict",
         path="/",
     )
+    response.set_cookie(
+        CMS_CSRF_COOKIE_NAME,
+        new_csrf_token(),
+        max_age=CMS_TOKEN_TTL,
+        httponly=False,
+        secure=CMS_COOKIE_SECURE,
+        samesite="strict",
+        path="/",
+    )
     await _audit(request, "cms.login", principal_record["username"], "ok")
     return {"ok": True, "expires_in": CMS_TOKEN_TTL}
 
@@ -421,6 +378,7 @@ async def cms_logout(
         redis_client = await _get_redis(request)
         await redis_client.delete(f"cms_token:{token}")
     response.delete_cookie(CMS_COOKIE_NAME, path="/")
+    response.delete_cookie(CMS_CSRF_COOKIE_NAME, path="/")
     await _audit(request, "cms.logout", actor.username, "ok")
     return {"ok": True}
 
@@ -672,7 +630,7 @@ async def cms_preview_jira_tasks(
     _: CmsPrincipal = Depends(require_permission(PERM_TASKS_MANAGE)),
 ) -> dict:
     chat_id, topic_id = await _session_ref(request, session_id)
-    session = await _get_repo_session(request.app.state.repository, chat_id, topic_id)
+    session = await get_repo_session(request.app.state.repository, chat_id, topic_id)
     issues = await _jira_preview(body.jql, body.max_results)
     return _jira_preview_payload(issues, _existing_jira_keys(session))
 
@@ -722,7 +680,7 @@ async def cms_import_jira_tasks(
             session.bump_tasks_version()
             return TaskMutationResult(session=session, task=added[-1], tasks=tuple(added))
 
-        result = await _mutate_repo_session(request.app.state.repository, chat_id, topic_id, mutate)
+        _, result = await mutate_repo_session(request.app.state.repository, chat_id, topic_id, mutate)
     except TaskQueueError as exc:
         await _audit(request, "cms.task.jira_import", actor.username, "failed", {"error": str(exc), "session_id": session_id})
         _raise_task_error(exc)

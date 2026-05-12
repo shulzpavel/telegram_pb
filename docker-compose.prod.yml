@@ -47,7 +47,7 @@ services:
       - STATE_FILE=/data/state.json
       - CMS_USERNAME=${CMS_USERNAME}
       - CMS_PASSWORD=${CMS_PASSWORD}
-      - CMS_COOKIE_SECURE=true
+      - CMS_COOKIE_SECURE=${CMS_COOKIE_SECURE:-true}
       - WEB_UI_URL=https://${APP_DOMAIN}
       - CORS_ORIGINS=https://${APP_DOMAIN}
       - ENABLE_DEMO_SESSION=${ENABLE_DEMO_SESSION:-false}
@@ -77,6 +77,7 @@ services:
       - JIRA_USERNAME=${JIRA_USERNAME}
       - JIRA_API_TOKEN=${JIRA_API_TOKEN}
       - STORY_POINTS_FIELD=${STORY_POINTS_FIELD}
+      - JIRA_SERVICE_CORS_ORIGINS=${JIRA_SERVICE_CORS_ORIGINS:-https://${APP_DOMAIN}}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
       interval: 30s

@@ -12,6 +12,7 @@ services:
       - JIRA_USERNAME=${JIRA_USERNAME}
       - JIRA_API_TOKEN=${JIRA_API_TOKEN}
       - STORY_POINTS_FIELD=${STORY_POINTS_FIELD}
+      - JIRA_SERVICE_CORS_ORIGINS=${JIRA_SERVICE_CORS_ORIGINS:-}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
       interval: 30s

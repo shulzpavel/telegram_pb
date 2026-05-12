@@ -1,6 +1,7 @@
 """Web UI API endpoints for Planning Poker voting."""
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
@@ -11,6 +12,7 @@ import redis.asyncio as aioredis
 from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
+from services.voting_service.session_helpers import mutate_repo_session
 from services.voting_service.ws_manager import redis_pubsub_listener
 
 logger = logging.getLogger(__name__)
@@ -57,8 +59,9 @@ def _channel_name(chat_id: int, topic_id: Optional[int]) -> str:
 
 
 def _stable_user_id(participant_id: str) -> int:
-    """Map a UUID participant_id to a stable integer user_id (negative range to avoid collisions)."""
-    return -(abs(hash(participant_id)) % (10 ** 14) + 1)
+    digest = hashlib.sha256(participant_id.encode("utf-8")).digest()
+    value = int.from_bytes(digest[:8], "big") & ((1 << 63) - 1)
+    return -(value + 1)
 
 
 async def _get_redis(request: Request) -> aioredis.Redis:
@@ -150,21 +153,6 @@ def _build_web_session_state(session) -> dict:
     }
 
 
-async def _mutate_session(repo, chat_id: int, topic_id: Optional[int], mutator):
-    if hasattr(repo, "mutate_session"):
-        return await repo.mutate_session(chat_id, topic_id, mutator)
-    if hasattr(repo, "get_session_async"):
-        session = await repo.get_session_async(chat_id, topic_id)
-    else:
-        session = repo.get_session(chat_id, topic_id)
-    result = mutator(session)
-    if hasattr(repo, "save_session_async"):
-        await repo.save_session_async(session)
-    else:
-        repo.save_session(session)
-    return session, result
-
-
 # ---------------------------------------------------------------------------
 # REST endpoints
 # ---------------------------------------------------------------------------
@@ -233,7 +221,7 @@ async def web_join(body: WebJoinRequest, request: Request) -> dict:
             added = True
         return None
 
-    session, _ = await _mutate_session(repo, chat_id, topic_id, mutate)
+    session, _ = await mutate_repo_session(repo, chat_id, topic_id, mutate)
 
     if added:
         channel = _channel_name(chat_id, topic_id)
@@ -288,7 +276,7 @@ async def web_vote(body: WebVoteRequest, request: Request) -> dict:
         session.current_task.votes[user_id] = body.value
         return None
 
-    session, _ = await _mutate_session(repo, chat_id, topic_id, mutate)
+    session, _ = await mutate_repo_session(repo, chat_id, topic_id, mutate)
 
     # Build and publish state update
     task = session.current_task

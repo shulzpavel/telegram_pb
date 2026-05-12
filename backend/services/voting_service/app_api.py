@@ -35,6 +35,17 @@ from services.voting_service.cms_api import (
 )
 from services.voting_service.cms_store import DEFAULT_LIMIT, MAX_LIMIT
 from services.voting_service.cms_rbac import PERM_APP_SESSIONS_MANAGE
+from services.voting_service.schemas import (
+    FinalEstimateRequest,
+    JiraImportRequest,
+    JiraPreviewRequest,
+    TaskBulkCreateRequest,
+    TaskCreateRequest,
+    TaskMoveRequest,
+    TaskReorderRequest,
+    TaskUpdateRequest,
+)
+from services.voting_service.session_helpers import get_repo_session, mutate_repo_session
 from services.voting_service.web_api import WEB_TOKEN_TTL, _build_web_session_state, _channel_name
 
 app_router = APIRouter()
@@ -69,50 +80,6 @@ class AppSessionCreateRequest(BaseModel):
     title: str = Field(default="Planning Poker", min_length=1, max_length=120)
 
 
-class TaskInput(BaseModel):
-    summary: str = Field(min_length=1, max_length=500)
-    jira_key: Optional[str] = Field(default=None, max_length=64)
-    url: Optional[str] = Field(default=None, max_length=1000)
-    story_points: Optional[int] = Field(default=None, ge=0, le=1000)
-
-
-class TaskCreateRequest(TaskInput):
-    expected_version: Optional[int] = Field(default=None, ge=0)
-
-
-class TaskBulkCreateRequest(BaseModel):
-    tasks: list[TaskInput] = Field(min_length=1, max_length=500)
-    expected_version: Optional[int] = Field(default=None, ge=0)
-
-
-class TaskUpdateRequest(TaskInput):
-    expected_version: Optional[int] = Field(default=None, ge=0)
-
-
-class TaskMoveRequest(BaseModel):
-    target_index: int = Field(ge=0)
-    expected_version: Optional[int] = Field(default=None, ge=0)
-
-
-class TaskReorderRequest(BaseModel):
-    ordered_task_ids: list[str] = Field(min_length=1, max_length=5000)
-    expected_version: Optional[int] = Field(default=None, ge=0)
-
-
-class JiraPreviewRequest(BaseModel):
-    jql: str = Field(min_length=1, max_length=5000)
-    max_results: int = Field(default=500, ge=1, le=1000)
-
-
-class JiraImportRequest(JiraPreviewRequest):
-    selected_keys: list[str] = Field(default_factory=list, max_length=1000)
-    expected_version: Optional[int] = Field(default=None, ge=0)
-
-
-class FinalEstimateRequest(BaseModel):
-    value: int = Field(ge=0, le=1000)
-
-
 def _manager_dep(actor: CmsPrincipal = Depends(require_permission(PERM_APP_SESSIONS_MANAGE))) -> CmsPrincipal:
     return actor
 
@@ -128,25 +95,6 @@ def _new_app_chat_id() -> int:
 
 def _demo_enabled() -> bool:
     return os.getenv("ENABLE_DEMO_SESSION", "true").lower() in {"1", "true", "yes", "on"}
-
-
-async def _get_repo_session(repo, chat_id: int, topic_id: Optional[int]) -> Session:
-    if hasattr(repo, "get_session_async"):
-        return await repo.get_session_async(chat_id, topic_id)
-    return await repo.get_session(chat_id, topic_id)
-
-
-async def _mutate_repo_session(repo, chat_id: int, topic_id: Optional[int], mutator):
-    if hasattr(repo, "mutate_session"):
-        session, result = await repo.mutate_session(chat_id, topic_id, mutator)
-        return session, result
-    session = await _get_repo_session(repo, chat_id, topic_id)
-    result = mutator(session)
-    if hasattr(repo, "save_session_async"):
-        await repo.save_session_async(session)
-    else:
-        await repo.save_session(session)
-    return session, result
 
 
 async def _create_invite_token(
@@ -251,7 +199,7 @@ async def create_app_session(
     repo = request.app.state.repository
     chat_id = _new_app_chat_id()
     topic_id = None
-    session = await _get_repo_session(repo, chat_id, topic_id)
+    session = await get_repo_session(repo, chat_id, topic_id)
     token, invite_url = await _create_invite_token(request, chat_id, topic_id, body.title)
     await _audit(request, "app.session.create", actor.username, "ok", {"chat_id": chat_id, "title": body.title})
     return _manager_session_payload(session, title=body.title, invite_url=invite_url, token=token)
@@ -301,7 +249,7 @@ async def create_demo_session(request: Request, reset: bool = Query(default=Fals
 
         session.bump_tasks_version()
 
-    session, _ = await _mutate_repo_session(repo, chat_id, topic_id, mutate)
+    session, _ = await mutate_repo_session(repo, chat_id, topic_id, mutate)
     token, invite_url = await _create_invite_token(request, chat_id, topic_id, DEMO_TITLE)
     await _publish_state(request, session)
     await _audit(request, "app.demo_session", None, "ok", {"chat_id": chat_id, "reset": reset})
@@ -316,7 +264,7 @@ async def app_session_state(
     title: str = "Planning Poker",
     _: CmsPrincipal = Depends(_manager_dep),
 ) -> dict:
-    session = await _get_repo_session(request.app.state.repository, chat_id, topic_id)
+    session = await get_repo_session(request.app.state.repository, chat_id, topic_id)
     return _manager_session_payload(session, title=title)
 
 
@@ -330,7 +278,7 @@ async def app_session_tasks(
     q: Optional[str] = None,
     _: CmsPrincipal = Depends(_manager_dep),
 ) -> dict:
-    session = await _get_repo_session(request.app.state.repository, chat_id, topic_id)
+    session = await get_repo_session(request.app.state.repository, chat_id, topic_id)
     return _task_page(session, limit, cursor, q)
 
 
@@ -490,7 +438,7 @@ async def app_preview_jira_tasks(
     topic_id: Optional[int] = None,
     _: CmsPrincipal = Depends(_manager_dep),
 ) -> dict:
-    session = await _get_repo_session(request.app.state.repository, chat_id, topic_id)
+    session = await get_repo_session(request.app.state.repository, chat_id, topic_id)
     issues = await _jira_preview(body.jql, body.max_results)
     return _jira_preview_payload(issues, _existing_jira_keys(session))
 
@@ -537,7 +485,7 @@ async def app_import_jira_tasks(
         return TaskMutationResult(session=session, task=added[-1], tasks=tuple(added))
 
     try:
-        session, result = await _mutate_repo_session(request.app.state.repository, chat_id, topic_id, mutate)
+        session, result = await mutate_repo_session(request.app.state.repository, chat_id, topic_id, mutate)
     except TaskQueueError as exc:
         await _audit(request, "app.task.jira_import", actor.username, "failed", {"error": str(exc), "chat_id": chat_id})
         _raise_task_error(exc)
@@ -565,7 +513,7 @@ async def app_start_session(
         session.bump_tasks_version()
         return None
 
-    session, error = await _mutate_repo_session(request.app.state.repository, chat_id, topic_id, mutate)
+    session, error = await mutate_repo_session(request.app.state.repository, chat_id, topic_id, mutate)
     if error:
         raise HTTPException(status_code=400, detail=error)
     await _publish_state(request, session)
@@ -587,7 +535,7 @@ async def app_reveal_session(
         session.bump_tasks_version()
         return None
 
-    session, error = await _mutate_repo_session(request.app.state.repository, chat_id, topic_id, mutate)
+    session, error = await mutate_repo_session(request.app.state.repository, chat_id, topic_id, mutate)
     if error:
         raise HTTPException(status_code=400, detail=error)
     await _publish_state(request, session)
@@ -615,7 +563,7 @@ async def app_next_task(
             session.batch_completed = True
         session.bump_tasks_version()
 
-    session, _ = await _mutate_repo_session(request.app.state.repository, chat_id, topic_id, mutate)
+    session, _ = await mutate_repo_session(request.app.state.repository, chat_id, topic_id, mutate)
     await _publish_state(request, session)
     await _audit(request, "app.session.next", actor.username, "ok", {"chat_id": chat_id})
     return _manager_session_payload(session)
@@ -648,7 +596,7 @@ async def app_set_final_estimate(
         session.bump_tasks_version()
         return None
 
-    session, error = await _mutate_repo_session(request.app.state.repository, chat_id, topic_id, mutate)
+    session, error = await mutate_repo_session(request.app.state.repository, chat_id, topic_id, mutate)
     if error:
         raise HTTPException(status_code=400, detail=error)
     await _publish_state(request, session)
@@ -683,7 +631,7 @@ async def app_finish_session(
         session.bump_tasks_version()
         return completed_tasks
 
-    session, completed = await _mutate_repo_session(request.app.state.repository, chat_id, topic_id, mutate)
+    session, completed = await mutate_repo_session(request.app.state.repository, chat_id, topic_id, mutate)
     await _publish_state(request, session)
     await _audit(request, "app.session.finish", actor.username, "ok", {"chat_id": chat_id, "count": len(completed)})
     return _manager_session_payload(session)

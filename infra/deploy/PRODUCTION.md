@@ -56,6 +56,10 @@ Open:
 
 - `https://planning.shults-sync.com/cms`
 - login with `CMS_USERNAME` / `CMS_PASSWORD`
+- create or verify a manager admin with `app.sessions.manage`
+- open `https://planning.shults-sync.com/manage` and create a browser session
+
+Production compose sets `CMS_COOKIE_SECURE=true`, `ENABLE_DEMO_SESSION=false`, and explicit CORS origins for both FastAPI services.
 
 Start Telegram polling only after web/API/CMS are healthy:
 
