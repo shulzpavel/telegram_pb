@@ -15,9 +15,8 @@ class Notifier(ABC):
         reply_markup: Optional[Any] = None,
         parse_mode: Optional[str] = None,
         disable_web_page_preview: bool = False,
-        message_thread_id: Optional[int] = None,
     ) -> Optional[Any]:
-        """Send text message. message_thread_id: topic/thread for forum groups."""
+        """Send text message."""
         pass
 
     @abstractmethod
@@ -44,17 +43,6 @@ class Notifier(ABC):
         document: Any,
         caption: Optional[str] = None,
         reply_markup: Optional[Any] = None,
-        message_thread_id: Optional[int] = None,
     ) -> Optional[Any]:
-        """Send document. message_thread_id: topic/thread for forum groups."""
-        pass
-
-    @abstractmethod
-    async def answer_callback(
-        self,
-        callback_query_id: str,
-        text: Optional[str] = None,
-        show_alert: bool = False,
-    ) -> bool:
-        """Answer callback query."""
+        """Send document."""
         pass

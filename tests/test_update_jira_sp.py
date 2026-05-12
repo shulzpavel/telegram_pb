@@ -1,7 +1,7 @@
 """Tests for update Jira SP handler with busy flag and error handling."""
 
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 from pathlib import Path
 
 from app.domain.participant import Participant
@@ -23,9 +23,7 @@ class TestUpdateJiraSPBusyFlag:
             self.temp_file.unlink()
         self.repo = FileSessionRepository(self.temp_file)
 
-        # Mock bot and container
-        self.mock_bot = MagicMock()
-        self.container = DIContainer(bot=self.mock_bot, session_repo=self.repo)
+        self.container = DIContainer(session_repo=self.repo)
 
     def teardown_method(self):
         """Cleanup test fixtures."""
@@ -88,8 +86,7 @@ class TestShowBatchResultsSP:
         if self.temp_file.exists():
             self.temp_file.unlink()
         self.repo = FileSessionRepository(self.temp_file)
-        self.mock_bot = MagicMock()
-        self.container = DIContainer(bot=self.mock_bot, session_repo=self.repo)
+        self.container = DIContainer(session_repo=self.repo)
 
     def teardown_method(self):
         """Cleanup test fixtures."""

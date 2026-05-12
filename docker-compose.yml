@@ -85,69 +85,6 @@ services:
       retries: 5
     restart: unless-stopped
 
-  gateway:
-    build:
-      context: .
-      dockerfile: backend/services/gateway/Dockerfile
-      network: host
-      args:
-        PIP_DEFAULT_TIMEOUT: 120
-    container_name: telegram-gateway
-    environment:
-      - BOT_TOKEN=${BOT_TOKEN}
-      - JIRA_SERVICE_URL=http://jira-service:8001
-      - VOTING_SERVICE_URL=http://voting-service:8002
-      - USER_TOKEN=${USER_TOKEN}
-      - LEAD_TOKEN=${LEAD_TOKEN}
-      - ADMIN_TOKEN=${ADMIN_TOKEN}
-      - SUPPORTED_TOPICS=${SUPPORTED_TOPICS}
-      - WEB_UI_URL=${WEB_UI_URL:-}
-      - CMS_USERNAME=${CMS_USERNAME:-admin}
-      - CMS_PASSWORD=${CMS_PASSWORD:-}
-    depends_on:
-      jira-service:
-        condition: service_healthy
-      voting-service:
-        condition: service_healthy
-    restart: unless-stopped
-
-  lark-gateway:
-    build:
-      context: .
-      dockerfile: backend/services/gateway/Dockerfile
-      network: host
-      args:
-        PIP_DEFAULT_TIMEOUT: 120
-    container_name: lark-gateway
-    command: ["python", "-m", "app.main_lark"]
-    ports:
-      - "8080:8080"
-    environment:
-      - LARK_APP_ID=${LARK_APP_ID}
-      - LARK_APP_SECRET=${LARK_APP_SECRET}
-      - LARK_VERIFICATION_TOKEN=${LARK_VERIFICATION_TOKEN}
-      - LARK_ENCRYPT_KEY=${LARK_ENCRYPT_KEY}
-      - LARK_WEBHOOK_PORT=8080
-      - JIRA_SERVICE_URL=http://jira-service:8001
-      - VOTING_SERVICE_URL=http://voting-service:8002
-      - USER_TOKEN=${USER_TOKEN}
-      - LEAD_TOKEN=${LEAD_TOKEN}
-      - ADMIN_TOKEN=${ADMIN_TOKEN}
-      - POSTGRES_DSN=${POSTGRES_DSN}
-      - WEB_UI_URL=${WEB_UI_URL:-}
-    depends_on:
-      jira-service:
-        condition: service_healthy
-      voting-service:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 20s
-    restart: unless-stopped
-
   web:
     build:
       context: ./frontend/web

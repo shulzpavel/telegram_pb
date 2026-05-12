@@ -84,30 +84,6 @@ services:
       retries: 3
       start_period: 40s
 
-  gateway:
-    build:
-      context: .
-      dockerfile: backend/services/gateway/Dockerfile
-      args:
-        PIP_DEFAULT_TIMEOUT: 120
-    container_name: telegram-gateway
-    restart: unless-stopped
-    environment:
-      - BOT_TOKEN=${BOT_TOKEN}
-      - JIRA_SERVICE_URL=http://jira-service:8001
-      - VOTING_SERVICE_URL=http://voting-service:8002
-      - USER_TOKEN=${USER_TOKEN}
-      - LEAD_TOKEN=${LEAD_TOKEN}
-      - ADMIN_TOKEN=${ADMIN_TOKEN}
-      - SUPPORTED_TOPICS=${SUPPORTED_TOPICS}
-      - WEB_UI_URL=https://${APP_DOMAIN}
-      - POSTGRES_DSN=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
-    depends_on:
-      jira-service:
-        condition: service_healthy
-      voting-service:
-        condition: service_healthy
-
   redis:
     image: redis:7-alpine
     container_name: voting-redis

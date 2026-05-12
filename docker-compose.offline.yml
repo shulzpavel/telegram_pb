@@ -1,5 +1,0 @@
-# Использовать для сборки без сети: docker compose -f docker-compose.yml -f docker-compose.offline.yml build gateway
-services:
-  gateway:
-    build:
-      dockerfile: backend/services/gateway/Dockerfile.offline

@@ -1,17 +1,12 @@
 """Dependency injection container."""
 
 import asyncio
-from pathlib import Path
 from typing import Optional, Dict, Tuple
-
-from aiogram import Bot
 
 from app.adapters.jira_service_client import JiraServiceHttpClient
 from app.adapters.voting_service_client import VotingServiceHttpClient
 from app.adapters.metrics_null import NullMetricsRepository
-from app.adapters.telegram_notifier import TelegramNotifier
 from app.ports.jira_client import JiraClient
-from app.ports.notifier import Notifier
 from app.ports.session_repository import SessionRepository
 from app.ports.metrics_repository import MetricsRepository
 from app.usecases.add_tasks import AddTasksFromJiraUseCase
@@ -37,13 +32,10 @@ class DIContainer:
 
     def __init__(
         self,
-        bot: Bot,
         jira_client: Optional[JiraClient] = None,
         session_repo: Optional[SessionRepository] = None,
-        notifier: Optional[Notifier] = None,
         metrics_repo: Optional[MetricsRepository] = None,
     ):
-        # Always use HTTP clients to microservices
         if jira_client is None:
             if not JIRA_SERVICE_URL:
                 raise ValueError("JIRA_SERVICE_URL must be set for microservices mode")
@@ -58,24 +50,21 @@ class DIContainer:
         else:
             self._session_repo = session_repo
 
-        self._notifier = notifier or TelegramNotifier(bot)
-
         if metrics_repo is not None:
             self._metrics = metrics_repo
         else:
             if POSTGRES_DSN:
                 try:
-                    # Lazy import to avoid dependency error when asyncpg is absent
                     from app.adapters.metrics_postgres import PostgresMetricsRepository  # type: ignore
 
                     self._metrics = PostgresMetricsRepository(POSTGRES_DSN)
-                except Exception as exc:  # ImportError or asyncpg missing
+                except Exception as exc:
                     print(f"[Metrics] asyncpg not available or import failed ({exc!r}), using NullMetricsRepository")
                     self._metrics = NullMetricsRepository()
             else:
                 self._metrics = NullMetricsRepository()
 
-        # In-memory flags/locks for long operations (e.g., JQL, update_sp) to avoid duplicate presses
+        # In-memory flags/locks for long operations to avoid duplicate presses
         self.busy_ops: set[Tuple] = set()
         self._busy_locks: Dict[Tuple, asyncio.Lock] = {}
 
@@ -104,32 +93,21 @@ class DIContainer:
 
     @property
     def jira_client(self) -> JiraClient:
-        """Get Jira client."""
         return self._jira_client
 
     @property
     def session_repo(self) -> SessionRepository:
-        """Get session repository."""
         return self._session_repo
 
     @property
-    def notifier(self) -> Notifier:
-        """Get notifier."""
-        return self._notifier
-
-    @property
     def metrics(self) -> MetricsRepository:
-        """Get metrics repository."""
         return self._metrics
 
     async def cleanup(self) -> None:
         """Cleanup resources."""
-        # Close Jira client (both direct and HTTP service client have close method)
         if hasattr(self._jira_client, "close"):
             await self._jira_client.close()
-        # Close session repo if it has close method (HTTP client does)
         if hasattr(self._session_repo, "close"):
             await self._session_repo.close()
-        # Close metrics
         if hasattr(self._metrics, "close"):
             await self._metrics.close()
