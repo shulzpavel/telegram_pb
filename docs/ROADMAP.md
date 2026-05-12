@@ -5,7 +5,7 @@
 1. Added atomic live-session mutations.
    - Redis uses optimistic locking.
    - Postgres uses transaction-scoped advisory locks.
-   - Task queue edits, Jira imports, Telegram voting, and web voting mutate sessions through the same repository boundary.
+   - Task queue edits, Jira imports, manager actions, and browser voting mutate sessions through the same repository boundary.
 
 2. Moved CMS read-model refresh out of hot write paths.
    - Session saves schedule coalesced background CMS sync.

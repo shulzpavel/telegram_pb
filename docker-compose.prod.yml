@@ -1,3 +1,5 @@
+name: planning-poker
+
 services:
   caddy:
     image: caddy:2-alpine

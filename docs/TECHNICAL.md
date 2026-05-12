@@ -6,7 +6,7 @@ The project is split into backend services, a browser frontend, and infrastructu
 
 ```text
 backend/app
-  domain, use cases, ports, adapters, Telegram/Lark transports
+  domain, use cases, ports, adapters
 backend/services/jira_service
   FastAPI service for Jira search and Story Points writes
 backend/services/voting_service
@@ -30,9 +30,7 @@ infra
 
 - Jira API auth failures are logged without exposing the API token.
 - Jira HTTP calls retry transient network errors and `429/5xx` responses with short backoff.
-- Bot-to-service HTTP clients retry transient service failures.
 - Jira Service cache is TTL-based and capped by `JIRA_CACHE_MAX_ITEMS` to avoid unbounded growth.
-- Telegram notifier failures are logged with chat/message context.
 - Session JSON serialization is centralized in `SessionFactory`.
 - Redis and Postgres session repositories expose async methods directly; sync `NotImplementedError` shims were removed.
 - Session creation is service-owned and idempotent: Redis uses `SET NX`, Postgres uses a transaction-scoped advisory lock, and HTTP clients no longer create local fallback sessions after a missing read.
@@ -99,7 +97,7 @@ Core endpoints:
 
 Manual reveal is represented by `Session.revealed_task_id`. The browser state moves to `results` either when all eligible voters voted or when the manager explicitly reveals the current task.
 
-Telegram and Lark no longer expose task-skip controls to ordinary voters; server handlers also reject crafted skip/review callbacks from non-managers.
+Only authenticated managers with `app.sessions.manage` can start, reveal, skip, advance, or finish a session. Public participant links expose voting/joining only.
 
 Demo support:
 
@@ -121,13 +119,13 @@ CMS auth is DB-backed:
 - Page access is stored in `cms_pages`.
 - Admin-role and role-permission relations are many-to-many.
 
-CMS user creation is guarded on both UX and API boundaries: the frontend validates username format, password length, role selection, and optional Telegram user id before submitting. FastAPI remains authoritative for request validation and server-side permission checks.
+CMS user creation is guarded on both UX and API boundaries: the frontend validates username format, password length, and role selection before submitting. FastAPI remains authoritative for request validation and server-side permission checks.
 
 Access management is designed for large admin lists:
 
 - `GET /api/v1/cms/access/admins` uses cursor pagination.
 - Admin list filters are `q`, `active`, and `role_id`.
-- Admin search is prefix-oriented for indexed lookup on username/display name; numeric queries can match `telegram_user_id`.
+- Admin search is prefix-oriented for indexed lookup on username/display name.
 - Frontend searches are debounced and stale list responses are ignored.
 
 Backend remains the source of truth. Frontend hides pages based on `/api/v1/cms/auth/me`, but every CMS API endpoint also checks its required permission server-side.

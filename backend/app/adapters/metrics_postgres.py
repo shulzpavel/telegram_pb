@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 class PostgresMetricsRepository(MetricsRepository):
     """Stores operational events in Postgres for Grafana dashboards."""
 
-    def __init__(self, dsn: str, table: str = "bot_events", min_pool_size: int = 1, max_pool_size: int = 5):
+    def __init__(self, dsn: str, table: str = "app_events", min_pool_size: int = 1, max_pool_size: int = 5):
         self.dsn = dsn
         self.table = table
         self._pool: Optional[asyncpg.Pool] = None
@@ -60,7 +60,7 @@ class PostgresMetricsRepository(MetricsRepository):
         status: str = "ok",
         payload: Optional[Dict[str, Any]] = None,
     ) -> None:
-        """Record event. Swallows errors so bot works even when Postgres is unreachable."""
+        """Record event. Swallows errors so the app works even when Postgres is unreachable."""
         try:
             pool = await self._get_pool()
             async with pool.acquire() as conn:

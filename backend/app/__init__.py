@@ -1,2 +1,1 @@
-"""Planning Poker Bot Application."""
-
+"""Planning Poker application domain."""

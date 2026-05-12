@@ -70,14 +70,12 @@ class AdminCreateRequest(BaseModel):
     username: str = Field(min_length=2, max_length=80, pattern=r"^[A-Za-z0-9_.@-]+$")
     password: str = Field(min_length=8, max_length=256)
     display_name: Optional[str] = Field(default=None, max_length=120)
-    telegram_user_id: Optional[int] = None
     is_active: bool = True
     role_ids: list[int] = Field(default_factory=list)
 
 
 class AdminUpdateRequest(BaseModel):
     display_name: Optional[str] = Field(default=None, max_length=120)
-    telegram_user_id: Optional[int] = None
     is_active: bool = True
     role_ids: list[int] = Field(default_factory=list)
     password: Optional[str] = Field(default=None, min_length=8, max_length=256)
@@ -900,7 +898,6 @@ async def cms_access_create_admin(
             username=body.username,
             password=body.password,
             display_name=body.display_name,
-            telegram_user_id=body.telegram_user_id,
             is_active=body.is_active,
             role_ids=body.role_ids,
         )
@@ -923,7 +920,6 @@ async def cms_access_update_admin(
     admin = await _get_cms_store(request).update_cms_admin(
         admin_id=admin_id,
         display_name=body.display_name,
-        telegram_user_id=body.telegram_user_id,
         is_active=body.is_active,
         role_ids=body.role_ids,
         password=body.password,

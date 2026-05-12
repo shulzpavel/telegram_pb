@@ -1,6 +1,7 @@
 """Web UI API endpoints for Planning Poker voting."""
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
@@ -58,7 +59,9 @@ def _channel_name(chat_id: int, topic_id: Optional[int]) -> str:
 
 def _stable_user_id(participant_id: str) -> int:
     """Map a UUID participant_id to a stable integer user_id (negative range to avoid collisions)."""
-    return -(abs(hash(participant_id)) % (10 ** 14) + 1)
+    digest = hashlib.sha256(participant_id.encode("utf-8")).digest()
+    value = int.from_bytes(digest[:8], "big") & ((1 << 63) - 1)
+    return -(value + 1)
 
 
 async def _get_redis(request: Request) -> aioredis.Redis:
@@ -342,9 +345,10 @@ async def web_vote(body: WebVoteRequest, request: Request) -> dict:
 # ---------------------------------------------------------------------------
 
 @web_router.websocket("/ws/{token}")
-async def websocket_endpoint(websocket: WebSocket, token: str, request: Request) -> None:
+async def websocket_endpoint(websocket: WebSocket, token: str) -> None:
     """WebSocket endpoint for real-time session updates."""
-    redis_client = await _get_redis(request)
+    app_state = websocket.scope["app"].state
+    redis_client = app_state.web_redis
 
     token_data = await redis_client.get(f"web:{token}")
     if not token_data:
@@ -359,7 +363,7 @@ async def websocket_endpoint(websocket: WebSocket, token: str, request: Request)
 
     # Send initial state
     try:
-        repo = request.app.state.repository
+        repo = app_state.repository
         state = await _get_web_session_state(token, chat_id, topic_id, repo, redis_client)
         await websocket.send_text(json.dumps({"type": "session_state", "state": state}))
     except Exception as exc:

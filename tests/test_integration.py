@@ -1,4 +1,4 @@
-"""Integration tests for full bot workflow."""
+"""Integration tests for full planning workflow."""
 
 import pytest
 from pathlib import Path
@@ -16,7 +16,7 @@ from config import UserRole
 
 
 class TestFullWorkflow:
-    """Integration tests for complete bot workflow."""
+    """Integration tests for complete planning workflow."""
 
     def setup_method(self):
         """Setup test fixtures."""

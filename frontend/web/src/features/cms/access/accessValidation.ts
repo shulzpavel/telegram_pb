@@ -5,18 +5,6 @@ interface CreateAdminValidationInput {
   username: string;
   password: string;
   roleIds: number[];
-  telegramUserId: string;
-}
-
-export function parseOptionalTelegramUserId(value: string): number | null {
-  const trimmed = value.trim();
-  if (!trimmed) return null;
-
-  const parsed = Number(trimmed);
-  if (!Number.isSafeInteger(parsed) || parsed <= 0) {
-    return Number.NaN;
-  }
-  return parsed;
 }
 
 export function validateCreateAdminInput(input: CreateAdminValidationInput): string[] {
@@ -35,10 +23,6 @@ export function validateCreateAdminInput(input: CreateAdminValidationInput): str
 
   if (input.roleIds.length === 0) {
     errors.push("Select at least one role.");
-  }
-
-  if (Number.isNaN(parseOptionalTelegramUserId(input.telegramUserId))) {
-    errors.push("Telegram user_id must be a positive integer.");
   }
 
   return errors;

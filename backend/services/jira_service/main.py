@@ -14,6 +14,9 @@ from services.jira_service.api import router
 from services.jira_service.health import health_router
 from services.jira_service.metrics import metrics_router
 
+ALLOWED_CORS_METHODS = ["GET", "POST", "PATCH", "DELETE", "OPTIONS"]
+ALLOWED_CORS_HEADERS = ["Authorization", "Content-Type", "X-Requested-With"]
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -50,8 +53,8 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins(),
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=ALLOWED_CORS_METHODS,
+    allow_headers=ALLOWED_CORS_HEADERS,
 )
 
 # Include routers

@@ -93,7 +93,7 @@ class TestContextEncapsulation:
 
     @pytest.mark.asyncio
     async def test_one_chat_two_topics(self):
-        """1.2: Один чат, два топика — изоляция по message_thread_id (topic_id)."""
+        """1.2: One session namespace, two topics: isolation by topic_id."""
         tmp = Path("/tmp/test_adult_2")
         tmp.mkdir(exist_ok=True)
         try:

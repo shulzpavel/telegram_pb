@@ -1,4 +1,4 @@
-"""Session storage and persistence utilities for Planning Poker bot."""
+"""Session storage and persistence utilities for Planning Poker."""
 
 from __future__ import annotations
 
@@ -130,7 +130,7 @@ class SessionState:
 
 
 class SessionStore:
-    """Manages session state persistence across bot restarts."""
+    """Manages session state persistence across service restarts."""
 
     def __init__(self, state_path: Path):
         self.state_path = state_path

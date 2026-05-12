@@ -1,7 +1,7 @@
 {
   "dashboard": {
-    "uid": "telegram-pb-overview",
-    "title": "Telegram PB Overview",
+    "uid": "planning-poker-overview",
+    "title": "Planning Poker Overview",
     "timezone": "browser",
     "panels": [
       {
@@ -11,7 +11,7 @@
         "targets": [
           {
             "datasource": {"type": "postgres", "uid": "postgres"},
-            "rawSql": "SELECT count(*) as cnt FROM bot_events WHERE ts > now() - interval '1 hour'",
+            "rawSql": "SELECT count(*) as cnt FROM app_events WHERE ts > now() - interval '1 hour'",
             "format": "table",
             "refId": "A"
           }
@@ -24,7 +24,7 @@
         "targets": [
           {
             "datasource": {"type": "postgres", "uid": "postgres"},
-            "rawSql": "SELECT count(*) as cnt FROM bot_events WHERE ts > now() - interval '1 hour' AND status = 'error'",
+            "rawSql": "SELECT count(*) as cnt FROM app_events WHERE ts > now() - interval '1 hour' AND status = 'error'",
             "format": "table",
             "refId": "A"
           }
@@ -37,7 +37,7 @@
         "targets": [
           {
             "datasource": {"type": "postgres", "uid": "postgres"},
-            "rawSql": "SELECT date_trunc('minute', ts) as time, count(*) as events FROM bot_events WHERE $__timeFilter(ts) GROUP BY 1 ORDER BY 1",
+            "rawSql": "SELECT date_trunc('minute', ts) as time, count(*) as events FROM app_events WHERE $__timeFilter(ts) GROUP BY 1 ORDER BY 1",
             "format": "time_series",
             "refId": "A"
           }
@@ -50,7 +50,7 @@
         "targets": [
           {
             "datasource": {"type": "postgres", "uid": "postgres"},
-            "rawSql": "SELECT date_trunc('minute', ts) as time, count(*) as errors FROM bot_events WHERE $__timeFilter(ts) AND status = 'error' GROUP BY 1 ORDER BY 1",
+            "rawSql": "SELECT date_trunc('minute', ts) as time, count(*) as errors FROM app_events WHERE $__timeFilter(ts) AND status = 'error' GROUP BY 1 ORDER BY 1",
             "format": "time_series",
             "refId": "A"
           }
@@ -63,7 +63,7 @@
         "targets": [
           {
             "datasource": {"type": "postgres", "uid": "postgres"},
-            "rawSql": "SELECT event as metric, count(*) as value FROM bot_events WHERE ts > now() - interval '24 hours' GROUP BY event ORDER BY value DESC LIMIT 10",
+            "rawSql": "SELECT event as metric, count(*) as value FROM app_events WHERE ts > now() - interval '24 hours' GROUP BY event ORDER BY value DESC LIMIT 10",
             "format": "table",
             "refId": "A"
           }
@@ -76,7 +76,7 @@
         "targets": [
           {
             "datasource": {"type": "postgres", "uid": "postgres"},
-            "rawSql": "SELECT ts, event, status, payload FROM bot_events WHERE status = 'error' ORDER BY ts DESC LIMIT 20",
+            "rawSql": "SELECT ts, event, status, payload FROM app_events WHERE status = 'error' ORDER BY ts DESC LIMIT 20",
             "format": "table",
             "refId": "A"
           }
@@ -90,7 +90,7 @@
         "targets": [
           {
             "datasource": {"type": "postgres", "uid": "postgres"},
-            "rawSql": "SELECT count(*) as cnt FROM bot_events WHERE event='service_health' AND status='error' AND ts > now() - interval '15 minutes'",
+            "rawSql": "SELECT count(*) as cnt FROM app_events WHERE event='service_health' AND status='error' AND ts > now() - interval '15 minutes'",
             "format": "table",
             "refId": "A"
           }
@@ -103,7 +103,7 @@
         "targets": [
           {
             "datasource": {"type": "postgres", "uid": "postgres"},
-            "rawSql": "SELECT date_trunc('minute', ts) as time, count(*) as failures FROM bot_events WHERE event='service_health' AND status='error' AND $__timeFilter(ts) GROUP BY 1 ORDER BY 1",
+            "rawSql": "SELECT date_trunc('minute', ts) as time, count(*) as failures FROM app_events WHERE event='service_health' AND status='error' AND $__timeFilter(ts) GROUP BY 1 ORDER BY 1",
             "format": "time_series",
             "refId": "A"
           }
@@ -116,7 +116,7 @@
         "targets": [
           {
             "datasource": {"type": "postgres", "uid": "postgres"},
-            "rawSql": "SELECT DISTINCT ON (payload->>'service') payload->>'service' as service, status, ts as last_check, payload->>'latency_ms' as latency_ms FROM bot_events WHERE event='service_health' AND ts > now() - interval '2 hours' ORDER BY payload->>'service', ts DESC",
+            "rawSql": "SELECT DISTINCT ON (payload->>'service') payload->>'service' as service, status, ts as last_check, payload->>'latency_ms' as latency_ms FROM app_events WHERE event='service_health' AND ts > now() - interval '2 hours' ORDER BY payload->>'service', ts DESC",
             "format": "table",
             "refId": "A"
           }

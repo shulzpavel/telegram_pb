@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Planning Poker helps teams estimate Jira tasks from a manager-led web room, Telegram, and browser voting links.
+Planning Poker helps teams estimate Jira tasks from a manager-led web room with browser voting links.
 
 ## Core Flows
 
@@ -96,7 +96,7 @@ Access management lets a superadmin or access manager:
 - assign roles to CMS users/admins;
 - deactivate admins.
 
-New CMS users need a username, a temporary password of at least 8 characters, and at least one role. `telegram_user_id` is optional and should be a Telegram user id, not a group or chat id.
+New CMS users need a username, a temporary password of at least 8 characters, and at least one role.
 
 For large teams, CMS users are searched and loaded page by page. The access screen supports filtering by status and role before loading more rows.
 

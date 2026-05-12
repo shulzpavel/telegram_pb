@@ -7,9 +7,6 @@ Load test для голосования (voting-service).
   # 50 параллельных голосов, 5 итераций
   python backend/scripts/load_test_voting.py --voters 50 --rounds 5
 
-  # Через docker на хосте
-  docker compose exec gateway python scripts/load_test_voting.py --voters 20 --rounds 10
-
   # С хоста к localhost
   VOTING_SERVICE_URL=http://localhost:8002 python backend/scripts/load_test_voting.py --voters 30
 """

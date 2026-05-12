@@ -1,4 +1,4 @@
-"""End-to-end integration tests for bot handlers."""
+"""End-to-end integration tests for planning session handlers."""
 
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch

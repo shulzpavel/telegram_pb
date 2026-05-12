@@ -1,6 +1,6 @@
 """Postgres read model for CMS/admin screens.
 
-The bot stores live session state as compact domain JSON. CMS screens need a
+The app stores live session state as compact domain JSON. CMS screens need a
 different shape: indexed, normalized, and pageable tables. This module keeps
 that read model in sync without making normal voting depend on CMS writes.
 """
@@ -413,7 +413,6 @@ class PostgresCmsStore:
                     username TEXT NOT NULL UNIQUE,
                     password_hash TEXT NOT NULL,
                     display_name TEXT,
-                    telegram_user_id BIGINT UNIQUE,
                     is_active BOOLEAN NOT NULL DEFAULT TRUE,
                     is_superuser BOOLEAN NOT NULL DEFAULT FALSE,
                     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -422,8 +421,6 @@ class PostgresCmsStore:
                 );
                 CREATE INDEX IF NOT EXISTS idx_cms_admin_accounts_active
                     ON cms_admin_accounts(is_active, username);
-                CREATE INDEX IF NOT EXISTS idx_cms_admin_accounts_telegram_user
-                    ON cms_admin_accounts(telegram_user_id);
                 CREATE INDEX IF NOT EXISTS idx_cms_admin_accounts_username_lower
                     ON cms_admin_accounts((lower(username)), id);
                 CREATE INDEX IF NOT EXISTS idx_cms_admin_accounts_display_name_lower
@@ -644,7 +641,7 @@ class PostgresCmsStore:
                         user_ids.append(user_id)
                         role = participant.get("role", "participant")
                         name = participant.get("name") or "Unknown"
-                        is_web = user_id < 0
+                        is_web = True
                         await conn.execute(
                             """
                             INSERT INTO cms_users (user_id, name, role, is_web)
@@ -676,7 +673,7 @@ class PostgresCmsStore:
                             user_id,
                             name,
                             role,
-                            "web" if is_web else "telegram",
+                            "web",
                         )
 
                     await conn.execute(
@@ -910,7 +907,7 @@ class PostgresCmsStore:
         async with self.pool.acquire() as conn:
             row = await conn.fetchrow(
                 """
-                SELECT id, username, display_name, telegram_user_id,
+                SELECT id, username, display_name,
                        is_active, is_superuser, created_at, updated_at, last_login_at
                 FROM cms_admin_accounts
                 WHERE ($1::bigint IS NOT NULL AND id = $1)
@@ -1101,44 +1098,35 @@ class PostgresCmsStore:
         cursor_id = cur.get("id")
         clean_q = q.strip().lower() if q and q.strip() else None
         pattern = f"{clean_q}%" if clean_q else None
-        telegram_user_id = None
-        if clean_q:
-            try:
-                telegram_user_id = int(clean_q)
-            except ValueError:
-                telegram_user_id = None
-
         async with self.pool.acquire() as conn:
             rows = await conn.fetch(
                 """
-                SELECT id, username, display_name, telegram_user_id, is_active,
+                SELECT id, username, display_name, is_active,
                        is_superuser, created_at, updated_at, last_login_at
                 FROM cms_admin_accounts
                 WHERE (
                     $1::text IS NULL
                     OR lower(username) LIKE $1
                     OR lower(COALESCE(display_name, '')) LIKE $1
-                    OR ($2::bigint IS NOT NULL AND telegram_user_id = $2)
                 )
-                  AND ($3::boolean IS NULL OR is_active = $3)
+                  AND ($2::boolean IS NULL OR is_active = $2)
                   AND (
-                    $4::bigint IS NULL
+                    $3::bigint IS NULL
                     OR EXISTS (
                         SELECT 1
                         FROM cms_admin_roles role_filter
                         WHERE role_filter.admin_id = cms_admin_accounts.id
-                          AND role_filter.role_id = $4
+                          AND role_filter.role_id = $3
                     )
                   )
                   AND (
-                      $5::text IS NULL
-                      OR (lower(username), id) > ($5::text, $6::bigint)
+                      $4::text IS NULL
+                      OR (lower(username), id) > ($4::text, $5::bigint)
                   )
                 ORDER BY lower(username) ASC, id ASC
-                LIMIT $7
+                LIMIT $6
                 """,
                 pattern,
-                telegram_user_id,
                 active,
                 role_id,
                 cursor_username,
@@ -1185,7 +1173,7 @@ class PostgresCmsStore:
         async with self.pool.acquire() as conn:
             rows = await conn.fetch(
                 """
-                SELECT id, username, display_name, telegram_user_id, is_active,
+                SELECT id, username, display_name, is_active,
                        is_superuser, created_at, updated_at, last_login_at
                 FROM cms_admin_accounts
                 ORDER BY lower(username) ASC, id ASC
@@ -1220,7 +1208,7 @@ class PostgresCmsStore:
         async with self.pool.acquire() as conn:
             row = await conn.fetchrow(
                 """
-                SELECT id, username, display_name, telegram_user_id, is_active,
+                SELECT id, username, display_name, is_active,
                        is_superuser, created_at, updated_at, last_login_at
                 FROM cms_admin_accounts
                 WHERE id = $1
@@ -1256,7 +1244,6 @@ class PostgresCmsStore:
         username: str,
         password: str,
         display_name: Optional[str],
-        telegram_user_id: Optional[int],
         is_active: bool,
         role_ids: list[int],
     ) -> dict[str, Any]:
@@ -1265,16 +1252,14 @@ class PostgresCmsStore:
                 admin_id = await conn.fetchval(
                     """
                     INSERT INTO cms_admin_accounts (
-                        username, password_hash, display_name, telegram_user_id,
-                        is_active, is_superuser, updated_at
+                        username, password_hash, display_name, is_active, is_superuser, updated_at
                     )
-                    VALUES ($1, $2, $3, $4, $5, FALSE, NOW())
+                    VALUES ($1, $2, $3, $4, FALSE, NOW())
                     RETURNING id
                     """,
                     username,
                     hash_password(password),
                     display_name,
-                    telegram_user_id,
                     is_active,
                 )
                 await self._replace_admin_roles(conn, int(admin_id), role_ids)
@@ -1284,7 +1269,6 @@ class PostgresCmsStore:
         self,
         admin_id: int,
         display_name: Optional[str],
-        telegram_user_id: Optional[int],
         is_active: bool,
         role_ids: list[int],
         password: Optional[str] = None,
@@ -1296,16 +1280,14 @@ class PostgresCmsStore:
                         """
                         UPDATE cms_admin_accounts
                         SET display_name = $2,
-                            telegram_user_id = $3,
-                            is_active = $4,
-                            password_hash = $5,
+                            is_active = $3,
+                            password_hash = $4,
                             updated_at = NOW()
                         WHERE id = $1
                         RETURNING id
                         """,
                         admin_id,
                         display_name,
-                        telegram_user_id,
                         is_active,
                         hash_password(password),
                     )
@@ -1314,15 +1296,13 @@ class PostgresCmsStore:
                         """
                         UPDATE cms_admin_accounts
                         SET display_name = $2,
-                            telegram_user_id = $3,
-                            is_active = $4,
+                            is_active = $3,
                             updated_at = NOW()
                         WHERE id = $1
                         RETURNING id
                         """,
                         admin_id,
                         display_name,
-                        telegram_user_id,
                         is_active,
                     )
                 if not row:

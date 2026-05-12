@@ -6,7 +6,7 @@ Target domain: `planning.shults-sync.com`.
 
 - Cloudflare DNS and proxy in front of the VPS.
 - Caddy terminates HTTPS and proxies traffic.
-- Docker Compose runs `web`, `voting-service`, `jira-service`, `gateway`, `postgres`, and `redis`.
+- Docker Compose runs `web`, `voting-service`, `jira-service`, `postgres`, and `redis`.
 - Only ports `80` and `443` are public. Postgres, Redis, and internal services stay inside the Docker network.
 
 ## Cloudflare
@@ -26,8 +26,8 @@ Install Docker Engine and Compose plugin using Docker's official apt repository.
 Clone the repo:
 
 ```bash
-mkdir -p /opt/telegram-pb
-cd /opt/telegram-pb
+mkdir -p /opt/planning-poker
+cd /opt/planning-poker
 git clone <repo-url> .
 ```
 
@@ -57,16 +57,10 @@ Open:
 - `https://planning.shults-sync.com/cms`
 - login with `CMS_USERNAME` / `CMS_PASSWORD`
 
-Start Telegram polling only after web/API/CMS are healthy:
-
-```bash
-docker compose -f docker-compose.prod.yml --env-file .env up -d gateway
-```
-
 ## Update
 
 ```bash
-cd /opt/telegram-pb
+cd /opt/planning-poker
 git pull
 docker compose -f docker-compose.prod.yml --env-file .env build
 docker compose -f docker-compose.prod.yml --env-file .env up -d
@@ -77,7 +71,6 @@ docker compose -f docker-compose.prod.yml --env-file .env ps
 
 ```bash
 docker compose -f docker-compose.prod.yml --env-file .env logs -f voting-service
-docker compose -f docker-compose.prod.yml --env-file .env logs -f gateway
 docker compose -f docker-compose.prod.yml --env-file .env logs -f caddy
 ```
 

@@ -4,7 +4,7 @@ import { cmsAccessApi } from "../api/cmsClient";
 import type { CmsAdmin, CmsPageAccess, CmsPermission, CmsRole } from "../api/cmsTypes";
 import { useCmsList } from "../hooks/useCmsList";
 import { useDebouncedValue } from "../hooks/useDebouncedValue";
-import { parseOptionalTelegramUserId, validateCreateAdminInput } from "./accessValidation";
+import { validateCreateAdminInput } from "./accessValidation";
 
 interface AccessPageProps {
   canManage: boolean;
@@ -133,7 +133,7 @@ export default function AccessPage({ canManage, currentAdminId }: AccessPageProp
           <div className="mt-3 grid gap-2 md:grid-cols-[minmax(0,1fr)_160px_180px]">
             <TextField
               aria-label="Search CMS users"
-              placeholder="Search username, display name, Telegram id"
+              placeholder="Search username or display name"
               value={adminQ}
               onChange={(event) => setAdminQ(event.target.value)}
             />
@@ -360,19 +360,18 @@ function CreateAdminCard({
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [displayName, setDisplayName] = useState("");
-  const [telegramUserId, setTelegramUserId] = useState("");
   const [roleIds, setRoleIds] = useState<number[]>([]);
   const [saving, setSaving] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
 
   const validationMessages = useMemo(
-    () => validateCreateAdminInput({ username, password, roleIds, telegramUserId }),
-    [password, roleIds, telegramUserId, username]
+    () => validateCreateAdminInput({ username, password, roleIds }),
+    [password, roleIds, username]
   );
   const canSubmit = canManage && !saving && validationMessages.length === 0;
 
   async function createAdmin() {
-    const errors = validateCreateAdminInput({ username, password, roleIds, telegramUserId });
+    const errors = validateCreateAdminInput({ username, password, roleIds });
     if (errors.length > 0) {
       setLocalError(errors[0]);
       return;
@@ -386,7 +385,6 @@ function CreateAdminCard({
         username: username.trim(),
         password,
         display_name: displayName.trim() || null,
-        telegram_user_id: parseOptionalTelegramUserId(telegramUserId),
         is_active: true,
         role_ids: roleIds,
       });
@@ -394,7 +392,6 @@ function CreateAdminCard({
       setUsername("");
       setPassword("");
       setDisplayName("");
-      setTelegramUserId("");
       setRoleIds([]);
     } catch (err) {
       onError(err instanceof Error ? err.message : "Admin create failed");
@@ -426,13 +423,6 @@ function CreateAdminCard({
           label="Display name"
           value={displayName}
           onChange={(event) => setDisplayName(event.target.value)}
-          disabled={!canManage}
-        />
-        <TextField
-          label="Telegram user_id"
-          inputMode="numeric"
-          value={telegramUserId}
-          onChange={(event) => setTelegramUserId(event.target.value)}
           disabled={!canManage}
         />
         <RolePicker roles={roles} selected={roleIds} disabled={!canManage} onChange={setRoleIds} />
@@ -473,7 +463,6 @@ function AdminEditor({
   onError: (error: string | null) => void;
 }) {
   const [displayName, setDisplayName] = useState(admin.display_name ?? "");
-  const [telegramUserId, setTelegramUserId] = useState(admin.telegram_user_id?.toString() ?? "");
   const [active, setActive] = useState(admin.is_active);
   const [roleIds, setRoleIds] = useState(admin.roles.map((role) => role.id));
   const [password, setPassword] = useState("");
@@ -485,7 +474,6 @@ function AdminEditor({
     try {
       const updated = await cmsAccessApi.updateAdmin(admin.id, {
         display_name: displayName || null,
-        telegram_user_id: telegramUserId ? Number(telegramUserId) : null,
         is_active: active,
         role_ids: roleIds,
         ...(password ? { password } : {}),
@@ -522,12 +510,6 @@ function AdminEditor({
           label="Display name"
           value={displayName}
           onChange={(event) => setDisplayName(event.target.value)}
-          disabled={!canManage}
-        />
-        <TextField
-          label="Telegram user_id"
-          value={telegramUserId}
-          onChange={(event) => setTelegramUserId(event.target.value)}
           disabled={!canManage}
         />
         <TextField

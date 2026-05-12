@@ -77,7 +77,6 @@ export const cmsAccessApi = {
     username: string;
     password: string;
     display_name: string | null;
-    telegram_user_id: number | null;
     is_active: boolean;
     role_ids: number[];
   }) =>
@@ -89,7 +88,6 @@ export const cmsAccessApi = {
     adminId: number,
     body: {
       display_name: string | null;
-      telegram_user_id: number | null;
       is_active: boolean;
       role_ids: number[];
       password?: string;

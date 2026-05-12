@@ -34,7 +34,7 @@ export default function UsersPage() {
         mobileCards={list.items.map((item) => (
           <MobileRecordCard key={item.user_id} title={item.name} meta={item.user_id}>
             <MobileRecordField label="Role" value={item.role} />
-            <MobileRecordField label="Source" value={item.is_web ? "web" : "telegram"} />
+            <MobileRecordField label="Source" value="web" />
             <MobileRecordField label="First seen" value={formatDate(item.first_seen_at)} />
             <MobileRecordField label="Last seen" value={formatDate(item.last_seen_at)} />
           </MobileRecordCard>
@@ -47,7 +47,7 @@ export default function UsersPage() {
               <p className="text-xs text-ink3">{item.user_id}</p>
             </td>
             <td className="px-3 py-2">{item.role}</td>
-            <td className="px-3 py-2">{item.is_web ? "web" : "telegram"}</td>
+            <td className="px-3 py-2">web</td>
             <td className="px-3 py-2 text-ink3">{formatDate(item.first_seen_at)}</td>
             <td className="px-3 py-2 text-ink3">{formatDate(item.last_seen_at)}</td>
           </tr>

@@ -19,8 +19,8 @@ frontend-build:
 
 check: backend-test frontend-test frontend-build
 	PYTHONPATH=backend python3 -m compileall -q backend
-	docker compose config >/tmp/telegram-pb-compose.yml
-	docker compose -f docker-compose.prod.yml --env-file infra/deploy/prod.env.example config >/tmp/telegram-pb-prod-compose.yml
+	docker compose config >/tmp/planning-poker-compose.yml
+	docker compose -f docker-compose.prod.yml --env-file infra/deploy/prod.env.example config >/tmp/planning-poker-prod-compose.yml
 
 clean:
 	find . -type d -name __pycache__ -exec rm -r {} + 2>/dev/null || true

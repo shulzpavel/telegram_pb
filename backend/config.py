@@ -8,20 +8,12 @@ class UserRole(Enum):
     ADMIN = "admin"
 
 
-# Role tokens
-USER_TOKEN = os.getenv("USER_TOKEN", "user_token")
-LEAD_TOKEN = os.getenv("LEAD_TOKEN", "lead_token")
-ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "admin_token")
-
 # Microservices configuration (REQUIRED)
 JIRA_SERVICE_URL = os.getenv("JIRA_SERVICE_URL", "http://localhost:8001")
 VOTING_SERVICE_URL = os.getenv("VOTING_SERVICE_URL", "http://localhost:8002")
 
 # Postgres metrics storage
 POSTGRES_DSN = os.getenv("POSTGRES_DSN", "")
-
-# Instruction URL (shown in welcome message)
-INSTRUCTION_URL = os.getenv("INSTRUCTION_URL", "https://www.youtube.com/watch?v=dQw4w9WgXcQ")
 
 # Redis configuration (for Voting Service)
 REDIS_URL = os.getenv("REDIS_URL", "")

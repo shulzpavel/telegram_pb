@@ -50,5 +50,5 @@ jobs:
       - uses: actions/checkout@v4
       - name: Validate docker compose files
         run: |
-          docker compose config >/tmp/telegram-pb-compose.yml
-          docker compose -f docker-compose.prod.yml --env-file infra/deploy/prod.env.example config >/tmp/telegram-pb-prod-compose.yml
+          docker compose config >/tmp/planning-poker-compose.yml
+          docker compose -f docker-compose.prod.yml --env-file infra/deploy/prod.env.example config >/tmp/planning-poker-prod-compose.yml

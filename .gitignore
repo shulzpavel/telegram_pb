@@ -107,7 +107,6 @@ RESTART_SUCCESS.md
 SUCCESS_REPORT.md
 SUMMARY.md
 
-# Shell scripts (keep only telegram-pb-bot.service)
+# Shell scripts
 *.sh
-!telegram-pb-bot.service
 !backend/scripts/*.sh

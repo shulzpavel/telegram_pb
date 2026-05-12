@@ -17,7 +17,7 @@ def audit_log(
     
     Args:
         action: Action name (e.g., 'reset_queue', 'update_jira_sp', 'add_tasks')
-        user_id: Telegram user ID
+        user_id: Product user ID
         user_name: User full name (can be from participant or callback.from_user)
         chat_id: Chat ID
         topic_id: Topic ID (if in topic)

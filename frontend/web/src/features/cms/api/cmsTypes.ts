@@ -47,7 +47,6 @@ export interface CmsAdmin {
   id: number;
   username: string;
   display_name: string | null;
-  telegram_user_id: number | null;
   is_active: boolean;
   is_superuser: boolean;
   created_at: string;

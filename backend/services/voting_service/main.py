@@ -17,6 +17,9 @@ from services.voting_service.metrics import metrics_router
 from services.voting_service.cms_api import cms_router
 from services.voting_service.web_api import web_router, REDIS_URL
 
+ALLOWED_CORS_METHODS = ["GET", "POST", "PATCH", "DELETE", "OPTIONS"]
+ALLOWED_CORS_HEADERS = ["Authorization", "Content-Type", "X-Requested-With"]
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -97,8 +100,8 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins(),
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=ALLOWED_CORS_METHODS,
+    allow_headers=ALLOWED_CORS_HEADERS,
 )
 
 # Include routers

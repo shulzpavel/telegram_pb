@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: postgres
-  namespace: telegram-pb
+  namespace: planning-poker
 spec:
   replicas: 1
   selector:
@@ -20,7 +20,7 @@ spec:
         - containerPort: 5432
         env:
         - name: POSTGRES_DB
-          value: "telegram_pb"
+          value: "planning_poker"
         - name: POSTGRES_USER
           valueFrom:
             secretKeyRef:
@@ -66,7 +66,7 @@ apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: postgres-pvc
-  namespace: telegram-pb
+  namespace: planning-poker
 spec:
   accessModes:
   - ReadWriteOnce
@@ -78,7 +78,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: postgres
-  namespace: telegram-pb
+  namespace: planning-poker
 spec:
   selector:
     app: postgres
