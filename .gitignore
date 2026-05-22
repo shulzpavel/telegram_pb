@@ -92,6 +92,7 @@ test_results/
 *.md
 !README.md
 !DEPLOY.md
+!AGENTS.md
 !docs/*.md
 !infra/deploy/*.md
 
