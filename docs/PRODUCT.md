@@ -16,11 +16,9 @@ Planning Poker helps teams estimate Jira tasks from a manager-led web room with 
 
 Participant disciplines are used for estimation context:
 
-- backend
-- frontend
-- qa
-- product
-- design
+- backend team
+- frontend team
+- qa team
 
 Session authority is separate:
 

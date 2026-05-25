@@ -181,7 +181,13 @@ export default function FinishedSessionPage() {
 
   function downloadCsv() {
     if (!summary) return;
-    const href = managerApi.summaryCsvUrl(chatId, summary.title);
+    const href = managerApi.summaryCsvUrl(chatId, summary.title, summary.topic_id);
+    window.location.assign(href);
+  }
+
+  function downloadMarkdown() {
+    if (!summary) return;
+    const href = managerApi.summaryMarkdownUrl(chatId, summary.title, summary.topic_id);
     window.location.assign(href);
   }
 
@@ -218,12 +224,21 @@ export default function FinishedSessionPage() {
             </Button>
             <Button
               size="sm"
-              variant="primary"
+              variant="secondary"
               disabled={!canDownload}
               onClick={downloadCsv}
               className="hidden md:inline-flex"
             >
               Скачать CSV
+            </Button>
+            <Button
+              size="sm"
+              variant="primary"
+              disabled={!canDownload}
+              onClick={downloadMarkdown}
+              className="hidden md:inline-flex"
+            >
+              Скачать MD
             </Button>
             <Button size="sm" variant="ghost" onClick={() => navigate("/manage")} className="hidden md:inline-flex">
               В cockpit
@@ -288,9 +303,9 @@ export default function FinishedSessionPage() {
             variant="primary"
             className="flex-1 min-h-12"
             disabled={!canDownload}
-            onClick={downloadCsv}
+            onClick={downloadMarkdown}
           >
-            Скачать CSV
+            Скачать MD
           </Button>
           <Button
             variant="ghost"
@@ -327,8 +342,17 @@ export default function FinishedSessionPage() {
             }}
           />
           <SheetItem
+            label="Скачать MD"
+            description={canDownload ? "Красивый отчёт для Confluence" : "Нет задач для экспорта"}
+            disabled={!canDownload}
+            onClick={() => {
+              setMobileMenuOpen(false);
+              downloadMarkdown();
+            }}
+          />
+          <SheetItem
             label="Скачать CSV"
-            description={canDownload ? "Полный лог задач и оценок" : "Нет задач для экспорта"}
+            description={canDownload ? "Табличный лог задач и оценок" : "Нет задач для экспорта"}
             disabled={!canDownload}
             onClick={() => {
               setMobileMenuOpen(false);
@@ -497,9 +521,10 @@ function FinishedSummaryBody({ chatId, summary }: { chatId: number; summary: Ses
     <div className="space-y-6">
       {/* META + STATS */}
       <Surface className="p-5">
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
           <StatCard label="Сыграно задач" value={summary.stats.total_completed.toString()} />
           <StatCard label="С итоговой оценкой" value={`${summary.stats.with_estimate} / ${summary.stats.total_completed}`} />
+          <StatCard label="TOTAL SP" value={summary.stats.total_story_points.toString()} />
           <StatCard label="Consensus" value={`${summary.stats.consensus_count} / ${summary.stats.total_completed}`} />
           <StatCard label="Голосов отдано" value={summary.stats.votes_cast.toString()} />
         </div>

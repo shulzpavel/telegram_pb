@@ -20,7 +20,7 @@ export interface AiTaskSummary {
   source: string;
 }
 
-export type ParticipantRole = "backend" | "frontend" | "qa" | "product" | "design";
+export type ParticipantRole = "backend" | "frontend" | "qa";
 
 export interface ParticipantStatus {
   name: string;

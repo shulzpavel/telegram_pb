@@ -98,6 +98,7 @@ export interface SessionSummary {
     with_estimate: number;
     consensus_count: number;
     votes_cast: number;
+    total_story_points: number;
   };
 }
 

@@ -8,6 +8,7 @@ const EMAIL_RE = new RegExp(
 );
 
 export const WEB_IDENTITY_STORAGE_KEY = "pp_web_identity";
+const PARTICIPANT_ROLES = new Set<ParticipantRole>(["backend", "frontend", "qa"]);
 
 export interface WebParticipantIdentity {
   email: string;
@@ -30,6 +31,10 @@ export function validateParticipantEmail(raw: string): string | null {
   return null;
 }
 
+function isParticipantRole(raw: unknown): raw is ParticipantRole {
+  return typeof raw === "string" && PARTICIPANT_ROLES.has(raw as ParticipantRole);
+}
+
 export function loadWebIdentity(): WebParticipantIdentity | null {
   try {
     const raw = localStorage.getItem(WEB_IDENTITY_STORAGE_KEY);
@@ -37,14 +42,14 @@ export function loadWebIdentity(): WebParticipantIdentity | null {
     const parsed = JSON.parse(raw) as Partial<WebParticipantIdentity>;
     if (
       typeof parsed.email !== "string" ||
-      typeof parsed.role !== "string" ||
+      !isParticipantRole(parsed.role) ||
       validateParticipantEmail(parsed.email) !== null
     ) {
       return null;
     }
     return {
       email: normalizeParticipantEmail(parsed.email),
-      role: parsed.role as ParticipantRole,
+      role: parsed.role,
     };
   } catch {
     return null;

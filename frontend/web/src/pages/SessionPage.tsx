@@ -81,7 +81,7 @@ function SessionInner({ token }: { token: string }) {
           <Link to="/">
             <Button variant="primary" className="w-full sm:w-auto">На главную</Button>
           </Link>
-          <Link to="/demo?mock=1">
+          <Link to="/demo">
             <Button variant="ghost" className="w-full sm:w-auto">Пройти demo</Button>
           </Link>
         </div>

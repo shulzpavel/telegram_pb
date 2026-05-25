@@ -5,6 +5,7 @@ import pytest
 from services.voting_service.participant_identity import (
     stable_user_id_from_email,
     validate_participant_email,
+    validate_participant_role,
 )
 from services.voting_service.web_api import _stable_user_id
 
@@ -18,6 +19,14 @@ def test_validate_participant_email_rejects_invalid() -> None:
         validate_participant_email("")
     with pytest.raises(ValueError, match="betboom"):
         validate_participant_email("paul@gmail.com")
+
+
+def test_validate_participant_role_allows_only_delivery_teams() -> None:
+    assert validate_participant_role("backend") == "backend"
+    assert validate_participant_role("frontend") == "frontend"
+    assert validate_participant_role("qa") == "qa"
+    with pytest.raises(ValueError, match="роль"):
+        validate_participant_role("product")
 
 
 def test_stable_user_id_from_email_is_repeatable_and_negative() -> None:

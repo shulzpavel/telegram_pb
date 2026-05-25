@@ -17,11 +17,9 @@ interface JoinPageProps {
 }
 
 const ROLES: { value: ParticipantRole; label: string; icon: string }[] = [
-  { value: "backend",  label: "Backend",  icon: "⚙️" },
-  { value: "frontend", label: "Frontend", icon: "🎨" },
-  { value: "qa",       label: "QA",       icon: "🔍" },
-  { value: "product",  label: "Product",  icon: "📋" },
-  { value: "design",   label: "Design",   icon: "✦" },
+  { value: "backend",  label: "Backend team",  icon: "⚙️" },
+  { value: "frontend", label: "Frontend team", icon: "🎨" },
+  { value: "qa",       label: "QA team",       icon: "🔍" },
 ];
 
 export default function JoinPage({ task, onJoin, error }: JoinPageProps) {

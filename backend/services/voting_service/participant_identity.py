@@ -11,7 +11,7 @@ _MAX_EMAIL_LEN = 64
 
 _DOMAIN_RE = re.escape(PARTICIPANT_EMAIL_DOMAIN)
 _EMAIL_RE = re.compile(rf"^[a-z0-9][a-z0-9._-]*@{_DOMAIN_RE}$")
-ALLOWED_PARTICIPANT_ROLES = frozenset({"backend", "frontend", "qa", "product", "design"})
+ALLOWED_PARTICIPANT_ROLES = frozenset({"backend", "frontend", "qa"})
 
 
 def normalize_participant_email(raw: str) -> str:

@@ -312,19 +312,20 @@ def _completed_tasks_in_batch(session: Session):
     """Raw (un-serialized) sequence of tasks already played in the active batch.
 
     Three layered cases:
-    1. Explicit Finish was called → ``last_batch`` is canonical.
-    2. The cursor was advanced past the last task by auto-next, but Finish
+    1. Explicit Finish was called → ``last_batch`` keeps the finished work.
+    2. Managers can add more tasks after Finish; those live in
+       ``tasks_queue`` until the next Finish call, so reports include the
+       already-played queue slice on top of ``last_batch``.
+    3. The cursor was advanced past the last task by auto-next, but Finish
        was not (yet) explicitly invoked. ``tasks_queue`` still holds the
        played tasks with their votes intact.
-    3. Session is still in-flight → take ``tasks_queue[:current_task_index]``.
     """
-    if session.batch_completed and session.last_batch:
-        return list(session.last_batch)
+    completed = list(session.last_batch)
     if session.batch_completed:
-        # Auto-next-on-last cleared the cursor but never moved tasks into
-        # last_batch — the played items are still inside tasks_queue.
-        return list(session.tasks_queue)
-    return list(session.tasks_queue[: session.current_task_index])
+        # Auto-next-on-last clears the active cursor before Finish migrates
+        # newly added tasks into last_batch.
+        return completed + list(session.tasks_queue)
+    return completed + list(session.tasks_queue[: session.current_task_index])
 
 
 def _completed_in_batch(session: Session) -> list[dict]:
@@ -513,11 +514,13 @@ async def create_demo_session(request: Request, reset: bool = Query(default=Fals
             session.history.clear()
             session.last_batch.clear()
 
-        existing = _existing_jira_keys(session)
+        # Demo tasks may already live in ``last_batch`` after a previous run.
+        # Do not treat that as "already imported" — only skip keys already queued.
         if not session.tasks_queue:
+            queued_keys = {task.jira_key for task in session.tasks_queue if task.jira_key}
             for item in DEMO_TASKS:
                 key = item["jira_key"]
-                if key in existing:
+                if key in queued_keys:
                     continue
                 session.tasks_queue.append(
                     Task(
@@ -528,7 +531,7 @@ async def create_demo_session(request: Request, reset: bool = Query(default=Fals
                         jql="project = DEMO ORDER BY priority DESC",
                     )
                 )
-                existing.add(key)
+                queued_keys.add(key)
 
         if session.tasks_queue and (reset or session.batch_completed or not session.current_batch_started_at or not session.current_task):
             session.current_task_index = 0
@@ -1094,7 +1097,7 @@ async def app_finish_session(
             for task in pending:
                 if not task.completed_at:
                     task.completed_at = finished_at
-            session.last_batch = pending
+            session.last_batch.extend(pending)
             session.history.extend(pending)
             session.tasks_queue.clear()
         session.current_task_index = 0
@@ -1200,6 +1203,11 @@ def _summary_payload(
     with_estimate = sum(1 for entry in full_completed if entry["story_points"] is not None)
     consensus_count = sum(1 for entry in full_completed if entry["consensus"])
     total_voters = sum(entry["voter_count"] for entry in full_completed)
+    total_story_points = sum(
+        entry["story_points"]
+        for entry in full_completed
+        if entry["story_points"] is not None
+    )
 
     # We persist a snapshot of the batch start time so finish/auto-next-on-last
     # don't erase it. Fall back to the current live timestamp for in-flight
@@ -1240,6 +1248,7 @@ def _summary_payload(
             "with_estimate": with_estimate,
             "consensus_count": consensus_count,
             "votes_cast": total_voters,
+            "total_story_points": total_story_points,
         },
     }
 
@@ -1304,11 +1313,112 @@ def _csv_ai_summary_fields(ai_summary: Optional[dict]) -> tuple[str, str, str]:
     return description, complexity, methods
 
 
-def _csv_download_filename(title: str, chat_id: int) -> str:
+def _download_filename(title: str, chat_id: int, extension: str) -> str:
     """ASCII fallback filename for Content-Disposition headers."""
     safe_title = "".join(ch if ch.isascii() and (ch.isalnum() or ch in "-_") else "_" for ch in (title or "session"))
     safe_title = "_".join(part for part in safe_title.split("_") if part) or "session"
-    return f"planning_poker_{safe_title}_{chat_id}.csv"
+    return f"REPORT_{safe_title}.{extension}"
+
+
+def _content_disposition(title: str, chat_id: int, extension: str) -> str:
+    filename = _download_filename(title, chat_id, extension)
+    utf8_filename = f"REPORT_{title or 'session'}.{extension}"
+    return f"attachment; filename=\"{filename}\"; filename*=UTF-8''{quote(utf8_filename)}"
+
+
+def _md_escape(text: object) -> str:
+    value = " ".join(str(text or "").split())
+    return value.replace("\\", "\\\\").replace("|", "\\|")
+
+
+def _md_link(label: object, url: object) -> str:
+    clean_url = str(url or "").strip()
+    clean_label = _md_escape(label)
+    if not clean_url:
+        return clean_label
+    return f"[{clean_label or _md_escape(clean_url)}]({clean_url})"
+
+
+def _markdown_report(summary: dict) -> str:
+    stats = summary["stats"]
+    lines = [
+        f"# Planning Poker: {_md_escape(summary['title'])}",
+        "",
+        "## Summary",
+        "",
+        f"- **TOTAL SP:** {stats['total_story_points']}",
+        f"- **Completed tasks:** {stats['total_completed']}",
+        f"- **With final estimate:** {stats['with_estimate']} / {stats['total_completed']}",
+        f"- **Consensus:** {stats['consensus_count']} / {stats['total_completed']}",
+        f"- **Votes cast:** {stats['votes_cast']}",
+        f"- **Started:** {_md_escape(summary['started_at'] or '—')}",
+        f"- **Finished:** {_md_escape(summary['finished_at'] or '—')}",
+        "",
+        "## Participants",
+        "",
+        ", ".join(_md_escape(name) for name in summary["participants"]) or "—",
+        "",
+        "## Results By Task",
+        "",
+    ]
+
+    if not summary["completed_tasks"]:
+        lines.extend(["No completed tasks.", ""])
+        return "\n".join(lines).strip() + "\n"
+
+    lines.extend([
+        "| # | Task | Final SP | Votes | Consensus | AI Description |",
+        "|---:|---|---:|---|---|---|",
+    ])
+    for idx, entry in enumerate(summary["completed_tasks"], start=1):
+        task_label = entry["jira_key"] or entry["summary"]
+        task = _md_link(task_label, entry.get("url"))
+        if entry["jira_key"]:
+            task = f"{task}<br />{_md_escape(entry['summary'])}"
+        ai_description, _, _ = _csv_ai_summary_fields(entry.get("ai_summary"))
+        lines.append(
+            "| "
+            + " | ".join(
+                [
+                    str(idx),
+                    task,
+                    str(entry["story_points"]) if entry["story_points"] is not None else "—",
+                    _md_escape(_format_distribution(entry["distribution"]) or "—"),
+                    "yes" if entry["consensus"] else "no",
+                    _md_escape(ai_description or "—"),
+                ]
+            )
+            + " |"
+        )
+
+    lines.extend(["", "## Vote Details", ""])
+    for idx, entry in enumerate(summary["completed_tasks"], start=1):
+        title = entry["jira_key"] or entry["summary"]
+        lines.extend([
+            f"### {idx}. {_md_escape(title)}",
+            "",
+            f"- **Final SP:** {entry['story_points'] if entry['story_points'] is not None else '—'}",
+            f"- **Distribution:** {_md_escape(_format_distribution(entry['distribution']) or '—')}",
+        ])
+        if entry.get("url"):
+            lines.append(f"- **Link:** {entry['url']}")
+        if entry.get("ai_summary"):
+            ai_description, ai_complexity, ai_methods = _csv_ai_summary_fields(entry.get("ai_summary"))
+            if ai_description:
+                lines.append(f"- **AI description:** {_md_escape(ai_description)}")
+            if ai_complexity:
+                lines.append(f"- **AI complexity:** {_md_escape(ai_complexity)}")
+            if ai_methods:
+                lines.append(f"- **AI methods:** {_md_escape(ai_methods)}")
+        lines.extend(["", "| Participant | Vote |", "|---|---|"])
+        if entry["votes"]:
+            for vote in entry["votes"]:
+                lines.append(f"| {_md_escape(vote['name'])} | {_md_escape(vote['value'])} |")
+        else:
+            lines.append("| — | — |")
+        lines.append("")
+
+    return "\n".join(lines).strip() + "\n"
 
 
 @app_router.get("/app/sessions/{chat_id}/summary.csv")
@@ -1346,6 +1456,7 @@ async def app_session_summary_csv(
     writer.writerow([f"# Phase: {summary['phase']}"])
     writer.writerow([f"# Completed tasks: {summary['stats']['total_completed']}"])
     writer.writerow([f"# With final estimate: {summary['stats']['with_estimate']}"])
+    writer.writerow([f"# Total SP: {summary['stats']['total_story_points']}"])
     writer.writerow([f"# Consensus reached: {summary['stats']['consensus_count']}"])
     writer.writerow([f"# Votes cast: {summary['stats']['votes_cast']}"])
     writer.writerow([])
@@ -1389,9 +1500,7 @@ async def app_session_summary_csv(
 
     csv_bytes = buf.getvalue().encode("utf-8-sig")  # BOM so Excel detects UTF-8
 
-    filename = _csv_download_filename(summary["title"], chat_id)
-    utf8_filename = f"planning_poker_{summary['title'] or 'session'}_{chat_id}.csv"
-    content_disposition = f"attachment; filename=\"{filename}\"; filename*=UTF-8''{quote(utf8_filename)}"
+    content_disposition = _content_disposition(summary["title"], chat_id, "csv")
 
     await _audit(
         request,
@@ -1405,4 +1514,34 @@ async def app_session_summary_csv(
         iter([csv_bytes]),
         media_type="text/csv; charset=utf-8",
         headers={"Content-Disposition": content_disposition},
+    )
+
+
+@app_router.get("/app/sessions/{chat_id}/summary.md")
+async def app_session_summary_markdown(
+    chat_id: int,
+    request: Request,
+    topic_id: Optional[int] = None,
+    title: Optional[str] = Query(default=None),
+    actor: CmsPrincipal = Depends(_manager_dep),
+) -> StreamingResponse:
+    """Export a Confluence-friendly Markdown report for a planning session."""
+    session = await _get_repo_session(request.app.state.repository, chat_id, topic_id)
+    stored_title = await _stored_session_title(request, chat_id, topic_id)
+    resolved_title = _resolve_session_title(title, stored_title)
+    summary = _summary_payload(session, title=resolved_title)
+    markdown = _markdown_report(summary).encode("utf-8")
+
+    await _audit(
+        request,
+        "app.session.summary_export",
+        actor.username,
+        "ok",
+        {"chat_id": chat_id, "format": "md", "rows": len(summary["completed_tasks"])},
+    )
+
+    return StreamingResponse(
+        iter([markdown]),
+        media_type="text/markdown; charset=utf-8",
+        headers={"Content-Disposition": _content_disposition(summary["title"], chat_id, "md")},
     )

@@ -214,4 +214,8 @@ export const managerApi = {
    *  browser triggers an "attach" download with the session-cookie auth. */
   summaryCsvUrl: (chatId: number, title: string, topicId: number | null = null) =>
     appUrl(`/sessions/${chatId}/summary.csv${query({ topic_id: topicId, title })}`),
+
+  /** Confluence-friendly Markdown report download. */
+  summaryMarkdownUrl: (chatId: number, title: string, topicId: number | null = null) =>
+    appUrl(`/sessions/${chatId}/summary.md${query({ topic_id: topicId, title })}`),
 };

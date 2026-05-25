@@ -32,7 +32,7 @@ const MOCK_PARTICIPANTS = [
   { name: "Маша", role: "frontend" as const, voted: true },
   { name: "Иван", role: "backend" as const, voted: false },
   { name: "Петя", role: "qa" as const, voted: true },
-  { name: "Оля", role: "product" as const, voted: false },
+  { name: "Оля", role: "qa" as const, voted: false },
   { name: "Саша", role: "backend" as const, voted: true },
 ];
 
@@ -65,7 +65,9 @@ export default function DemoPage() {
   useEffect(() => {
     if (staticView) return;
     let alive = true;
-    managerApi.demoSession(false)
+    // Always restart the shared demo room so landing → /demo never opens
+    // a stale "session complete" screen after a previous facilitator run.
+    managerApi.demoSession(true)
       .then((session) => {
         if (!alive) return;
         const ref = {
