@@ -27,6 +27,20 @@ import { SessionTabsBar } from "./SessionTabsBar";
 /** Page size for the completed-tasks list. Mirrors backend default of 20. */
 const TASKS_PAGE_SIZE = 20;
 
+function toSafeNumber(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function normalizeSummaryStats(stats: SessionSummary["stats"] | null | undefined): SessionSummary["stats"] {
+  return {
+    total_completed: toSafeNumber(stats?.total_completed),
+    with_estimate: toSafeNumber(stats?.with_estimate),
+    consensus_count: toSafeNumber(stats?.consensus_count),
+    votes_cast: toSafeNumber(stats?.votes_cast),
+    total_story_points: toSafeNumber(stats?.total_story_points),
+  };
+}
+
 function useFinishedThemeSync(principal: CmsPrincipal | null): void {
   const { mode, setMode } = useTheme();
   const lastSyncedRef = useRef<ThemeMode | null>(null);
@@ -162,7 +176,8 @@ export default function FinishedSessionPage() {
   }
 
   const canDownload = Boolean(summary && summary.completed_tasks.length > 0);
-  const canSyncJira = Boolean(summary && summary.stats.total_completed > 0);
+  const stats = normalizeSummaryStats(summary?.stats);
+  const canSyncJira = Boolean(summary && stats.total_completed > 0);
 
   async function syncJiraSp() {
     if (!summary || !Number.isFinite(chatId)) return;
@@ -454,7 +469,8 @@ function FinishedSummarySkeleton() {
 
 function FinishedSummaryBody({ chatId, summary }: { chatId: number; summary: SessionSummary }) {
   const duration = useMemo(() => formatDuration(summary.started_at, summary.finished_at), [summary]);
-  const total = summary.stats.total_completed;
+  const stats = useMemo(() => normalizeSummaryStats(summary.stats), [summary.stats]);
+  const total = stats.total_completed;
   const isPaginated = summary.completed_next_cursor !== undefined;
 
   // Stable identity for the seed so re-renders of `summary` (e.g. after
@@ -523,11 +539,11 @@ function FinishedSummaryBody({ chatId, summary }: { chatId: number; summary: Ses
       {/* META + STATS */}
       <Surface className="p-5">
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
-          <StatCard label="Сыграно задач" value={summary.stats.total_completed.toString()} />
-          <StatCard label="С итоговой оценкой" value={`${summary.stats.with_estimate} / ${summary.stats.total_completed}`} />
-          <StatCard label="TOTAL SP" value={summary.stats.total_story_points.toString()} />
-          <StatCard label="Consensus" value={`${summary.stats.consensus_count} / ${summary.stats.total_completed}`} />
-          <StatCard label="Голосов отдано" value={summary.stats.votes_cast.toString()} />
+          <StatCard label="Сыграно задач" value={stats.total_completed.toString()} />
+          <StatCard label="С итоговой оценкой" value={`${stats.with_estimate} / ${stats.total_completed}`} />
+          <StatCard label="TOTAL SP" value={stats.total_story_points.toString()} />
+          <StatCard label="Consensus" value={`${stats.consensus_count} / ${stats.total_completed}`} />
+          <StatCard label="Голосов отдано" value={stats.votes_cast.toString()} />
         </div>
         <div className="mt-5 grid gap-3 text-sm text-ink3 sm:grid-cols-3">
           <MetaRow label="Старт">{formatDateTime(summary.started_at)}</MetaRow>

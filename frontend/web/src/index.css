@@ -151,6 +151,38 @@
 }
 
 @layer components {
+  @keyframes skeleton-shimmer {
+    0% { transform: translateX(-120%); }
+    100% { transform: translateX(120%); }
+  }
+
+  .skeleton-base {
+    border: 1px solid rgb(var(--c-line) / 0.7);
+    background-color: rgb(var(--c-line2) / 0.75);
+    backdrop-filter: blur(2px);
+    -webkit-backdrop-filter: blur(2px);
+  }
+
+  .skeleton-shimmer {
+    position: relative;
+    overflow: hidden;
+  }
+
+  .skeleton-shimmer::after {
+    content: "";
+    position: absolute;
+    inset: -2px;
+    background: linear-gradient(
+      100deg,
+      transparent 20%,
+      rgb(var(--c-surface) / 0.65) 50%,
+      transparent 80%
+    );
+    filter: blur(8px);
+    animation: skeleton-shimmer 1.4s var(--ease-out-soft) infinite;
+    pointer-events: none;
+  }
+
   .card {
     @apply bg-surface rounded-lg shadow-card border border-line;
   }

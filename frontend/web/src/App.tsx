@@ -19,6 +19,16 @@ function SessionDetailIndex() {
   return <Navigate to={`/cms/sessions/${id}/cockpit`} replace />;
 }
 
+function LandingRouteLoader() {
+  return (
+    <main className="flex min-h-screen-mobile items-center justify-center app-gradient-bg px-4">
+      <span className="relative block h-1 w-full max-w-xs overflow-hidden rounded-full bg-line2/80" aria-hidden="true">
+        <span className="absolute inset-y-0 left-0 w-1/3 rounded-full bg-line animate-[skeleton-shimmer_1.2s_var(--ease-out-soft)_infinite]" />
+      </span>
+    </main>
+  );
+}
+
 export default function App() {
   return (
     <ThemeProvider defaultMode="dark">
@@ -28,7 +38,14 @@ export default function App() {
             <Routes>
               {/* Root is the public landing page. Authenticated entry points
                   (cockpit, CMS) are linked from there. */}
-              <Route path="/" element={<LandingPage />} />
+              <Route
+                path="/"
+                element={
+                  <Suspense fallback={<LandingRouteLoader />}>
+                    <LandingPage />
+                  </Suspense>
+                }
+              />
               {/* Option B alias routes (UX audit recommendation): the
                   cockpit and report screens are conceptually the
                   "detail view" of a CMS session. We expose them under

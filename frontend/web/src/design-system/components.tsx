@@ -459,7 +459,7 @@ export function EmptyState({ title, description, action }: { title: string; desc
 }
 
 export function Skeleton({ className = "h-24" }: { className?: string }) {
-  return <div className={cn("rounded-lg border border-line bg-line2 animate-pulse", className)} />;
+  return <div className={cn("rounded-lg skeleton-base skeleton-shimmer", className)} />;
 }
 
 /**
@@ -491,14 +491,14 @@ export function RowSkeleton({
       )}
     >
       {withAvatar ? (
-        <span className="h-8 w-8 shrink-0 animate-pulse rounded-full bg-line2" />
+        <span className="h-8 w-8 shrink-0 rounded-full skeleton-base skeleton-shimmer" />
       ) : null}
       <div className="flex-1 space-y-2">
         {Array.from({ length: safeLines }).map((_, idx) => (
           <span
             key={idx}
             className={cn(
-              "block h-2.5 animate-pulse rounded bg-line2",
+              "block h-2.5 rounded skeleton-base skeleton-shimmer",
               lineWidths[idx % lineWidths.length],
             )}
           />
