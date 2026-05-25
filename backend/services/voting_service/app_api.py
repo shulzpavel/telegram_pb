@@ -133,6 +133,13 @@ class AiTaskSummary(BaseModel):
     description: str
     methods: list[str]
     complexity: str
+    sp_dev: Optional[int] = None
+    sp_test: Optional[int] = None
+    sp_final: Optional[int] = None
+    scale_label: Optional[str] = None
+    confidence: Optional[str] = None
+    assumptions: list[str] = Field(default_factory=list)
+    estimation_model: Optional[str] = None
     generated_at: str
     source: str = "anthropic"
 

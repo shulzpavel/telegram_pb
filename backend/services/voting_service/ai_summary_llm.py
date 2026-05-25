@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
 ANTHROPIC_VERSION = "2023-06-01"
 JSON_FENCE_RE = re.compile(r"^```(?:json)?\s*|\s*```$", re.IGNORECASE | re.MULTILINE)
+STORY_POINT_SCALE = (1, 2, 3, 5, 8, 13, 18)
 
 
 class LlmSummaryError(Exception):
@@ -86,10 +87,45 @@ def _validate_summary_payload(payload: dict[str, Any]) -> dict[str, Any]:
     if not complexity:
         raise LlmSummaryError("LLM summary is missing complexity", status_code=502)
 
+    sp_dev_raw = payload.get("sp_dev")
+    sp_test_raw = payload.get("sp_test")
+    if not isinstance(sp_dev_raw, int) or sp_dev_raw not in STORY_POINT_SCALE:
+        raise LlmSummaryError("LLM summary has invalid sp_dev", status_code=502)
+    if not isinstance(sp_test_raw, int) or sp_test_raw not in STORY_POINT_SCALE:
+        raise LlmSummaryError("LLM summary has invalid sp_test", status_code=502)
+
+    derived_final = max(sp_dev_raw, sp_test_raw)
+    sp_final_raw = payload.get("sp_final")
+    if isinstance(sp_final_raw, int) and sp_final_raw in STORY_POINT_SCALE:
+        sp_final = max(sp_final_raw, derived_final)
+    else:
+        sp_final = derived_final
+
+    scale_label = str(payload.get("scale_label") or "").strip()
+    if not scale_label:
+        scale_label = f"{sp_final} SP"
+
+    confidence = str(payload.get("confidence") or "").strip().lower()
+    if confidence not in {"low", "medium", "high"}:
+        confidence = "medium"
+
+    assumptions_raw = payload.get("assumptions")
+    if isinstance(assumptions_raw, list):
+        assumptions = [str(item).strip() for item in assumptions_raw if str(item).strip()][:6]
+    else:
+        assumptions = []
+
     return {
         "description": description[:2000],
         "methods": methods,
         "complexity": complexity[:500],
+        "sp_dev": sp_dev_raw,
+        "sp_test": sp_test_raw,
+        "sp_final": sp_final,
+        "scale_label": scale_label[:120],
+        "confidence": confidence,
+        "assumptions": assumptions,
+        "estimation_model": "max(sp_dev, sp_test)",
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "source": "anthropic",
     }
@@ -127,13 +163,26 @@ def _build_task_context(task: Task, jira_context: Optional[dict[str, Any]]) -> s
 
 def _system_prompt() -> str:
     return (
-        "You help a software team estimate Jira tasks during planning poker. "
+        "You help a software team estimate Jira tasks during planning poker using a strict rubric. "
         "Respond with a single JSON object only, no markdown fences, using this schema:\n"
-        '{"description": string, "methods": string[], "complexity": string}\n'
+        '{"description": string, "methods": string[], "complexity": string, '
+        '"sp_dev": 1|2|3|5|8|13|18, "sp_test": 1|2|3|5|8|13|18, "sp_final": 1|2|3|5|8|13|18, '
+        '"scale_label": string, "confidence": "low"|"medium"|"high", "assumptions": string[]}\n'
         "description: 2-4 sentences in Russian explaining what the task delivers and what to verify.\n"
         "methods: 3-5 short bullets in Russian naming focus areas (API, UI, data, tests, integration, etc.).\n"
-        "complexity: one sentence in Russian with AI baseline story points range (e.g. 2-3 SP, 5-8 SP, 13+ SP) "
-        "and why. Base the answer on the provided task context only; do not invent unrelated scope."
+        "complexity: one sentence in Russian with why this task has this complexity.\n"
+        "sp_dev: estimate for developer scope only (analysis, implementation, unit tests, review fixes).\n"
+        "sp_test: estimate for QA scope only (test design, execution, regression risk, test automation updates).\n"
+        "sp_final must equal max(sp_dev, sp_test).\n"
+        "Use this interpretation and keep estimates conservative:\n"
+        "- Story Points are relative complexity, NOT time.\n"
+        "- Final formula: SP = max(SP dev, SP test).\n"
+        "- Scale semantics: 1 very easy, 2 easy with minor dependency, 3 small moderate logic, 5 medium with dependencies, "
+        "8 above medium with uncertainty, 13 complex/high risk and likely decomposition candidate, "
+        "18 very complex and must be decomposed before implementation.\n"
+        "- If requirements are unclear or have open questions, prefer 8 or 13 and explicitly list assumptions.\n"
+        "- Epic-level work itself should not be estimated as one implementation task; note decomposition need in assumptions.\n"
+        "Base the answer on the provided task context only; do not invent unrelated scope."
     )
 
 

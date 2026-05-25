@@ -1564,6 +1564,11 @@ function ControlRoom({
 }
 
 function AiSummaryPanel({ summary }: { summary: NonNullable<NonNullable<ManagerSession["state"]["task"]>["ai_summary"]> }) {
+  const hasStructuredSp =
+    typeof summary.sp_dev === "number" &&
+    typeof summary.sp_test === "number" &&
+    typeof summary.sp_final === "number";
+
   return (
     <Surface className="mb-4 border-blue/25 bg-blue/5 p-4">
       <div className="flex flex-wrap items-center gap-2">
@@ -1588,6 +1593,38 @@ function AiSummaryPanel({ summary }: { summary: NonNullable<NonNullable<ManagerS
           <p className="mt-1 text-sm leading-6 text-ink2">{summary.complexity}</p>
         </div>
       </div>
+      {hasStructuredSp ? (
+        <div className="mt-3 grid gap-2 sm:grid-cols-3">
+          <div className="rounded-lg border border-line bg-surface px-3 py-2">
+            <p className="text-xs font-semibold uppercase tracking-wide text-ink3">SP dev</p>
+            <p className="mt-1 text-lg font-bold text-ink">{summary.sp_dev}</p>
+          </div>
+          <div className="rounded-lg border border-line bg-surface px-3 py-2">
+            <p className="text-xs font-semibold uppercase tracking-wide text-ink3">SP test</p>
+            <p className="mt-1 text-lg font-bold text-ink">{summary.sp_test}</p>
+          </div>
+          <div className="rounded-lg border border-blue/30 bg-blue/10 px-3 py-2">
+            <p className="text-xs font-semibold uppercase tracking-wide text-ink3">SP final</p>
+            <p className="mt-1 text-lg font-bold text-blue">{summary.sp_final}</p>
+            <p className="text-[11px] text-ink3">
+              {summary.scale_label ?? "SP = max(SP dev, SP test)"}
+            </p>
+          </div>
+        </div>
+      ) : null}
+      {summary.assumptions && summary.assumptions.length > 0 ? (
+        <div className="mt-3">
+          <p className="text-xs font-semibold uppercase tracking-wide text-ink3">Предположения / риски</p>
+          <ul className="mt-1 space-y-1 text-sm text-ink2">
+            {summary.assumptions.map((item) => (
+              <li key={item} className="flex gap-2">
+                <span className="text-blue" aria-hidden="true">•</span>
+                <span>{item}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
     </Surface>
   );
 }

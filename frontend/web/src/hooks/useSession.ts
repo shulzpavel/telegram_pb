@@ -16,8 +16,15 @@ export interface AiTaskSummary {
   description: string;
   methods: string[];
   complexity: string;
-  generated_at: string;
-  source: string;
+  sp_dev?: number;
+  sp_test?: number;
+  sp_final?: number;
+  scale_label?: string;
+  confidence?: "low" | "medium" | "high";
+  assumptions?: string[];
+  estimation_model?: string;
+  generated_at?: string;
+  source?: string;
 }
 
 export type ParticipantRole = "backend" | "frontend" | "qa";
