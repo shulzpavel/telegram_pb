@@ -67,8 +67,8 @@ test.describe("participant flow", () => {
     // JoinPage is rendered with a mock task. Form labels are stable
     // across UI iterations, so we assert on them rather than on the
     // task title or marketing copy.
-    await expect(page.getByLabel("Ваше имя")).toBeVisible();
-    await page.getByLabel("Ваше имя").fill("QA User");
+    await expect(page.getByLabel("Корпоративная почта")).toBeVisible();
+    await page.getByLabel("Корпоративная почта").fill("qa.user@betboom.com");
 
     // Role chips are buttons. The "QA" label is shared across the chip
     // text and the assistive icon — `getByRole` with exact match keeps

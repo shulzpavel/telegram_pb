@@ -3,6 +3,11 @@ import { FormEvent, useState } from "react";
 import { Link } from "react-router-dom";
 import { Alert, Badge, BrandMark, Button, ProgressBar, Surface, TextField, ThemeToggle, cn } from "../design-system";
 import { ParticipantRole, TaskInfo } from "../hooks/useSession";
+import {
+  PARTICIPANT_EMAIL_DOMAIN,
+  loadWebIdentity,
+  validateParticipantEmail,
+} from "../shared/lib/participantIdentity";
 
 interface JoinPageProps {
   task: TaskInfo | null;
@@ -18,18 +23,11 @@ const ROLES: { value: ParticipantRole; label: string; icon: string }[] = [
   { value: "design",   label: "Design",   icon: "✦" },
 ];
 
-function validateName(v: string): string | null {
-  const t = v.trim();
-  if (!t) return "Введите имя";
-  if (t.length < 2) return "Имя должно быть минимум 2 символа";
-  if (t.length > 40) return "Имя не должно превышать 40 символов";
-  return null;
-}
-
 export default function JoinPage({ task, onJoin, error }: JoinPageProps) {
   const reduceMotion = useReducedMotion();
-  const [name, setName] = useState("");
-  const [role, setRole] = useState<ParticipantRole | null>(null);
+  const saved = loadWebIdentity();
+  const [name, setName] = useState(saved?.email ?? "");
+  const [role, setRole] = useState<ParticipantRole | null>(saved?.role ?? null);
   // Validation is field-scoped so blurring the name input doesn't suddenly
   // flash "Выберите роль" before the user has even reached the role picker.
   const [nameTouched, setNameTouched] = useState(false);
@@ -38,9 +36,9 @@ export default function JoinPage({ task, onJoin, error }: JoinPageProps) {
   const [loading, setLoading] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
-  const nameError = nameTouched || submitAttempted ? validateName(name) : null;
+  const nameError = nameTouched || submitAttempted ? validateParticipantEmail(name) : null;
   const roleError = (roleTouched || submitAttempted) && !role ? "Выберите роль" : null;
-  const canSubmit = !loading && validateName(name) === null && role !== null;
+  const canSubmit = !loading && validateParticipantEmail(name) === null && role !== null;
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -49,7 +47,7 @@ export default function JoinPage({ task, onJoin, error }: JoinPageProps) {
     setLoading(true);
     setSubmitError(null);
     try {
-      await onJoin(name.trim(), role);
+      await onJoin(name.trim().toLowerCase(), role);
     } catch (err) {
       setSubmitError(err instanceof Error ? err.message : "Ошибка подключения");
       setLoading(false);
@@ -101,15 +99,17 @@ export default function JoinPage({ task, onJoin, error }: JoinPageProps) {
 
             <form onSubmit={handleSubmit} className="space-y-4 sm:space-y-5" noValidate>
               <TextField
-                label="Ваше имя"
-                type="text"
+                label="Корпоративная почта"
+                type="email"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 onBlur={() => setNameTouched(true)}
-                placeholder="Например: Маша"
+                placeholder={`name@${PARTICIPANT_EMAIL_DOMAIN}`}
+                hint={`Например: paul_s@${PARTICIPANT_EMAIL_DOMAIN}`}
                 autoFocus
-                autoComplete="name"
-                maxLength={50}
+                autoComplete="email"
+                inputMode="email"
+                maxLength={64}
                 disabled={loading}
                 error={nameError}
               />

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiUrl, wsUrl } from "../app/config";
+import { saveWebIdentity } from "../shared/lib/participantIdentity";
 
 export interface TaskInfo {
   task_id?: string;
@@ -179,6 +180,7 @@ export function useSession(token: string): UseSessionReturn {
         throw new Error(message);
       }
       const data = (await resp.json()) as { participant_id: string; session: WebSessionState };
+      saveWebIdentity(name, role);
       try {
         localStorage.setItem(pidKey, data.participant_id);
       } catch {

@@ -12,6 +12,11 @@ import redis.asyncio as aioredis
 from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
+from services.voting_service.participant_identity import (
+    stable_user_id_from_email,
+    validate_participant_email,
+    validate_participant_role,
+)
 from services.voting_service.ws_manager import redis_pubsub_listener
 
 logger = logging.getLogger(__name__)
@@ -190,21 +195,27 @@ async def create_web_token(body: WebTokenRequest, request: Request) -> WebTokenR
 
 @web_router.post("/web/join")
 async def web_join(body: WebJoinRequest, request: Request) -> dict:
-    """Join a web voting session by name."""
+    """Join a web voting session with corporate email and team role."""
+    try:
+        display_name = validate_participant_email(body.name)
+        team_role = validate_participant_role(body.role)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     redis_client = await _get_redis(request)
     info = await _resolve_token(redis_client, body.token)
     chat_id: int = info["chat_id"]
     topic_id: Optional[int] = info["topic_id"]
 
     participant_id = str(uuid.uuid4())
-    user_id = _stable_user_id(participant_id)
+    user_id = stable_user_id_from_email(display_name)
 
     # Persist web participant metadata in Redis
     p_key = f"web_participant:{body.token}:{participant_id}"
     await redis_client.setex(
         p_key,
         WEB_TOKEN_TTL,
-        json.dumps({"name": body.name, "user_id": user_id, "role": body.role}),
+        json.dumps({"name": display_name, "user_id": user_id, "role": team_role}),
     )
 
     cms_store = _get_cms_store(request)
@@ -213,8 +224,8 @@ async def web_join(body: WebJoinRequest, request: Request) -> dict:
             body.token,
             participant_id,
             user_id,
-            body.name,
-            body.role,
+            display_name,
+            team_role,
             chat_id,
             topic_id,
             WEB_TOKEN_TTL,
@@ -228,10 +239,13 @@ async def web_join(body: WebJoinRequest, request: Request) -> dict:
         from app.domain.participant import Participant
         from config import UserRole
 
-        if user_id not in session.participants:
+        existing = session.participants.get(user_id)
+        if existing:
+            existing.name = display_name
+        else:
             session.participants[user_id] = Participant(
                 user_id=user_id,
-                name=body.name,
+                name=display_name,
                 role=UserRole.PARTICIPANT,
             )
             added = True
