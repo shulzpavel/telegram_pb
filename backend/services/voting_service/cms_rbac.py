@@ -23,6 +23,7 @@ PERM_ACCESS_VIEW = "cms.access.view"
 PERM_ACCESS_MANAGE = "cms.access.manage"
 PERM_TASKS_MANAGE = "cms.tasks.manage"
 PERM_APP_SESSIONS_MANAGE = "app.sessions.manage"
+PERM_WEB_PARTICIPANTS_DELETE = "cms.web_participants.delete"
 
 CMS_PERMISSION_DEFINITIONS: list[dict[str, str]] = [
     {
@@ -54,6 +55,11 @@ CMS_PERMISSION_DEFINITIONS: list[dict[str, str]] = [
         "key": PERM_WEB_VIEW,
         "label": "View web participants",
         "description": "Can view web participant records.",
+    },
+    {
+        "key": PERM_WEB_PARTICIPANTS_DELETE,
+        "label": "Delete participants permanently",
+        "description": "Can hard-delete participant records, session participant links, web join records, and CMS vote rows.",
     },
     {
         "key": PERM_EVENTS_VIEW,

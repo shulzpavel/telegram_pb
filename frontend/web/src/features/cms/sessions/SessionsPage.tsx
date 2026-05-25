@@ -463,14 +463,14 @@ function CreateSessionDialog({
       role="dialog"
       aria-modal="true"
       aria-labelledby="cms-create-session-title"
-      className="fixed inset-0 z-40 flex items-end justify-center bg-canvas/70 px-4 pb-safe-6 pt-safe backdrop-blur sm:items-center"
+      className="fixed inset-0 z-40 flex items-end justify-center overflow-y-auto overscroll-contain bg-canvas/70 px-4 pb-safe-6 pt-safe backdrop-blur sm:items-center"
       onClick={(event) => {
         if (event.target === event.currentTarget && !busy) onCancel();
       }}
     >
       <Surface
         as="form"
-        className="w-full max-w-md p-5 sm:p-6 motion-safe:animate-scale-in"
+        className="mb-4 max-h-[calc(100dvh-var(--safe-top)-var(--safe-bottom)-1.5rem)] w-full max-w-md overflow-y-auto overscroll-contain p-5 sm:mb-0 sm:p-6 motion-safe:animate-scale-in"
         onSubmit={onSubmit}
       >
         <h2 id="cms-create-session-title" className="text-base font-bold text-ink">

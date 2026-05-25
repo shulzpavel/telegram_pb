@@ -1,7 +1,9 @@
 import { useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Button, EmptyState, SelectField, TextField } from "../../../design-system";
-import type { UserItem } from "../api/cmsTypes";
+import { Alert, Button, ConfirmDialog, EmptyState, SelectField, TextField } from "../../../design-system";
+import { cmsUsersApi } from "../api/cmsClient";
+import type { CmsPrincipal, UserItem } from "../api/cmsTypes";
+import { CMS_PERMISSIONS, hasPermission } from "../navigation";
 import {
   DataTable,
   HelpCallout,
@@ -14,14 +16,43 @@ import { useCmsList } from "../hooks/useCmsList";
 import { useDebouncedValue } from "../hooks/useDebouncedValue";
 import { formatDate } from "../../../shared/lib/format";
 
-export default function UsersPage() {
+export default function UsersPage({ principal }: { principal: CmsPrincipal }) {
   const navigate = useNavigate();
   const [q, setQ] = useState("");
   const [role, setRole] = useState("");
+  const [deleteTarget, setDeleteTarget] = useState<UserItem | null>(null);
+  const [deleteConfirmName, setDeleteConfirmName] = useState("");
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const debouncedQ = useDebouncedValue(q);
   const params = useMemo(() => ({ q: debouncedQ, role: role || undefined }), [debouncedQ, role]);
   const list = useCmsList<UserItem>("/users", params, { scrollKey: "cms-users" });
   const searchRef = useRef<HTMLInputElement | null>(null);
+  const canHardDeleteParticipants = hasPermission(principal, CMS_PERMISSIONS.webParticipantsDelete);
+  const deleteConfirmed = deleteTarget !== null && deleteConfirmName.trim() === deleteTarget.name;
+
+  function openDeleteDialog(item: UserItem) {
+    setDeleteTarget(item);
+    setDeleteConfirmName("");
+    setDeleteError(null);
+  }
+
+  async function hardDeleteParticipant() {
+    if (!deleteTarget || !deleteConfirmed || deleteBusy) return;
+    setDeleteBusy(true);
+    setDeleteError(null);
+    try {
+      await cmsUsersApi.hardDelete(deleteTarget.user_id, deleteConfirmName.trim());
+      setDeleteTarget(null);
+      setDeleteConfirmName("");
+      await list.reload();
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : "Не удалось удалить участника");
+    } finally {
+      setDeleteBusy(false);
+    }
+  }
+
   return (
     <section className="space-y-4">
       <SectionHeader
@@ -66,7 +97,7 @@ export default function UsersPage() {
         onMore={list.loadMore}
         onFocusSearch={() => searchRef.current?.focus()}
         itemNoun="участников"
-        columns={["Участник", "Роль", "Первое подключение", "Последнее подключение"]}
+        columns={canHardDeleteParticipants ? ["Участник", "Роль", "Первое подключение", "Последнее подключение", ""] : ["Участник", "Роль", "Первое подключение", "Последнее подключение"]}
         empty={
           list.items.length === 0 && !list.loading ? (
             // Two flavours: with filters → offer to clear them; with a
@@ -108,6 +139,13 @@ export default function UsersPage() {
             <MobileRecordField label="Роль" value={item.role} />
             <MobileRecordField label="Первое" value={formatDate(item.first_seen_at)} />
             <MobileRecordField label="Последнее" value={formatDate(item.last_seen_at)} />
+            {canHardDeleteParticipants ? (
+              <div className="pt-2">
+                <Button variant="danger" size="sm" onClick={() => openDeleteDialog(item)}>
+                  Удалить навсегда
+                </Button>
+              </div>
+            ) : null}
           </MobileRecordCard>
         ))}
       >
@@ -122,9 +160,54 @@ export default function UsersPage() {
             <td className="px-3 py-2 break-words">{item.role}</td>
             <td className="px-3 py-2 text-ink3 whitespace-nowrap">{formatDate(item.first_seen_at)}</td>
             <td className="px-3 py-2 text-ink3 whitespace-nowrap">{formatDate(item.last_seen_at)}</td>
+            {canHardDeleteParticipants ? (
+              <td className="px-3 py-2 text-right">
+                <Button variant="danger" size="sm" onClick={() => openDeleteDialog(item)}>
+                  Удалить
+                </Button>
+              </td>
+            ) : null}
           </tr>
         ))}
       </DataTable>
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        title="Удалить участника навсегда?"
+        description={
+          <div className="space-y-3">
+            <p>
+              Это hard delete из CMS: карточка участника, связи с сессиями, web-подключения и строки голосов будут удалены без восстановления.
+            </p>
+            {deleteTarget ? (
+              <div className="rounded-lg border border-line bg-line2 p-3 text-xs text-ink2">
+                <p className="font-semibold text-ink">{deleteTarget.name}</p>
+                <p>id {deleteTarget.user_id}</p>
+              </div>
+            ) : null}
+            <TextField
+              label="Для подтверждения введите имя участника"
+              value={deleteConfirmName}
+              onChange={(event) => setDeleteConfirmName(event.target.value)}
+              placeholder={deleteTarget?.name ?? ""}
+              disabled={deleteBusy}
+              reserveMessageSpace={false}
+            />
+            {deleteError ? <Alert tone="danger">{deleteError}</Alert> : null}
+          </div>
+        }
+        confirmLabel="Удалить навсегда"
+        cancelLabel="Отмена"
+        tone="danger"
+        busy={deleteBusy}
+        confirmDisabled={!deleteConfirmed}
+        onCancel={() => {
+          if (deleteBusy) return;
+          setDeleteTarget(null);
+          setDeleteConfirmName("");
+          setDeleteError(null);
+        }}
+        onConfirm={() => { void hardDeleteParticipant(); }}
+      />
     </section>
   );
 }

@@ -168,6 +168,21 @@ export const cmsEventsApi = {
   },
 };
 
+export const cmsUsersApi = {
+  hardDelete: (userId: number, confirmName: string) =>
+    cmsFetch<{
+      ok: boolean;
+      user_id: number;
+      deleted: boolean;
+      votes_deleted: number;
+      session_participants_deleted: number;
+      web_participants_deleted: number;
+    }>(`/users/${userId}`, {
+      method: "DELETE",
+      body: JSON.stringify({ confirm_name: confirmName }),
+    }),
+};
+
 export const cmsTokensApi = {
   revoke: (tokenId: number) =>
     cmsFetch<{ ok: boolean; token_id: number; revoked: boolean }>(`/tokens/${tokenId}`, {

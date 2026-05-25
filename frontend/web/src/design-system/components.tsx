@@ -572,6 +572,7 @@ export function ConfirmDialog({
   cancelLabel = "Cancel",
   tone = "danger",
   busy = false,
+  confirmDisabled = false,
   onConfirm,
   onCancel,
 }: {
@@ -584,6 +585,7 @@ export function ConfirmDialog({
   /** Disable both actions and show a spinner on the primary CTA while
    *  an async confirmation is in flight (e.g. delete network call). */
   busy?: boolean;
+  confirmDisabled?: boolean;
   onConfirm: () => void;
   onCancel: () => void;
 }) {
@@ -697,6 +699,7 @@ export function ConfirmDialog({
               variant={tone === "danger" ? "danger" : "primary"}
               onClick={onConfirm}
               loading={busy}
+              disabled={busy || confirmDisabled}
               className="sm:w-auto"
             >
               {confirmLabel}

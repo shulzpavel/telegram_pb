@@ -39,6 +39,7 @@ from services.voting_service.cms_rbac import (
     PERM_TASKS_MANAGE,
     PERM_USERS_VIEW,
     PERM_VOTES_VIEW,
+    PERM_WEB_PARTICIPANTS_DELETE,
     PERM_WEB_VIEW,
 )
 
@@ -69,6 +70,10 @@ class RoleUpdateRequest(BaseModel):
     name: str = Field(min_length=2, max_length=80)
     description: str = Field(default="", max_length=500)
     permission_keys: list[str] = Field(default_factory=list)
+
+
+class ParticipantHardDeleteRequest(BaseModel):
+    confirm_name: str = Field(min_length=1, max_length=200)
 
 
 class AdminCreateRequest(BaseModel):
@@ -1016,6 +1021,31 @@ async def cms_users(
     _: CmsPrincipal = Depends(require_permission(PERM_USERS_VIEW)),
 ) -> dict:
     return await _get_cms_store(request).list_users(limit=limit, cursor=cursor, q=q, role=role)
+
+
+@cms_router.delete("/cms/users/{user_id}")
+async def cms_hard_delete_user(
+    user_id: int,
+    body: ParticipantHardDeleteRequest,
+    request: Request,
+    actor: CmsPrincipal = Depends(require_permission(PERM_WEB_PARTICIPANTS_DELETE)),
+) -> dict:
+    store = _get_cms_store(request)
+    try:
+        deleted = await store.hard_delete_user(user_id, body.confirm_name)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Type the participant name exactly to confirm deletion") from exc
+    if deleted is None:
+        raise HTTPException(status_code=404, detail="Participant not found")
+    return {
+        "ok": True,
+        "user_id": user_id,
+        "deleted": True,
+        "votes_deleted": deleted["votes_deleted"],
+        "session_participants_deleted": deleted["session_participants_deleted"],
+        "web_participants_deleted": deleted["web_participants_deleted"],
+        "actor": actor.username,
+    }
 
 
 @cms_router.get("/cms/votes")

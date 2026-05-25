@@ -10,6 +10,7 @@ export const CMS_PERMISSIONS = {
   accessManage: "cms.access.manage",
   tasksManage: "cms.tasks.manage",
   appSessionsManage: "app.sessions.manage",
+  webParticipantsDelete: "cms.web_participants.delete",
 } as const;
 
 /**

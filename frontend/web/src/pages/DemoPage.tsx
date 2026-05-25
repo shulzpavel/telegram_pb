@@ -1,7 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
-import { Navigate } from "react-router-dom";
-import { Alert, BrandMark, Spinner, Surface } from "../design-system";
-import { managerApi } from "../features/manager/api/managerClient";
+import { useMemo, useState } from "react";
 import type { ParticipantRole, ParticipantStatus, VoteResult } from "../hooks/useSession";
 import JoinPage from "./JoinPage";
 import ResultsPage from "./ResultsPage";
@@ -53,39 +50,11 @@ function delay(ms: number): Promise<void> {
 export default function DemoPage() {
   const params = new URLSearchParams(window.location.search);
   const view = params.get("view") ?? "join";
-  const staticView = params.has("view") || params.has("mock");
   const [phase, setPhase] = useState<DemoPhase>("join");
   const [taskIndex, setTaskIndex] = useState(0);
   const [participant, setParticipant] = useState<{ name: string; role: ParticipantRole } | null>(null);
   const [ownVote, setOwnVote] = useState<string | null>(null);
-  const [realToken, setRealToken] = useState<string | null>(null);
-  const [realError, setRealError] = useState<string | null>(null);
   const task = MOCK_TASKS[taskIndex];
-
-  useEffect(() => {
-    if (staticView) return;
-    let alive = true;
-    // Always restart the shared demo room so landing → /demo never opens
-    // a stale "session complete" screen after a previous facilitator run.
-    managerApi.demoSession(true)
-      .then((session) => {
-        if (!alive) return;
-        const ref = {
-          chatId: session.chat_id,
-          topicId: session.topic_id,
-          title: session.title,
-          token: session.token,
-          inviteUrl: session.invite_url,
-        };
-        window.localStorage.setItem("pp_manager_session", JSON.stringify(ref));
-        setRealToken(session.token);
-      })
-      .catch((err) => {
-        if (!alive) return;
-        setRealError(err instanceof Error ? err.message : "Не удалось создать demo session");
-      });
-    return () => { alive = false; };
-  }, [staticView]);
 
   const participants = useMemo<ParticipantStatus[]>(() => {
     if (!participant) return MOCK_PARTICIPANTS;
@@ -127,31 +96,6 @@ export default function DemoPage() {
     setPhase("join");
   }
 
-  if (!staticView) {
-    if (realToken) {
-      return <Navigate to={`/s/${realToken}`} replace />;
-    }
-    return (
-      <main className="flex min-h-screen-mobile flex-col app-gradient-bg">
-        <header className="sticky top-0 z-10 border-b border-line/60 bg-surface/85 pt-safe backdrop-blur">
-          <div className="mx-auto flex min-h-14 max-w-3xl items-center px-3 sm:px-4">
-            <BrandMark size="sm" />
-          </div>
-        </header>
-        <div className="flex flex-1 items-center justify-center px-4 py-10 pb-safe-6">
-          <Surface className="w-full max-w-sm p-6 text-center">
-            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-lg bg-line2 text-blue">
-              <Spinner />
-            </div>
-            <h1 className="mt-4 text-lg font-bold text-ink">Готовим real demo session</h1>
-            <p className="mt-2 text-sm text-ink3">Создаём живую сессию с тестовыми Jira-like задачами. Менеджер увидит её в `/manage?demo=1`.</p>
-            {realError ? <Alert className="mt-4 text-left" tone="danger">{realError}</Alert> : null}
-          </Surface>
-        </div>
-      </main>
-    );
-  }
-
   if (params.has("view")) {
     if (view === "vote") {
       return (
@@ -171,17 +115,13 @@ export default function DemoPage() {
     return <JoinPage task={MOCK_TASKS[0]} onJoin={async () => {}} error={null} />;
   }
 
-  if (params.has("mock")) {
-    if (phase === "vote") {
-      return <VotePage task={task} participants={participants} onVote={voteDemo} error={null} />;
-    }
-
-    if (phase === "results") {
-      return <ResultsPage task={task} results={results} onNextTask={nextTask} onRestart={restartDemo} />;
-    }
-
-    return <JoinPage task={task} onJoin={joinDemo} error={null} />;
+  if (phase === "vote") {
+    return <VotePage task={task} participants={participants} onVote={voteDemo} error={null} />;
   }
 
-  return null;
+  if (phase === "results") {
+    return <ResultsPage task={task} results={results} onNextTask={nextTask} onRestart={restartDemo} />;
+  }
+
+  return <JoinPage task={task} onJoin={joinDemo} error={null} />;
 }

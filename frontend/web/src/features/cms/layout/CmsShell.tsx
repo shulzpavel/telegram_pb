@@ -241,7 +241,7 @@ export default function CmsShell({
                 }
               />
             ) : null}
-            {hasPermission(principal, CMS_PERMISSIONS.users) ? <Route path="users" element={<UsersPage />} /> : null}
+            {hasPermission(principal, CMS_PERMISSIONS.users) ? <Route path="users" element={<UsersPage principal={principal} />} /> : null}
             {hasPermission(principal, CMS_PERMISSIONS.tokens) ? (
               <Route path="tokens" element={<TokensPage canManageSessions={canManageSessions} />} />
             ) : null}

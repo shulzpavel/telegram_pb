@@ -1800,6 +1800,84 @@ class PostgresCmsStore:
             )
         return self._paged_rows(rows, limit, "last_seen_at")
 
+    async def hard_delete_user(self, user_id: int, confirm_name: str) -> Optional[dict[str, Any]]:
+        """Hard-delete a participant from the CMS read model.
+
+        This intentionally removes the aggregate user row plus CMS-only traces
+        that point to the same user_id. It does not mutate live session state in
+        Redis, so a participant who joins again can be backfilled as a new CMS
+        record later.
+        """
+        async with self.pool.acquire() as conn:
+            async with conn.transaction():
+                user = await conn.fetchrow(
+                    """
+                    SELECT user_id, name, role, is_web, first_seen_at, last_seen_at
+                    FROM cms_users
+                    WHERE user_id = $1
+                    """,
+                    user_id,
+                )
+                if not user:
+                    return None
+                if confirm_name.strip() != str(user["name"]):
+                    raise ValueError("participant name confirmation mismatch")
+
+                task_rows = await conn.fetch(
+                    "SELECT DISTINCT task_id FROM cms_votes WHERE user_id = $1",
+                    user_id,
+                )
+                affected_task_ids = [int(row["task_id"]) for row in task_rows]
+
+                votes_deleted = await conn.fetchval(
+                    "WITH deleted AS (DELETE FROM cms_votes WHERE user_id = $1 RETURNING 1) SELECT COUNT(*) FROM deleted",
+                    user_id,
+                )
+                session_participants_deleted = await conn.fetchval(
+                    "WITH deleted AS (DELETE FROM cms_session_participants WHERE user_id = $1 RETURNING 1) SELECT COUNT(*) FROM deleted",
+                    user_id,
+                )
+                web_participants_deleted = await conn.fetchval(
+                    "WITH deleted AS (DELETE FROM cms_web_participants WHERE user_id = $1 RETURNING 1) SELECT COUNT(*) FROM deleted",
+                    user_id,
+                )
+                await conn.execute("DELETE FROM cms_users WHERE user_id = $1", user_id)
+
+                if affected_task_ids:
+                    await conn.execute(
+                        """
+                        WITH affected(task_id) AS (
+                            SELECT unnest($1::bigint[])
+                        ),
+                        agg AS (
+                            SELECT
+                                task_id,
+                                COUNT(*)::integer AS votes_count,
+                                AVG(numeric_value) FILTER (WHERE is_numeric)::numeric AS numeric_avg,
+                                MAX(numeric_value) FILTER (WHERE is_numeric)::integer AS numeric_max
+                            FROM cms_votes
+                            WHERE task_id = ANY($1::bigint[])
+                            GROUP BY task_id
+                        )
+                        UPDATE cms_tasks AS task
+                        SET
+                            votes_count = COALESCE(agg.votes_count, 0),
+                            numeric_avg = agg.numeric_avg,
+                            numeric_max = agg.numeric_max,
+                            updated_at = NOW()
+                        FROM affected
+                        LEFT JOIN agg ON agg.task_id = affected.task_id
+                        WHERE task.id = affected.task_id
+                        """,
+                        affected_task_ids,
+                    )
+
+        data = _row_to_dict(user)
+        data["votes_deleted"] = int(votes_deleted or 0)
+        data["session_participants_deleted"] = int(session_participants_deleted or 0)
+        data["web_participants_deleted"] = int(web_participants_deleted or 0)
+        return data
+
     async def list_web_tokens(
         self,
         limit: int,
