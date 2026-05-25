@@ -11,7 +11,7 @@ export function SectionHeader({
   actions?: ReactNode;
 }) {
   return (
-    <header className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+    <header className="mx-auto flex w-full max-w-4xl flex-col gap-3 md:flex-row md:items-start md:justify-between">
       <div className="min-w-0">
         <h2 className="text-base font-bold text-ink sm:text-lg">{title}</h2>
         {description ? (
@@ -31,7 +31,7 @@ export function HelpCallout({
   children: ReactNode;
 }) {
   return (
-    <aside className="rounded-lg border border-line bg-line2/30 p-3 text-sm text-ink2 sm:p-4">
+    <aside className="mx-auto w-full max-w-3xl rounded-lg border border-line bg-line2/30 p-3 text-sm text-ink2 sm:p-4">
       {title ? <p className="mb-1 text-xs font-bold uppercase tracking-wide text-ink3">{title}</p> : null}
       <div className="space-y-1">{children}</div>
     </aside>
@@ -293,13 +293,13 @@ export function MobileRecordField({ label, value }: { label: string; value: Reac
   return (
     <div className="min-w-0">
       <p className="font-semibold text-ink4">{label}</p>
-      <div className="mt-0.5 truncate text-ink2">{value}</div>
+      <div className="mt-0.5 whitespace-normal break-words text-ink2">{value}</div>
     </div>
   );
 }
 
 export function Toolbar({ children }: { children: ReactNode }) {
-  return <div className="flex flex-col md:flex-row md:items-center gap-2">{children}</div>;
+  return <div className="mx-auto flex w-full max-w-4xl flex-col gap-2 md:flex-row md:items-center">{children}</div>;
 }
 
 export function Status({ active, done, label }: { active: boolean; done?: boolean; label?: string }) {

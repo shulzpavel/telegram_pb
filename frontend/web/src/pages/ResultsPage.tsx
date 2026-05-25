@@ -1,8 +1,8 @@
 import { motion, useReducedMotion } from "framer-motion";
-import { useEffect, useState } from "react";
+import { type MouseEvent, useEffect, useState } from "react";
 import FlipCard from "../components/FlipCard";
 import TaskTextBlock from "../components/TaskTextBlock";
-import { Badge, BrandMark, Button, LoadingDots, Surface } from "../design-system";
+import { Badge, BrandHomeLink, Button, LoadingDots, Surface } from "../design-system";
 import { staggerDelay } from "../design-system/motion";
 import { TaskInfo, VoteResult } from "../hooks/useSession";
 
@@ -49,9 +49,10 @@ interface ResultsPageProps {
   _skipAnimation?: boolean;
   onNextTask?: () => void;
   onRestart?: () => void;
+  onLogoClick?: (event: MouseEvent<HTMLAnchorElement>) => void;
 }
 
-export default function ResultsPage({ task, results, _skipAnimation, onNextTask, onRestart }: ResultsPageProps) {
+export default function ResultsPage({ task, results, _skipAnimation, onNextTask, onRestart, onLogoClick }: ResultsPageProps) {
   const reduceMotion = Boolean(useReducedMotion());
   const skipAnimation = Boolean(_skipAnimation || reduceMotion);
   const [phase, setPhase] = useState<"countdown" | "reveal" | "stats">(skipAnimation ? "stats" : "countdown");
@@ -90,10 +91,10 @@ export default function ResultsPage({ task, results, _skipAnimation, onNextTask,
       {/* Top bar: matches Vote/Join shells — BrandMark + section
           label + counter on the right. Single row, no wraps. */}
       <header className="sticky top-0 z-10 border-b border-line/60 bg-surface/85 backdrop-blur pt-safe">
-        <div className="mx-auto flex min-h-14 w-full max-w-5xl items-center gap-2 px-3 sm:px-4 md:px-8">
-          <BrandMark size="sm" showWordmark={false} className="shrink-0" />
-          <div className="flex min-w-0 items-center gap-2">
-            <span className="truncate text-sm font-semibold text-ink2">Результаты</span>
+        <div className="flex min-h-14 w-full items-center gap-2 px-3 sm:px-4 md:px-8">
+          <BrandHomeLink size="sm" showWordmark={false} className="shrink-0" onClick={onLogoClick} />
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <span className="text-sm font-semibold text-ink2">Результаты</span>
             {task?.jira_key ? <Badge>{task.jira_key}</Badge> : null}
           </div>
           {task ? (

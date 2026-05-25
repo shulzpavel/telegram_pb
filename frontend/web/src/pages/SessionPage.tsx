@@ -1,6 +1,7 @@
 import { motion, useReducedMotion } from "framer-motion";
-import { Link, useParams } from "react-router-dom";
-import { BrandMark, Button, Spinner as DsSpinner, Surface, ThemeToggle } from "../design-system";
+import { type MouseEvent, useState } from "react";
+import { Link, useNavigate, useParams } from "react-router-dom";
+import { BrandHomeLink, Button, ConfirmDialog, Spinner as DsSpinner, Surface, ThemeToggle } from "../design-system";
 import { useSession } from "../hooks/useSession";
 import JoinPage from "./JoinPage";
 import ResultsPage from "./ResultsPage";
@@ -19,7 +20,27 @@ export default function SessionPage() {
 
 function SessionInner({ token }: { token: string }) {
   const reduceMotion = useReducedMotion();
+  const navigate = useNavigate();
   const { state, phase, join, vote, error } = useSession(token);
+  const [leaveConfirmOpen, setLeaveConfirmOpen] = useState(false);
+
+  function requestLeaveSession(event: MouseEvent<HTMLAnchorElement>) {
+    event.preventDefault();
+    setLeaveConfirmOpen(true);
+  }
+
+  const leaveConfirm = (
+    <ConfirmDialog
+      open={leaveConfirmOpen}
+      title="Покинуть сессию?"
+      description="Вы точно хотите покинуть текущую сессию и перейти на главную страницу?"
+      confirmLabel="Перейти на главную"
+      cancelLabel="Остаться"
+      tone="primary"
+      onConfirm={() => navigate("/")}
+      onCancel={() => setLeaveConfirmOpen(false)}
+    />
+  );
 
   if (phase === "joining") {
     return (
@@ -33,27 +54,39 @@ function SessionInner({ token }: { token: string }) {
 
   if (phase === "waiting") {
     return (
-      <FullScreen>
-        <Spinner />
-        <p className="text-base text-ink2 font-semibold mt-5">Ожидание начала</p>
-        <p className="text-sm text-ink3 mt-1">Лид скоро запустит голосование</p>
-      </FullScreen>
+      <>
+        <FullScreen onLogoClick={requestLeaveSession}>
+          <Spinner />
+          <p className="text-base text-ink2 font-semibold mt-5">Ожидание начала</p>
+          <p className="text-sm text-ink3 mt-1">Лид скоро запустит голосование</p>
+        </FullScreen>
+        {leaveConfirm}
+      </>
     );
   }
 
   if (phase === "voting" && state?.task) {
     return (
-      <VotePage
-        task={state.task}
-        participants={state.participants}
-        onVote={vote}
-        error={error}
-      />
+      <>
+        <VotePage
+          task={state.task}
+          participants={state.participants}
+          onVote={vote}
+          error={error}
+          onLogoClick={requestLeaveSession}
+        />
+        {leaveConfirm}
+      </>
     );
   }
 
   if (phase === "results" && state?.results) {
-    return <ResultsPage task={state.task ?? null} results={state.results} />;
+    return (
+      <>
+        <ResultsPage task={state.task ?? null} results={state.results} onLogoClick={requestLeaveSession} />
+        {leaveConfirm}
+      </>
+    );
   }
 
   if (phase === "complete") {
@@ -97,7 +130,7 @@ function SessionInner({ token }: { token: string }) {
   );
 }
 
-function FullScreen({ children }: { children: React.ReactNode }) {
+function FullScreen({ children, onLogoClick }: { children: React.ReactNode; onLogoClick?: (event: MouseEvent<HTMLAnchorElement>) => void }) {
   // Shared "single message + brand" layout used by all transient
   // session states (joining / waiting / complete / error). Keeping the
   // brand visible avoids the "where am I?" feeling between phases and
@@ -105,9 +138,9 @@ function FullScreen({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex min-h-screen-mobile flex-col app-gradient-bg">
       <header className="sticky top-0 z-10 border-b border-line/60 bg-surface/85 pt-safe backdrop-blur">
-        <div className="mx-auto flex min-h-14 w-full max-w-5xl items-center px-3 sm:px-4">
-          <BrandMark size="sm" showWordmark={false} />
-          <span className="ml-2 truncate text-sm font-semibold text-ink2">Planning Poker</span>
+        <div className="flex min-h-14 w-full items-center px-3 sm:px-4 lg:px-6">
+          <BrandHomeLink size="sm" showWordmark={false} onClick={onLogoClick} />
+          <span className="ml-2 text-sm font-semibold text-ink2">Planning Poker</span>
           <div className="ml-auto">
             <ThemeToggle size="sm" tone="ghost" />
           </div>

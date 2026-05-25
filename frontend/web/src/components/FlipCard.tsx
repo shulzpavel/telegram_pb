@@ -76,7 +76,7 @@ export default function FlipCard({ name, value, delay = 0, revealed }: FlipCardP
             <>
               <span className="text-2xs font-bold text-ink3 self-start">{value}</span>
               <span className="text-3xl font-black text-ink tabular-nums">{value}</span>
-              <span className="text-2xs font-medium text-ink3 truncate w-full text-center px-0.5">
+              <span className="w-full break-words px-0.5 text-center text-2xs font-medium leading-tight text-ink3">
                 {name}
               </span>
             </>

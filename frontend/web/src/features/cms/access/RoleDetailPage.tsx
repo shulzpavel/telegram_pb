@@ -367,7 +367,7 @@ function RoleUsersPanel({ role }: RoleUsersPanelProps) {
               <Link
                 to={`/cms/access/users/${admin.id}`}
                 state={{ admin }}
-                className="min-w-0 flex-1 truncate text-sm font-semibold text-ink"
+                className="min-w-0 flex-1 whitespace-normal break-words text-sm font-semibold text-ink"
               >
                 <code className="font-mono text-xs">{admin.username}</code>
                 {admin.display_name ? <span className="ml-2 text-ink3">{admin.display_name}</span> : null}

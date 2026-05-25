@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from "react";
-import { Badge, BackLink, BrandMark, Button, Spinner, ThemeToggle } from "../../design-system";
+import { useEffect, useRef, useState, type MouseEvent } from "react";
+import { Badge, BackLink, BrandHomeLink, Button, Spinner, ThemeToggle } from "../../design-system";
 import type { CmsPrincipal } from "../cms/api/cmsTypes";
 import { CMS_PERMISSIONS, hasPermission } from "../cms/navigation";
 
@@ -7,7 +7,7 @@ import { CMS_PERMISSIONS, hasPermission } from "../cms/navigation";
  * Manager cockpit header.
  *
  * Two layouts, one component:
- *  - Mobile (< md): BackLink · BrandMark icon · editable title · "•••" menu.
+ *  - Mobile (< md): BrandMark icon · editable title · "•••" menu.
  *    All action buttons (copy invite, finish, theme, user) move to
  *    `ManagerBottomDock` / a bottom sheet.
  *  - Desktop (≥ md): the full action group is restored on the right.
@@ -25,6 +25,7 @@ export function ManagerTopBar({
   onRename,
   renameBusy,
   onOpenMenu,
+  onLogoClick,
 }: {
   principal: CmsPrincipal;
   title?: string;
@@ -34,6 +35,7 @@ export function ManagerTopBar({
   onRename?: (title: string) => Promise<boolean>;
   renameBusy?: boolean;
   onOpenMenu?: () => void;
+  onLogoClick?: (event: MouseEvent<HTMLAnchorElement>) => void;
 }) {
   const [copied, setCopied] = useState(false);
   async function copyInvite() {
@@ -49,20 +51,16 @@ export function ManagerTopBar({
   const canSeeSessions = hasPermission(principal, CMS_PERMISSIONS.sessions);
   const backTo = canSeeSessions ? "/cms/sessions" : "/cms";
   // Unified back-label across detail screens: "К <раздел>".
-  // Previously it read "К списку" / "В CMS" which gave no hint of
-  // *what* you'd be returning to.
   const backLabel = canSeeSessions ? "К сессиям" : "В CMS";
   const userLabel = principal.display_name ?? principal.username;
   return (
     <header className="sticky top-0 z-20 border-b border-line bg-surface/90 pt-safe backdrop-blur">
-      <div className="mx-auto flex min-h-14 max-w-[1440px] items-center gap-2 px-3 py-2 sm:px-4 md:min-h-16 md:gap-3 lg:px-6">
-        {/* Left cluster: back + brand mark. Brand is icon-only on
-            mobile so the editable title actually has room to breathe. */}
-        <BackLink to={backTo} label={backLabel} size="sm" className="shrink-0" />
-        <BrandMark size="sm" showWordmark={false} className="shrink-0" />
+      <div className="flex min-h-14 w-full items-center gap-2 px-3 py-2 sm:px-4 md:min-h-16 md:gap-3 lg:px-6">
+        {/* Brand is icon-only on mobile so the editable title has room to breathe. */}
+        <BrandHomeLink size="sm" showWordmark={false} className="shrink-0" onClick={onLogoClick} />
 
-        {/* Middle: editable title. Single line, truncates, becomes an
-            input on tap. Uses min-w-0 so flex children don't push the
+        {/* Middle: editable title. Wraps instead of hiding the full
+            session name. Uses min-w-0 so flex children don't push the
             cluster off-screen at 320px. */}
         <div className="min-w-0 flex-1">
           <SessionTitleEditor title={title} onRename={onRename} busy={Boolean(renameBusy)} />
@@ -113,6 +111,9 @@ export function ManagerTopBar({
           ) : null}
         </div>
       </div>
+      <div className="flex w-full border-t border-line/70 px-3 py-1.5 sm:px-4 lg:px-6">
+        <BackLink to={backTo} label={backLabel} size="sm" className="shrink-0" />
+      </div>
     </header>
   );
 }
@@ -155,7 +156,7 @@ function SessionTitleEditor({
   }, [editing]);
 
   if (!onRename) {
-    return <h1 className="truncate text-sm font-bold text-ink md:text-base" title={title}>{title}</h1>;
+    return <h1 className="break-words text-sm font-bold leading-snug text-ink md:text-base">{title}</h1>;
   }
 
   async function commit() {
@@ -214,10 +215,10 @@ function SessionTitleEditor({
       type="button"
       onClick={() => setEditing(true)}
       title="Кликните, чтобы переименовать"
-      className="group flex min-w-0 max-w-full items-center gap-1.5 rounded-md -mx-1 px-1 text-left transition hover:bg-line2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue/40"
+      className="group flex min-w-0 max-w-full items-start gap-1.5 rounded-md -mx-1 px-1 text-left transition hover:bg-line2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue/40"
     >
-      <span className="truncate text-sm font-bold text-ink md:text-base">{title}</span>
-      <PencilIcon className="hidden h-3.5 w-3.5 shrink-0 text-ink3 opacity-0 transition group-hover:opacity-100 group-focus-visible:opacity-100 md:inline-block" />
+      <span className="min-w-0 whitespace-normal break-words text-sm font-bold leading-snug text-ink md:text-base">{title}</span>
+      <PencilIcon className="mt-0.5 hidden h-3.5 w-3.5 shrink-0 text-ink3 opacity-0 transition group-hover:opacity-100 group-focus-visible:opacity-100 md:inline-block" />
     </button>
   );
 }

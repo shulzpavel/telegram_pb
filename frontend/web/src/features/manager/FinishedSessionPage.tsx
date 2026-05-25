@@ -5,7 +5,7 @@ import {
   Badge,
   BackLink,
   BottomSheet,
-  BrandMark,
+  BrandHomeLink,
   Button,
   EmptyState,
   ListSkeleton,
@@ -193,21 +193,14 @@ export default function FinishedSessionPage() {
 
   return (
     <main className="min-h-screen-mobile app-gradient-bg md:pb-safe-6">
-      {/* Header: single row at all viewports. Brand + back + stack
-          (eyebrow + title) on the left; primary actions hidden on
-          mobile (they live in the bottom dock) but kept on `md+`. */}
+      {/* Header: full-width app chrome. Back navigation lives in its own row
+          below so the menu line keeps a stable width and composition. */}
       <header className="sticky top-0 z-10 border-b border-line bg-surface/90 pt-safe backdrop-blur">
-        <div className="mx-auto flex min-h-14 max-w-6xl items-center gap-2 px-3 sm:px-4 md:min-h-16 md:gap-3 lg:px-6">
-          <BackLink
-            to={hasPermission(principal, CMS_PERMISSIONS.sessions) ? "/cms/sessions" : "/cms"}
-            label={hasPermission(principal, CMS_PERMISSIONS.sessions) ? "К сессиям" : "В CMS"}
-            size="sm"
-            className="shrink-0"
-          />
-          <BrandMark size="sm" showWordmark={false} className="shrink-0" />
+        <div className="flex min-h-14 w-full items-center gap-2 px-3 sm:px-4 md:min-h-16 md:gap-3 lg:px-6">
+          <BrandHomeLink size="sm" showWordmark={false} className="shrink-0" />
           <div className="min-w-0 flex-1">
-            <p className="truncate text-[11px] font-semibold uppercase tracking-wide text-ink3">Отчёт сессии</p>
-            <h1 className="truncate text-sm font-bold text-ink md:text-base" title={summary?.title ?? title}>
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-ink3">Отчёт сессии</p>
+            <h1 className="break-words text-sm font-bold leading-snug text-ink md:text-base">
               {summary?.title ?? title}
             </h1>
           </div>
@@ -253,6 +246,14 @@ export default function FinishedSessionPage() {
               <DotsIcon />
             </button>
           </div>
+        </div>
+        <div className="flex w-full border-t border-line/70 px-3 py-1.5 sm:px-4 lg:px-6">
+          <BackLink
+            to={hasPermission(principal, CMS_PERMISSIONS.sessions) ? "/cms/sessions" : "/cms"}
+            label={hasPermission(principal, CMS_PERMISSIONS.sessions) ? "К сессиям" : "В CMS"}
+            size="sm"
+            className="shrink-0"
+          />
         </div>
       </header>
 

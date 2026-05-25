@@ -9,4 +9,5 @@ export { ScrollHint } from "./ScrollHint";
 export { BackLink, resolveBackTarget, type BackLinkProps, type BackTarget } from "./BackLink";
 export { ToastProvider, useToast, type ToastTone, type ToastInput } from "./Toast";
 export { BrandMark } from "./BrandMark";
+export { BrandHomeLink } from "./BrandHomeLink";
 export { BottomSheet, SheetItem } from "./BottomSheet";

@@ -73,6 +73,7 @@ class RoleUpdateRequest(BaseModel):
 
 
 class ParticipantHardDeleteRequest(BaseModel):
+    user_id: Optional[str] = Field(default=None, min_length=1, max_length=32)
     confirm_name: str = Field(min_length=1, max_length=200)
 
 
@@ -1023,14 +1024,22 @@ async def cms_users(
     return await _get_cms_store(request).list_users(limit=limit, cursor=cursor, q=q, role=role)
 
 
-@cms_router.delete("/cms/users/{user_id}")
+@cms_router.delete("/cms/users")
+@cms_router.delete("/cms/users/{path_user_id}")
 async def cms_hard_delete_user(
-    user_id: int,
     body: ParticipantHardDeleteRequest,
     request: Request,
+    path_user_id: Optional[str] = None,
     actor: CmsPrincipal = Depends(require_permission(PERM_WEB_PARTICIPANTS_DELETE)),
 ) -> dict:
     store = _get_cms_store(request)
+    raw_user_id = body.user_id or path_user_id
+    if raw_user_id is None:
+        raise HTTPException(status_code=400, detail="Invalid participant id")
+    try:
+        user_id = int(raw_user_id.strip())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid participant id") from exc
     try:
         deleted = await store.hard_delete_user(user_id, body.confirm_name)
     except ValueError as exc:
@@ -1039,7 +1048,7 @@ async def cms_hard_delete_user(
         raise HTTPException(status_code=404, detail="Participant not found")
     return {
         "ok": True,
-        "user_id": user_id,
+        "user_id": deleted["user_id"],
         "deleted": True,
         "votes_deleted": deleted["votes_deleted"],
         "session_participants_deleted": deleted["session_participants_deleted"],

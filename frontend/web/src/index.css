@@ -85,10 +85,17 @@
   }
 
   html {
+    font-size: 17px;
     text-rendering: optimizeLegibility;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     background-color: rgb(var(--c-canvas));
+  }
+
+  @media (min-width: 640px) {
+    html {
+      font-size: 16px;
+    }
   }
 
   /* Defensive: any stray oversized element should be clipped at the

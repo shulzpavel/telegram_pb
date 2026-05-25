@@ -641,7 +641,7 @@ function SessionDetails({
               </form>
             ) : (
               <>
-                <h3 className="truncate text-base font-bold text-ink">
+                <h3 className="break-words text-base font-bold text-ink">
                   {detail ? displaySessionTitle(detail) : `Сессия #${sessionId}`}
                 </h3>
                 <p className="text-xs text-ink3">
@@ -792,7 +792,7 @@ function ParticipantsBlock({
             className="grid grid-cols-[1fr_auto] gap-3 border-b border-line py-2 last:border-b-0"
           >
             <div className="min-w-0">
-              <p className="truncate text-sm font-semibold text-ink">{item.name}</p>
+              <p className="break-words text-sm font-semibold text-ink">{item.name}</p>
               <p className="text-xs text-ink3">id {item.user_id}</p>
             </div>
             <Badge tone={item.role === "lead" ? "info" : "neutral"}>{item.role}</Badge>
@@ -848,7 +848,7 @@ function WebInviteesBlock({
         {filtered.map((item) => (
           <div key={item.id} className="grid grid-cols-[1fr_auto] gap-3 border-b border-line py-2 last:border-b-0">
             <div className="min-w-0">
-              <p className="truncate text-sm font-semibold text-ink">{item.name}</p>
+              <p className="break-words text-sm font-semibold text-ink">{item.name}</p>
               <p className="text-xs text-ink3">
                 {item.role} · присоединился {formatDate(item.joined_at)}
               </p>
@@ -1355,7 +1355,7 @@ function JiraImportPanel({
                 />
                 <span className="min-w-0">
                   <span className="block text-xs font-bold text-ink">{item.key}{item.duplicate ? " · уже в очереди" : ""}</span>
-                  <span className="block truncate text-xs text-ink3">{item.summary}</span>
+                  <span className="block whitespace-normal break-words text-xs text-ink3">{item.summary}</span>
                 </span>
               </label>
             ))}
@@ -1469,7 +1469,7 @@ function TaskRow({
         <div className="grid gap-3 lg:grid-cols-[1fr_auto]">
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
-              <p className="truncate text-sm font-semibold text-ink">{task.jira_key ?? `manual ${task.bucket_index + 1}`}</p>
+              <p className="break-all text-sm font-semibold text-ink">{task.jira_key ?? `manual ${task.bucket_index + 1}`}</p>
               <Status active={task.bucket === "tasks_queue"} done={task.bucket !== "tasks_queue"} label={task.source} />
               {isCurrent ? <Badge tone="info">текущая</Badge> : null}
             </div>

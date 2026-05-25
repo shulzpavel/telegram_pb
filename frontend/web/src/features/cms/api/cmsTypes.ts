@@ -142,7 +142,8 @@ export interface JiraPreview {
 }
 
 export interface UserItem {
-  user_id: number;
+  /** Stringified int64 — safe for web participants with negative stable ids. */
+  user_id: string;
   name: string;
   role: string;
   is_web: boolean;

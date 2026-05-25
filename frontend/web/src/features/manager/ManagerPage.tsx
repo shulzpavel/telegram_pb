@@ -14,7 +14,7 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { Children, FormEvent, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Children, FormEvent, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
 import { apiUrl } from "../../app/config";
 import TaskTextBlock from "../../components/TaskTextBlock";
@@ -407,6 +407,7 @@ function ManagerWorkspace({
   sessionRef: ManagerSessionRef | null;
   onSessionRef: (value: ManagerSessionRef | null) => void;
 }) {
+  const navigate = useNavigate();
   const [session, setSession] = useState<ManagerSession | null>(null);
   const [tasks, setTasks] = useState<TaskItem[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
@@ -414,6 +415,7 @@ function ManagerWorkspace({
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [leaveConfirmOpen, setLeaveConfirmOpen] = useState(false);
   const toast = useToast();
   const [historyLoadingMore, setHistoryLoadingMore] = useState(false);
   const [historyError, setHistoryError] = useState<string | null>(null);
@@ -689,8 +691,25 @@ function ManagerWorkspace({
   // Auto-advance to the next task as soon as the manager picks a final SP.
   // Last-task case (no more tasks ahead) lands the session in phase=complete
   // and we stay put — the user explicitly hits "Open report" or adds more.
-  const navigate = useNavigate();
   const autoNextGuard = useRef<string | null>(null);
+  function requestLeaveCockpit(event: MouseEvent<HTMLAnchorElement>) {
+    event.preventDefault();
+    setLeaveConfirmOpen(true);
+  }
+
+  const leaveCockpitConfirm = (
+    <ConfirmDialog
+      open={leaveConfirmOpen}
+      title="Покинуть сессию?"
+      description="Вы точно хотите покинуть текущую сессию и перейти на главную страницу?"
+      confirmLabel="Перейти на главную"
+      cancelLabel="Остаться"
+      tone="primary"
+      onConfirm={() => navigate("/")}
+      onCancel={() => setLeaveConfirmOpen(false)}
+    />
+  );
+
   async function selectFinalEstimate(value: number) {
     if (!sessionRef || !session?.state.task) return;
     // Use the manager-only current_task_id (always present) as the dedup key
@@ -789,25 +808,29 @@ function ManagerWorkspace({
   if (session.tasks_queue_count === 0) {
     const wizardFinishHandler = (session.completed_count ?? session.completed_tasks.length) > 0 ? finishAndOpenReport : undefined;
     return (
-      <CockpitShell
-        principal={principal}
-        title={sessionRef.title}
-        inviteUrl={inviteUrl}
-        chatId={sessionRef.chatId}
-        onFinishSession={wizardFinishHandler}
-        finishBusy={busy === "finish"}
-        onRename={renameSession}
-        renameBusy={busy === "rename"}
-      >
-        <BacklogWizard
+      <>
+        <CockpitShell
+          principal={principal}
+          title={sessionRef.title}
+          inviteUrl={inviteUrl}
           chatId={sessionRef.chatId}
-          tasksVersion={session.tasks_version}
-          busy={busy}
-          error={error}
-          completedCount={session.completed_count ?? session.completed_tasks.length}
-          onAction={applyAction}
-        />
-      </CockpitShell>
+          onFinishSession={wizardFinishHandler}
+          finishBusy={busy === "finish"}
+          onRename={renameSession}
+          renameBusy={busy === "rename"}
+          onLogoClick={requestLeaveCockpit}
+        >
+          <BacklogWizard
+            chatId={sessionRef.chatId}
+            tasksVersion={session.tasks_version}
+            busy={busy}
+            error={error}
+            completedCount={session.completed_count ?? session.completed_tasks.length}
+            onAction={applyAction}
+          />
+        </CockpitShell>
+        {leaveCockpitConfirm}
+      </>
     );
   }
 
@@ -884,20 +907,24 @@ function ManagerWorkspace({
   );
 
   return (
-    <CockpitShell
-      principal={principal}
-      title={sessionRef.title}
-      inviteUrl={inviteUrl}
-      chatId={sessionRef.chatId}
-      onFinishSession={finishAndOpenReport}
-      finishBusy={busy === "finish"}
-      onRename={renameSession}
-      renameBusy={busy === "rename"}
-    >
-      {backlogColumn}
-      {controlColumn}
-      {settingsColumn}
-    </CockpitShell>
+    <>
+      <CockpitShell
+        principal={principal}
+        title={sessionRef.title}
+        inviteUrl={inviteUrl}
+        chatId={sessionRef.chatId}
+        onFinishSession={finishAndOpenReport}
+        finishBusy={busy === "finish"}
+        onRename={renameSession}
+        renameBusy={busy === "rename"}
+        onLogoClick={requestLeaveCockpit}
+      >
+        {backlogColumn}
+        {controlColumn}
+        {settingsColumn}
+      </CockpitShell>
+      {leaveCockpitConfirm}
+    </>
   );
 }
 
@@ -924,6 +951,7 @@ function CockpitShell({
   finishBusy,
   onRename,
   renameBusy,
+  onLogoClick,
   children,
 }: {
   principal: CmsPrincipal;
@@ -934,6 +962,7 @@ function CockpitShell({
   finishBusy?: boolean;
   onRename?: (title: string) => Promise<boolean>;
   renameBusy?: boolean;
+  onLogoClick?: (event: MouseEvent<HTMLAnchorElement>) => void;
   /** Wizard: single child. Cockpit: three column fragments in order. */
   children: ReactNode;
 }) {
@@ -952,6 +981,7 @@ function CockpitShell({
           finishBusy={finishBusy}
           onRename={onRename}
           renameBusy={renameBusy}
+          onLogoClick={onLogoClick}
         />
         <SessionTabsBar chatId={chatId} />
         {!isWizard ? (
@@ -1355,7 +1385,7 @@ function ControlRoom({
   const revealedVotes = phase === "results" ? (results ?? []) : [];
 
   return (
-    <Surface className="relative isolate min-h-0 p-4 md:p-6 lg:min-h-[calc(100dvh-96px)]">
+    <Surface className="relative isolate min-h-0 p-4 md:p-6">
       {/* PHASE HEADER --------------------------------------------------- */}
       <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
         <div className="min-w-0">
@@ -1705,7 +1735,7 @@ function HistoryCard({ entry }: { entry: CompletedTask }) {
           <span className="text-[11px] font-semibold uppercase text-ink4">no SP</span>
         )}
       </div>
-      <p className="mt-2 line-clamp-2 text-sm font-semibold text-ink">{entry.summary}</p>
+      <p className="mt-2 break-words text-sm font-semibold text-ink">{entry.summary}</p>
       {distribution.length > 0 ? (
         <div className="mt-3 space-y-1">
           {distribution.slice(0, 4).map(([value, count]) => (
@@ -2077,7 +2107,7 @@ function ParticipantsPanel({ participants }: { participants: ManagerSession["sta
           <EmptyState title="Пока никого" description="Отправьте invite link команде." />
         ) : participants.map((participant, idx) => (
           <div key={`${participant.name}-${idx}`} className="flex items-center justify-between rounded-lg border border-line bg-line2 px-3 py-2">
-            <span className="min-w-0 truncate text-sm font-semibold text-ink">{participant.name}</span>
+            <span className="min-w-0 whitespace-normal break-words text-sm font-semibold text-ink">{participant.name}</span>
             <Badge tone={participant.voted ? "success" : "neutral"}>{participant.voted ? "voted" : "waiting"}</Badge>
           </div>
         ))}

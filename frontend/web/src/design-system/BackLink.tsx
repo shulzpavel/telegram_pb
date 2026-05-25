@@ -18,8 +18,8 @@ export interface BackLinkProps {
 }
 
 const sizeStyles: Record<NonNullable<BackLinkProps["size"]>, string> = {
-  sm: "min-h-9 text-xs",
-  md: "min-h-10 text-sm",
+  sm: "min-h-11 text-sm sm:min-h-9 sm:text-xs",
+  md: "min-h-11 text-base sm:min-h-10 sm:text-sm",
 };
 
 const baseClass = cn(

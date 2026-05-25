@@ -27,14 +27,14 @@ const OPTIONS: Option[] = [
 
 const sizeClasses: Record<Size, { wrap: string; option: string; icon: string }> = {
   sm: {
-    wrap:   "h-7 p-0.5 rounded-full gap-0.5",
-    option: "h-6 w-6 rounded-full",
-    icon:   "h-3.5 w-3.5",
+    wrap:   "h-11 p-1 rounded-full gap-1 sm:h-7 sm:p-0.5 sm:gap-0.5",
+    option: "h-9 w-9 rounded-full sm:h-6 sm:w-6",
+    icon:   "h-5 w-5 sm:h-3.5 sm:w-3.5",
   },
   md: {
-    wrap:   "h-8 p-0.5 rounded-full gap-0.5",
-    option: "h-7 w-7 rounded-full",
-    icon:   "h-4 w-4",
+    wrap:   "h-12 p-1 rounded-full gap-1 sm:h-8 sm:p-0.5 sm:gap-0.5",
+    option: "h-10 w-10 rounded-full sm:h-7 sm:w-7",
+    icon:   "h-5 w-5 sm:h-4 sm:w-4",
   },
 };
 

@@ -36,9 +36,9 @@ const buttonVariants: Record<ButtonVariant, string> = {
 };
 
 const buttonSizes: Record<ButtonSize, string> = {
-  sm: "min-h-9 px-3 text-sm",
-  md: "min-h-11 px-4 text-sm",
-  lg: "min-h-12 px-5 text-base",
+  sm: "min-h-11 px-3.5 text-base sm:min-h-9 sm:px-3 sm:text-sm",
+  md: "min-h-12 px-4 text-base sm:min-h-11 sm:text-sm",
+  lg: "min-h-[3.25rem] px-5 text-[1.0625rem] sm:min-h-12 sm:text-base",
 };
 
 export function Button({
@@ -99,7 +99,7 @@ export function IconButton({
 }) {
   return (
     <Button
-      className={cn("h-9 w-9 px-0", className)}
+      className={cn("h-11 w-11 px-0 sm:h-9 sm:w-9", className)}
       size="sm"
       variant="ghost"
       aria-label={label}
@@ -113,14 +113,14 @@ export function IconButton({
 
 export function FieldLabel({ children, htmlFor }: { children: ReactNode; htmlFor?: string }) {
   return (
-    <label htmlFor={htmlFor} className="block text-xs font-semibold text-ink3">
+    <label htmlFor={htmlFor} className="block text-sm font-semibold text-ink3 sm:text-xs">
       {children}
     </label>
   );
 }
 
 const inputClassName =
-  "w-full scroll-mt-24 scroll-mb-40 rounded-lg border border-line bg-surface px-3 py-2.5 text-base text-ink placeholder-ink4 shadow-none outline-none transition-[border-color,box-shadow] duration-150 focus:border-blue focus:ring-2 focus:ring-blue/20 disabled:cursor-not-allowed disabled:bg-line2 disabled:text-ink4 sm:text-sm";
+  "min-h-11 w-full scroll-mt-24 scroll-mb-40 rounded-lg border border-line bg-surface px-3 py-2.5 text-base text-ink placeholder-ink4 shadow-none outline-none transition-[border-color,box-shadow] duration-150 focus:border-blue focus:ring-2 focus:ring-blue/20 disabled:cursor-not-allowed disabled:bg-line2 disabled:text-ink4 sm:min-h-10 sm:text-sm";
 
 function keepFocusedFieldVisible(element: HTMLElement) {
   if (typeof window === "undefined" || !window.matchMedia("(max-width: 767px)").matches) return;
@@ -206,7 +206,7 @@ function FieldMessage({
       role={error ? "alert" : undefined}
       aria-live={error ? "polite" : undefined}
       className={cn(
-        "text-xs leading-snug transition-colors duration-150",
+        "text-sm leading-snug transition-colors duration-150 sm:text-xs",
         reserveSpace ? "min-h-[1rem]" : undefined,
         error ? "text-red" : "text-ink3",
       )}
@@ -329,7 +329,7 @@ export function CheckboxField({
       className={cn(
         // 44px tap target (WCAG 2.5.5). Hover/focus surface highlights
         // the whole label so the user can tap anywhere on the row.
-        "flex min-h-11 cursor-pointer items-start gap-2.5 rounded-lg px-2 py-2 text-sm text-ink3",
+        "flex min-h-12 cursor-pointer items-start gap-2.5 rounded-lg px-2.5 py-2.5 text-base text-ink3 sm:min-h-11 sm:px-2 sm:py-2 sm:text-sm",
         "transition-colors duration-150 hover:bg-line2 has-[input:focus-visible]:bg-line2",
         disabled ? "cursor-not-allowed opacity-60" : undefined,
         className,
@@ -343,7 +343,7 @@ export function CheckboxField({
       />
       <span className="min-w-0">
         <span className="font-semibold text-ink">{label}</span>
-        {hint ? <span className="mt-0.5 block text-xs text-ink3">{hint}</span> : null}
+        {hint ? <span className="mt-0.5 block text-sm text-ink3 sm:text-xs">{hint}</span> : null}
       </span>
     </label>
   );
@@ -359,7 +359,7 @@ const badgeTone: Record<Tone, string> = {
 
 export function Badge({ children, tone = "neutral", className }: { children: ReactNode; tone?: Tone; className?: string }) {
   return (
-    <span className={cn("inline-flex min-h-6 items-center rounded-full px-2 text-xs font-semibold", badgeTone[tone], className)}>
+    <span className={cn("inline-flex min-h-7 items-center rounded-full px-2.5 text-sm font-semibold sm:min-h-6 sm:px-2 sm:text-xs", badgeTone[tone], className)}>
       {children}
     </span>
   );
@@ -420,7 +420,7 @@ export function Alert({
   return (
     <div
       className={cn(
-        "flex items-start gap-2 rounded-lg border px-3 py-2 text-sm font-medium",
+        "flex items-start gap-2 rounded-lg border px-3 py-2.5 text-base font-medium sm:py-2 sm:text-sm",
         alertTone[tone],
         className,
       )}
@@ -451,8 +451,8 @@ export function Alert({
 export function EmptyState({ title, description, action }: { title: string; description?: string; action?: ReactNode }) {
   return (
     <div className="rounded-lg border border-dashed border-line bg-surface px-4 py-8 text-center">
-      <p className="text-sm font-semibold text-ink">{title}</p>
-      {description ? <p className="mx-auto mt-1 max-w-md text-sm text-ink3">{description}</p> : null}
+      <p className="text-base font-semibold text-ink sm:text-sm">{title}</p>
+      {description ? <p className="mx-auto mt-1 max-w-md text-base text-ink3 sm:text-sm">{description}</p> : null}
       {action ? <div className="mt-4">{action}</div> : null}
     </div>
   );
@@ -541,7 +541,7 @@ export function ProgressBar({ value, label }: { value: number; label?: string })
   const normalized = Math.max(0, Math.min(1, value));
   return (
     <div className="space-y-1.5">
-      {label ? <p className="text-xs text-ink3">{label}</p> : null}
+      {label ? <p className="text-sm text-ink3 sm:text-xs">{label}</p> : null}
       <div className="h-2 overflow-hidden rounded-full bg-line" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(normalized * 100)}>
         <div className="h-full rounded-full bg-blue transition-[width] duration-200" style={{ width: `${normalized * 100}%` }} />
       </div>
@@ -686,8 +686,8 @@ export function ConfirmDialog({
         )}
       >
         <Surface className="p-5">
-          <h2 id={titleId} className="text-base font-bold text-ink">{title}</h2>
-          <div id={descriptionId} className="mt-2 text-sm leading-snug text-ink3">{description}</div>
+          <h2 id={titleId} className="text-lg font-bold text-ink sm:text-base">{title}</h2>
+          <div id={descriptionId} className="mt-2 text-base leading-snug text-ink3 sm:text-sm">{description}</div>
           {/* Stack buttons full-width on the smallest viewports so labels
               never wrap or overflow; switch to inline on sm+ where the
               dialog is centered and there's enough horizontal room. */}

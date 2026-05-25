@@ -105,6 +105,13 @@ def _row_to_dict(row: asyncpg.Record) -> dict[str, Any]:
     return json.loads(json.dumps(dict(row), default=_json_default))
 
 
+def _user_row_dict(row: asyncpg.Record) -> dict[str, Any]:
+    """Serialize a cms_users row; user_id as str for JS clients (int64-safe)."""
+    data = _row_to_dict(row)
+    data["user_id"] = str(data["user_id"])
+    return data
+
+
 def _serialize_session(session: Session) -> dict[str, Any]:
     return SessionFactory.to_dict(session)
 
@@ -1777,12 +1784,44 @@ class PostgresCmsStore:
         cur = decode_cursor(cursor)
         cursor_ts = _decode_cursor_timestamp(cur.get("last_seen_at"))
         cursor_user_id = cur.get("user_id")
+        if cursor_user_id is not None:
+            cursor_user_id = int(cursor_user_id)
         pattern = f"%{q.strip()}%" if q and q.strip() else None
         async with self.pool.acquire() as conn:
             rows = await conn.fetch(
                 """
+                WITH related AS (
+                    SELECT user_id, name, role, source = 'web' AS is_web,
+                           first_seen_at, last_seen_at
+                    FROM cms_session_participants
+                    UNION ALL
+                    SELECT user_id, name, role, TRUE AS is_web,
+                           joined_at AS first_seen_at, joined_at AS last_seen_at
+                    FROM cms_web_participants
+                ),
+                orphan_users AS (
+                    SELECT
+                        user_id,
+                        (array_agg(name ORDER BY last_seen_at DESC))[1] AS name,
+                        (array_agg(role ORDER BY last_seen_at DESC))[1] AS role,
+                        bool_or(is_web) AS is_web,
+                        MIN(first_seen_at) AS first_seen_at,
+                        MAX(last_seen_at) AS last_seen_at
+                    FROM related
+                    WHERE NOT EXISTS (
+                        SELECT 1 FROM cms_users existing WHERE existing.user_id = related.user_id
+                    )
+                    GROUP BY user_id
+                ),
+                all_users AS (
+                    SELECT user_id, name, role, is_web, first_seen_at, last_seen_at
+                    FROM cms_users
+                    UNION ALL
+                    SELECT user_id, name, role, is_web, first_seen_at, last_seen_at
+                    FROM orphan_users
+                )
                 SELECT user_id, name, role, is_web, first_seen_at, last_seen_at
-                FROM cms_users
+                FROM all_users
                 WHERE ($1::text IS NULL OR name ILIKE $1 OR user_id::text ILIKE $1)
                   AND ($2::text IS NULL OR role = $2)
                   AND (
@@ -1798,7 +1837,19 @@ class PostgresCmsStore:
                 cursor_user_id,
                 limit + 1,
             )
-        return self._paged_rows(rows, limit, "last_seen_at")
+        return self._paged_user_rows(rows, limit)
+
+    def _paged_user_rows(self, rows: list[asyncpg.Record], limit: int) -> dict[str, Any]:
+        has_more = len(rows) > limit
+        page_rows = rows[:limit]
+        items = [_user_row_dict(row) for row in page_rows]
+        next_cursor = None
+        if has_more and items:
+            last = items[-1]
+            next_cursor = encode_cursor(
+                {"last_seen_at": last["last_seen_at"], "user_id": last["user_id"]}
+            )
+        return {"items": items, "next_cursor": next_cursor, "limit": limit}
 
     async def hard_delete_user(self, user_id: int, confirm_name: str) -> Optional[dict[str, Any]]:
         """Hard-delete a participant from the CMS read model.
@@ -1818,6 +1869,32 @@ class PostgresCmsStore:
                     """,
                     user_id,
                 )
+                if not user:
+                    user = await conn.fetchrow(
+                        """
+                        WITH related AS (
+                            SELECT user_id, name, role, source = 'web' AS is_web,
+                                   first_seen_at, last_seen_at
+                            FROM cms_session_participants
+                            WHERE user_id = $1
+                            UNION ALL
+                            SELECT user_id, name, role, TRUE AS is_web,
+                                   joined_at AS first_seen_at, joined_at AS last_seen_at
+                            FROM cms_web_participants
+                            WHERE user_id = $1
+                        )
+                        SELECT
+                            user_id,
+                            (array_agg(name ORDER BY last_seen_at DESC))[1] AS name,
+                            (array_agg(role ORDER BY last_seen_at DESC))[1] AS role,
+                            bool_or(is_web) AS is_web,
+                            MIN(first_seen_at) AS first_seen_at,
+                            MAX(last_seen_at) AS last_seen_at
+                        FROM related
+                        GROUP BY user_id
+                        """,
+                        user_id,
+                    )
                 if not user:
                     return None
                 if confirm_name.strip() != str(user["name"]):
@@ -1872,7 +1949,7 @@ class PostgresCmsStore:
                         affected_task_ids,
                     )
 
-        data = _row_to_dict(user)
+        data = _user_row_dict(user)
         data["votes_deleted"] = int(votes_deleted or 0)
         data["session_participants_deleted"] = int(session_participants_deleted or 0)
         data["web_participants_deleted"] = int(web_participants_deleted or 0)

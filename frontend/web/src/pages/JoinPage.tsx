@@ -2,7 +2,7 @@ import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { FormEvent, useState } from "react";
 import { Link } from "react-router-dom";
 import TaskTextBlock from "../components/TaskTextBlock";
-import { Alert, Badge, BrandMark, Button, ProgressBar, Surface, TextField, ThemeToggle, cn } from "../design-system";
+import { Alert, Badge, BrandHomeLink, Button, ProgressBar, Surface, TextField, ThemeToggle, cn } from "../design-system";
 import { ParticipantRole, TaskInfo } from "../hooks/useSession";
 import {
   PARTICIPANT_EMAIL_DOMAIN,
@@ -70,7 +70,7 @@ export default function JoinPage({ task, onJoin, error }: JoinPageProps) {
         transition={{ duration: reduceMotion ? 0 : 0.18, ease: [0.2, 0, 0, 1] }}
       >
         <div className="mb-6 flex items-center justify-center md:mb-8">
-          <BrandMark size="sm" />
+          <BrandHomeLink size="sm" />
         </div>
 
         <Surface className="p-5 sm:p-6 md:p-8">
@@ -122,10 +122,7 @@ export default function JoinPage({ task, onJoin, error }: JoinPageProps) {
                 <label className="mb-2 block text-xs font-semibold text-ink3">
                   Роль в команде
                 </label>
-                {/* 2 cols on the smallest viewports (320–375) keeps labels
-                    one-line; 3 cols on 376+ shows all five roles in two
-                    rows with a balanced grid. */}
-                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
                   {ROLES.map((r) => {
                     const active = role === r.value;
                     return (
@@ -145,7 +142,7 @@ export default function JoinPage({ task, onJoin, error }: JoinPageProps) {
                         )}
                       >
                         <span className="text-base leading-none">{r.icon}</span>
-                        <span className="truncate">{r.label}</span>
+                        <span className="min-w-0 whitespace-normal break-words leading-snug">{r.label}</span>
                         {active && (
                           <motion.div
                             className="ml-auto flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-blue"

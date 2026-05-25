@@ -110,7 +110,7 @@ function OverviewCards({
         >
           <p className="text-xs font-semibold text-ink3">{tile.label}</p>
           <p className="mt-1 text-2xl font-bold text-ink">{formatNumber(tile.value)}</p>
-          <p className="mt-1 truncate text-xs text-ink3">{tile.caption}</p>
+          <p className="mt-1 break-words text-xs text-ink3">{tile.caption}</p>
         </button>
       ))}
     </section>

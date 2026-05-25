@@ -101,12 +101,12 @@ export function ScrollHint() {
     <div
       aria-hidden="true"
       className={cn(
-        "pointer-events-none fixed inset-x-0 bottom-[calc(var(--safe-bottom)+0.75rem)] z-40 flex justify-center px-4",
+        "pointer-events-none fixed inset-x-0 bottom-[calc(var(--safe-bottom)+1.5rem)] z-40 flex justify-center px-4",
         "transition-[opacity,transform] duration-200 ease-out motion-reduce:transition-none",
         visible ? "translate-y-0 opacity-100" : "translate-y-2 opacity-0",
       )}
     >
-      <div className="flex items-center gap-2 rounded-full border border-line bg-surface/90 px-3 py-2 text-xs font-semibold text-ink2 shadow-card backdrop-blur">
+      <div className="flex items-center gap-2 rounded-full border border-line bg-surface px-3 py-2 text-xs font-semibold text-ink2 shadow-card">
         <span className="scroll-hint-bob flex h-5 w-5 items-center justify-center rounded-full bg-blue/10 text-blue">
           ↓
         </span>

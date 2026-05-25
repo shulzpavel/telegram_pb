@@ -169,17 +169,17 @@ export const cmsEventsApi = {
 };
 
 export const cmsUsersApi = {
-  hardDelete: (userId: number, confirmName: string) =>
+  hardDelete: (userId: string, confirmName: string) =>
     cmsFetch<{
       ok: boolean;
-      user_id: number;
+      user_id: string;
       deleted: boolean;
       votes_deleted: number;
       session_participants_deleted: number;
       web_participants_deleted: number;
-    }>(`/users/${userId}`, {
+    }>("/users", {
       method: "DELETE",
-      body: JSON.stringify({ confirm_name: confirmName }),
+      body: JSON.stringify({ user_id: userId, confirm_name: confirmName }),
     }),
 };
 

@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { Navigate, NavLink, Route, Routes, useLocation, useNavigate } from "react-router-dom";
-import { BottomSheet, BrandMark, Button, SheetItem, ThemeToggle, useTheme, type ThemeMode } from "../../../design-system";
+import { BottomSheet, BrandHomeLink, Button, SheetItem, ThemeToggle, useTheme, type ThemeMode } from "../../../design-system";
 import { cmsAuthApi } from "../api/cmsClient";
 import type { CmsPrincipal } from "../api/cmsTypes";
 import { InlineError, Skeleton } from "../components/CmsPrimitives";
@@ -75,6 +75,10 @@ export default function CmsShell({
     });
     return match ?? visibleTabs[0] ?? null;
   }, [location.pathname, visibleTabs]);
+  const contentWidthClass =
+    activeTab?.key === "overview" || activeTab?.key === "access"
+      ? "max-w-5xl"
+      : "max-w-7xl";
 
   async function logout() {
     await cmsAuthApi.logout().catch(() => undefined);
@@ -89,19 +93,16 @@ export default function CmsShell({
   return (
     <main className="min-h-screen-mobile app-gradient-bg pb-safe">
       <header className="sticky top-0 z-30 border-b border-line bg-surface/95 pt-safe backdrop-blur supports-[backdrop-filter]:bg-surface/80">
-        {/* Single-row header — locked at min-h-14 (mobile) / min-h-16
-            (desktop) so there are no wraps or layout shifts when the
-            principal's display name or active tab label changes. */}
-        <div className="mx-auto flex min-h-14 max-w-7xl items-center gap-2 px-3 sm:gap-3 sm:px-4 md:min-h-16">
-          <BrandMark size="sm" showWordmark={false} className="shrink-0" />
+        <div className="flex min-h-14 w-full items-center gap-2 px-3 py-2 sm:gap-3 sm:px-4 md:min-h-16 lg:px-6">
+          <BrandHomeLink size="sm" showWordmark={false} className="shrink-0" />
           <div className="min-w-0 flex-1">
-            <h1 className="hidden truncate text-base font-bold text-ink sm:block md:text-lg">
+            <h1 className="hidden break-words text-base font-bold leading-snug text-ink sm:block md:text-lg">
               Planning Poker · Админка
             </h1>
-            <p className="truncate text-[11px] font-semibold uppercase tracking-wide text-ink3 sm:hidden">
+            <p className="break-words text-[11px] font-semibold uppercase tracking-wide text-ink3 sm:hidden">
               {activeTab?.label ?? "Админка"}
             </p>
-            <p className="truncate text-xs text-ink3 sm:mt-0.5">
+            <p className="break-words text-xs text-ink3 sm:mt-0.5">
               {principal.display_name || principal.username}
               {principal.is_superuser ? " · суперпользователь" : ""}
             </p>
@@ -142,7 +143,7 @@ export default function CmsShell({
           aria-label="Разделы CMS"
           className="hidden md:block border-t border-line"
         >
-          <div className="mx-auto flex max-w-7xl gap-1 overflow-x-auto px-4">
+          <div className="flex w-full gap-1 overflow-x-auto px-4 lg:px-6">
             {visibleTabs.map((item) => (
               <NavLink
                 key={item.key}
@@ -222,7 +223,7 @@ export default function CmsShell({
         </div>
       </BottomSheet>
 
-      <div className="mx-auto max-w-7xl space-y-5 px-3 py-5 sm:px-4">
+      <div className={`mx-auto ${contentWidthClass} space-y-5 px-3 py-5 sm:px-4 lg:py-6`}>
         {visibleTabs.length === 0 ? (
           <InlineError text="Для этой учётной записи не настроено ни одного раздела CMS." />
         ) : null}

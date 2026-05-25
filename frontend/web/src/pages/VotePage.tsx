@@ -1,9 +1,9 @@
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import { useEffect, useState } from "react";
+import { type MouseEvent, useEffect, useState } from "react";
 import ParticipantChip from "../components/ParticipantChip";
 import TaskTextBlock from "../components/TaskTextBlock";
 import VoteCard from "../components/VoteCard";
-import { Alert, Badge, BrandMark, LoadingDots, ProgressBar, Surface, ThemeToggle } from "../design-system";
+import { Alert, Badge, BrandHomeLink, LoadingDots, ProgressBar, Surface, ThemeToggle } from "../design-system";
 import { ParticipantStatus, TaskInfo } from "../hooks/useSession";
 
 /**
@@ -20,9 +20,10 @@ interface VotePageProps {
   participants: ParticipantStatus[];
   onVote: (value: string) => Promise<boolean>;
   error: string | null;
+  onLogoClick?: (event: MouseEvent<HTMLAnchorElement>) => void;
 }
 
-export default function VotePage({ task, participants, onVote, error }: VotePageProps) {
+export default function VotePage({ task, participants, onVote, error, onLogoClick }: VotePageProps) {
   const reduceMotion = useReducedMotion();
   const [selected, setSelected] = useState<string | null>(null);
   const [voted, setVoted] = useState(false);
@@ -60,9 +61,9 @@ export default function VotePage({ task, participants, onVote, error }: VotePage
           backdrop-blur` keeps focus on the cards below while staying legible
           over scrolled content. */}
       <header className="sticky top-0 z-10 border-b border-line/60 bg-surface/85 backdrop-blur pt-safe">
-        <div className="mx-auto flex min-h-14 w-full max-w-5xl items-center gap-2 px-3 sm:gap-3 sm:px-4 md:px-8">
-          <BrandMark size="sm" showWordmark={false} className="shrink-0 sm:hidden" />
-          <BrandMark size="sm" className="hidden min-w-0 sm:inline-flex" />
+        <div className="flex min-h-14 w-full items-center gap-2 px-3 sm:gap-3 sm:px-4 md:px-8">
+          <BrandHomeLink size="sm" showWordmark={false} className="shrink-0 sm:hidden" onClick={onLogoClick} />
+          <BrandHomeLink size="sm" className="hidden min-w-0 sm:inline-flex" onClick={onLogoClick} />
           <div className="ml-auto flex min-w-0 shrink-0 items-center gap-1.5 sm:gap-2">
             {task.jira_key ? <Badge tone="info">{task.jira_key}</Badge> : null}
             <span className="text-xs font-medium tabular-nums text-ink3">

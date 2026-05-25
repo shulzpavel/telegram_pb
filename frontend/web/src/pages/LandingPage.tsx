@@ -1,7 +1,7 @@
 import { motion, useReducedMotion } from "framer-motion";
 import { useEffect } from "react";
 import { Link } from "react-router-dom";
-import { Badge, BrandMark, Button, Surface, ThemeToggle } from "../design-system";
+import { Badge, BrandHomeLink, Button, Surface, ThemeToggle } from "../design-system";
 
 interface HubAction {
   id: string;
@@ -53,11 +53,8 @@ export default function LandingPage() {
   return (
     <main className="flex min-h-screen-mobile flex-col app-gradient-bg text-ink">
       <header className="shrink-0 border-b border-line/70 bg-surface/70 pt-safe backdrop-blur-md">
-        <div className="mx-auto flex min-h-14 w-full max-w-5xl items-center gap-3 px-4 py-3 lg:px-6">
-          <Link to="/" className="flex min-w-0 items-center gap-3 text-ink">
-            <BrandMark size="md" />
-            <span className="hidden text-sm font-bold sm:inline">Planning Poker Hub</span>
-          </Link>
+        <div className="flex min-h-14 w-full items-center gap-3 px-4 py-3 lg:px-6">
+          <BrandHomeLink size="md" className="min-w-0 gap-3 text-ink" />
           <div className="ml-auto flex items-center gap-2">
             <ThemeToggle size="sm" tone="ghost" />
             <Link to="/cms" className="hidden sm:inline-flex">
@@ -75,7 +72,7 @@ export default function LandingPage() {
               Выберите, что нужно сделать сейчас
             </h1>
             <p className="mt-4 max-w-lg text-base leading-7 text-ink2 sm:text-lg">
-              Это не витрина продукта, а стартовая точка. Менеджер запускает сессию, участник может быстро понять, как выглядит голосование.
+              Быстрый вход в planning poker: создайте сессию для команды или откройте demo, чтобы посмотреть голосование глазами участника.
             </p>
             <div className="mt-6 rounded-2xl border border-blue/20 bg-blue/10 p-4 text-sm leading-6 text-ink2">
               Уже есть invite-ссылка? Откройте её напрямую — она ведёт сразу на экран входа в сессию.

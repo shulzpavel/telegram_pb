@@ -1,6 +1,6 @@
 import { motion, useReducedMotion } from "framer-motion";
-import { Link, useLocation } from "react-router-dom";
-import { BackLink, BrandMark, Button, Surface } from "../design-system";
+import { useLocation } from "react-router-dom";
+import { BackLink, BrandHomeLink, Button, Surface } from "../design-system";
 
 /**
  * Friendly 404 page. The mascot ("Бибизяныч") wobbles gently while a banana
@@ -34,10 +34,8 @@ export default function NotFoundPage() {
           are inside Planning Poker — the brand mark also doubles as a
           fast escape hatch back to the landing page. */}
       <header className="sticky top-0 z-10 border-b border-line/60 bg-surface/85 pt-safe backdrop-blur">
-        <div className="mx-auto flex min-h-14 max-w-3xl items-center px-3 sm:px-4">
-          <Link to="/" className="inline-flex items-center" aria-label="На главную">
-            <BrandMark size="sm" />
-          </Link>
+        <div className="flex min-h-14 w-full items-center px-3 sm:px-4 lg:px-6">
+          <BrandHomeLink size="sm" />
         </div>
       </header>
       <div className="flex flex-1 items-center justify-center px-4 py-10 pb-safe-6">
@@ -77,9 +75,9 @@ export default function NotFoundPage() {
           </p>
 
           {location.pathname ? (
-            <p className="mt-4 inline-flex max-w-full items-center gap-2 rounded-full border border-line bg-canvas px-3 py-1 text-xs text-ink3">
+            <p className="mt-4 flex max-w-full flex-wrap items-center justify-center gap-2 rounded-full border border-line bg-canvas px-3 py-1 text-xs text-ink3">
               <span className="font-semibold uppercase tracking-wide text-ink4">путь</span>
-              <code className="block max-w-full truncate font-mono text-ink2">{location.pathname}</code>
+              <code className="block max-w-full break-all font-mono text-ink2">{location.pathname}</code>
             </p>
           ) : null}
 

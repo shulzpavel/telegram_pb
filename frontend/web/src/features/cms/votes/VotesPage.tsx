@@ -61,7 +61,7 @@ export default function VotesPage() {
             </td>
             <td className="px-3 py-2">
               <p className="text-sm font-semibold text-ink">{item.jira_key ?? `task ${item.task_id}`}</p>
-              <p className="text-xs text-ink3 truncate max-w-sm">{item.summary}</p>
+              <p className="max-w-sm break-words text-xs text-ink3">{item.summary}</p>
             </td>
             <td className="px-3 py-2">
               <p className="text-sm text-ink">Сессия #{item.session_id}</p>

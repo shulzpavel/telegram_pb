@@ -52,7 +52,7 @@ export default function ParticipantChip({ name, voted }: ParticipantChipProps) {
         </motion.div>
       </div>
 
-      <span className={`min-w-0 truncate text-xs font-medium leading-none transition-colors duration-200 ${voted ? "text-ink2" : "text-ink3"}`}>
+      <span className={`min-w-0 whitespace-normal break-words text-xs font-medium leading-tight transition-colors duration-200 ${voted ? "text-ink2" : "text-ink3"}`}>
         {name}
       </span>
 

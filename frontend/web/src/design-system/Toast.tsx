@@ -200,8 +200,8 @@ function ToastItem({
       <div className="flex items-start gap-3">
         <span className="mt-0.5 shrink-0">{style.icon}</span>
         <div className="min-w-0 flex-1">
-          {toast.title ? <p className="text-sm font-bold text-ink">{toast.title}</p> : null}
-          <p className="text-sm leading-snug text-ink2">{toast.message}</p>
+          {toast.title ? <p className="text-base font-bold text-ink sm:text-sm">{toast.title}</p> : null}
+          <p className="text-base leading-snug text-ink2 sm:text-sm">{toast.message}</p>
           {toast.action ? (
             <button
               type="button"
@@ -209,7 +209,7 @@ function ToastItem({
                 toast.action?.onClick();
                 onDismiss();
               }}
-              className="mt-2 inline-flex min-h-9 items-center rounded-md px-2 text-sm font-semibold text-blue transition-colors hover:bg-blue/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue/30 active:scale-[0.98]"
+              className="mt-2 inline-flex min-h-11 items-center rounded-md px-2.5 text-base font-semibold text-blue transition-colors hover:bg-blue/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue/30 active:scale-[0.98] sm:min-h-9 sm:px-2 sm:text-sm"
             >
               {toast.action.label}
             </button>

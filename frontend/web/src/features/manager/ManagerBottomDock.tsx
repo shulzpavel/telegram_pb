@@ -75,7 +75,7 @@ export function ManagerBottomDock({
               onClick={copyInvite}
             >
               <span className="shrink-0">{copied ? <CheckIcon /> : <LinkIcon />}</span>
-              <span className="truncate">{copied ? "Скопировано" : "Скопировать invite"}</span>
+              <span className="whitespace-normal break-words">{copied ? "Скопировано" : "Скопировать invite"}</span>
             </Button>
           ) : null}
           {onFinishSession ? (

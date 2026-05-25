@@ -35,6 +35,13 @@ def test_stable_user_id_from_email_is_repeatable_and_negative() -> None:
     assert stable_user_id_from_email(email) < 0
 
 
+def test_stable_user_id_serializes_as_string_for_cms_api() -> None:
+    """CMS returns user_id as str so browsers do not round int64 JSON numbers."""
+    uid = stable_user_id_from_email("paul_s@betboom.com")
+    assert int(str(uid)) == uid
+    assert abs(uid) > 9007199254740991
+
+
 def test_stable_user_id_from_email_differs_from_uuid_mapping() -> None:
     email = "paul_s@betboom.com"
     uuid_id = _stable_user_id("some-uuid-participant")
