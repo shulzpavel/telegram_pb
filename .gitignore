@@ -25,7 +25,7 @@ eggs/
 lib/
 !frontend/web/src/shared/lib/
 lib64/
-parts/
+/parts/
 sdist/
 var/
 wheels/
