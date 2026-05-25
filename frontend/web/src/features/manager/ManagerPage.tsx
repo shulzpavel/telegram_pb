@@ -986,11 +986,11 @@ function CockpitShell({
         <SessionTabsBar chatId={chatId} />
         {!isWizard ? (
           <div
-            className="border-b border-line bg-surface px-3 py-2 lg:hidden"
+            className="border-b border-line bg-surface px-3 lg:hidden"
             role="tablist"
             aria-label="Разделы cockpit"
           >
-            <div className="mx-auto flex max-w-[1440px] gap-2">
+            <div className="flex w-full">
               {MOBILE_COCKPIT_TABS.map((tab) => (
                 <button
                   key={tab.id}
@@ -999,10 +999,10 @@ function CockpitShell({
                   aria-selected={mobileTab === tab.id}
                   onClick={() => setMobileTab(tab.id)}
                   className={cn(
-                    "min-h-11 flex-1 rounded-md px-3 text-sm font-semibold transition-colors",
+                    "min-h-11 flex-1 basis-0 border-b-2 px-3 text-center text-sm font-semibold transition-colors",
                     mobileTab === tab.id
-                      ? "bg-blue text-white"
-                      : "bg-line2 text-ink2 hover:bg-line",
+                      ? "border-blue text-blue"
+                      : "border-transparent text-ink3 hover:text-ink",
                   )}
                 >
                   {tab.label}
@@ -1833,7 +1833,7 @@ function BacklogWizard({
 
       {error ? <Alert tone="danger" className="mt-6">{error}</Alert> : null}
 
-      <div className="mt-7 flex flex-wrap justify-center gap-2">
+      <div className="mt-7 flex border-b border-line">
         {(["jira", "manual", "bulk"] as Tab[]).map((value) => (
           <button
             key={value}
@@ -1841,11 +1841,11 @@ function BacklogWizard({
             onClick={() => setTab(value)}
             aria-pressed={tab === value}
             className={cn(
-              "inline-flex min-h-11 items-center rounded-lg border px-4 py-2 text-sm font-semibold",
-              "transition-[background-color,border-color,color] duration-150 ease-out active:scale-[0.98]",
+              "min-h-11 flex-1 basis-0 border-b-2 px-3 py-2 text-center text-sm font-semibold",
+              "transition-[border-color,color] duration-150 ease-out active:scale-[0.98]",
               tab === value
-                ? "border-blue bg-blue/10 text-blue"
-                : "border-line bg-surface text-ink2 hover:border-blue/30",
+                ? "border-blue text-blue"
+                : "border-transparent text-ink3 hover:text-ink",
             )}
           >
             {value === "jira" ? "Jira import" : value === "manual" ? "Manual" : "Bulk paste"}

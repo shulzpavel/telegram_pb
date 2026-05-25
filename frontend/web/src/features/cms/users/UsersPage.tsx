@@ -58,7 +58,6 @@ export default function UsersPage({ principal }: { principal: CmsPrincipal }) {
       <SectionHeader
         title="Участники"
         description="Все, кто заходил в сессии планинг-покера. Один человек — одна запись; данные обновляются при каждом подключении."
-        actions={<Button variant="ghost" size="sm" onClick={list.reload}>Обновить</Button>}
       />
       <HelpCallout title="Как использовать">
         <p>Поиск ищет по имени и id. Фильтр «Роль» оставит только Lead / Participant / Admin — удобно искать фасилитаторов.</p>

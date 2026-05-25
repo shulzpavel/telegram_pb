@@ -9,7 +9,6 @@ import {
   MobileRecordField,
   SectionHeader,
   Status,
-  Toolbar,
 } from "../components/CmsPrimitives";
 import { useCmsList } from "../hooks/useCmsList";
 import { useDebouncedValue } from "../hooks/useDebouncedValue";
@@ -226,7 +225,6 @@ export default function AuditEventsPage() {
       <SectionHeader
         title="Журнал действий"
         description="Что и когда происходило в CMS и в самих сессиях: кто стартовал раунд, кто закрыл сессию, кто отозвал invite."
-        actions={<Button variant="ghost" size="sm" onClick={list.reload}>Обновить</Button>}
       />
       <HelpCallout title="Что здесь">
         <p>Записи добавляются автоматически. Удалять их нельзя — это аудит.</p>
@@ -235,25 +233,28 @@ export default function AuditEventsPage() {
         <p>Если ввели «action», фильтр работает по точному совпадению (например, <code className="rounded bg-line2 px-1 text-xs">cms.session.delete</code>).</p>
       </HelpCallout>
       {dateRangeError ? <Alert tone="warning">{dateRangeError}</Alert> : null}
-      <Toolbar>
+      <div className="grid w-full max-w-7xl grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-12">
         <TextField
           ref={searchRef}
-          className="md:max-w-sm"
+          className="xl:col-span-4"
           aria-label="Тип события"
+          label="Action"
           placeholder="Фильтр по action, например cms.task.create"
           value={actionFilter}
           onChange={(event) => setActionFilter(event.target.value)}
         />
         <TextField
-          className="md:max-w-[200px]"
+          className="xl:col-span-3"
           aria-label="Кто (actor)"
+          label="Actor"
           placeholder="username, например lead.user"
           value={actorFilter}
           onChange={(event) => setActorFilter(event.target.value)}
         />
         <SelectField
-          className="md:max-w-[200px]"
+          className="xl:col-span-2"
           aria-label="Статус"
+          label="Статус"
           value={status}
           onChange={(event) => setStatus(event.target.value)}
         >
@@ -262,7 +263,7 @@ export default function AuditEventsPage() {
           <option value="failed">Ошибка</option>
         </SelectField>
         <TextField
-          className="md:max-w-[220px]"
+          className="xl:col-span-3"
           aria-label="Начало периода"
           label="С"
           type="datetime-local"
@@ -271,7 +272,7 @@ export default function AuditEventsPage() {
           reserveMessageSpace={false}
         />
         <TextField
-          className="md:max-w-[220px]"
+          className="xl:col-span-3"
           aria-label="Конец периода"
           label="По"
           type="datetime-local"
@@ -281,6 +282,7 @@ export default function AuditEventsPage() {
         />
         <Button
           variant="ghost"
+          className="xl:self-end"
           onClick={() => {
             setActionFilter("");
             setActorFilter("");
@@ -291,8 +293,8 @@ export default function AuditEventsPage() {
         >
           Сбросить
         </Button>
-        <Button variant="ghost" onClick={list.reload}>Обновить</Button>
-      </Toolbar>
+        <Button variant="ghost" className="xl:self-end" onClick={list.reload}>Обновить</Button>
+      </div>
       <DataTable
         error={list.error}
         loading={list.loading}

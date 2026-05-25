@@ -188,11 +188,8 @@ export default function CmsShell({
         }
       >
         <div className="space-y-3 px-1 pb-2">
-          <div className="rounded-lg border border-line bg-canvas/40 px-3 py-2">
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-ink3">Тема интерфейса</p>
-            <div className="mt-1">
-              <ThemeToggle size="sm" tone="surface" />
-            </div>
+          <div className="flex justify-center px-3 py-2">
+            <ThemeToggle size="md" tone="plain" showTooltips={false} />
           </div>
           {groupedTabs.map((section) => (
             <div key={section.group.key}>

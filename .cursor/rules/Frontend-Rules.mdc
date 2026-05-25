@@ -1,0 +1,53 @@
+---
+alwaysApply: true
+---
+
+# Frontend Rules
+
+Use these rules when working with frontend code.
+
+## Scope
+
+Frontend code is likely located in:
+
+- frontend/**
+- frontend/web/**
+- src/components/**
+- src/features/**
+- src/pages/**
+- src/app/**
+- src/hooks/**
+- src/styles/**
+
+## Responsibilities
+
+Focus on:
+- UI behavior
+- component structure
+- state management
+- API integration
+- loading states
+- error states
+- empty states
+- responsive behavior
+- accessibility basics
+
+## Rules
+
+- Do not change backend contracts.
+- Do not hardcode API responses if real integration exists.
+- Reuse existing UI components and patterns.
+- Keep components focused and readable.
+- Avoid unnecessary global state.
+- Handle loading, error, empty, and success states.
+- Do not silently ignore failed API calls.
+- Keep user-facing text consistent with existing product language.
+
+## Output
+
+After work, include:
+1. UI behavior implemented
+2. States covered
+3. Files changed
+4. Manual checks
+5. Risks

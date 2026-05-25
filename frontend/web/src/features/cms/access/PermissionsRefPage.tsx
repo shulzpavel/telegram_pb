@@ -1,8 +1,8 @@
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { Badge, EmptyState, TextField } from "../../../design-system";
+import { Badge, EmptyState, Surface, TextField } from "../../../design-system";
 import type { CmsPermission, CmsRole } from "../api/cmsTypes";
-import { DataTable, HelpCallout, MobileRecordCard, MobileRecordField, SectionHeader, Toolbar } from "../components/CmsPrimitives";
+import { HelpCallout, SectionHeader, Toolbar } from "../components/CmsPrimitives";
 import { useAccessContext } from "./AccessShell";
 import { filterPermissions, groupPermissionsByPrefix } from "./parts/helpers";
 
@@ -44,46 +44,22 @@ export default function PermissionsRefPage() {
         />
       </Toolbar>
 
-      <DataTable
-        error={null}
-        loading={false}
-        loadingMore={false}
-        hasMore={false}
-        reachedCap={false}
-        loadedCount={flatPermissions.length}
-        total={permissions.length}
-        onMore={() => undefined}
-        itemNoun="прав"
-        showSkeleton={false}
-        columns={["Permission", "Описание", "Используется в ролях"]}
-        empty={
-          flatPermissions.length === 0 ? (
-            <EmptyState title="Ничего не нашлось" description="Поменяйте поисковый запрос." />
-          ) : null
-        }
-        mobileCards={flatPermissions.map((permission) => (
-          <MobileRecordCard
-            key={permission.key}
-            title={<code className="font-mono">{permission.key}</code>}
-            meta={permission.label}
-          >
-            <MobileRecordField label="Описание" value={permission.description || "—"} />
-            <MobileRecordField
-              label="Роли"
-              value={<PermissionRoleChips roles={rolesByPermission.get(permission.key) ?? []} />}
+      {flatPermissions.length === 0 ? (
+        <Surface className="p-4">
+          <EmptyState title="Ничего не нашлось" description="Поменяйте поисковый запрос." />
+        </Surface>
+      ) : (
+        <div className="grid gap-4 xl:grid-cols-2">
+          {grouped.map((group) => (
+            <PermissionGroupCard
+              key={group.key}
+              label={group.label}
+              permissions={group.permissions}
+              rolesByPermission={rolesByPermission}
             />
-          </MobileRecordCard>
-        ))}
-      >
-        {grouped.map((group) => (
-          <PermissionGroupRows
-            key={group.key}
-            label={group.label}
-            permissions={group.permissions}
-            rolesByPermission={rolesByPermission}
-          />
-        ))}
-      </DataTable>
+          ))}
+        </div>
+      )}
 
       <section className="rounded-lg border border-line bg-surface p-4 shadow-card">
         <h3 className="text-sm font-bold text-ink">Разделы CMS → permission</h3>
@@ -157,7 +133,7 @@ export default function PermissionsRefPage() {
   );
 }
 
-function PermissionGroupRows({
+function PermissionGroupCard({
   label,
   permissions,
   rolesByPermission,
@@ -167,27 +143,30 @@ function PermissionGroupRows({
   rolesByPermission: Map<string, CmsRole[]>;
 }) {
   return (
-    <>
-      <tr className="border-t border-line bg-line2/40">
-        <td colSpan={3} className="px-3 py-1.5 text-xs font-bold uppercase tracking-wide text-ink3">
-          {label}
-        </td>
-      </tr>
-      {permissions.map((permission) => (
-        <tr key={permission.key} className="border-t border-line align-top">
-          <td className="px-3 py-2">
-            <code className="block max-w-[18rem] break-all font-mono text-xs text-ink">{permission.key}</code>
-            {permission.label ? <p className="mt-0.5 max-w-[18rem] break-words text-xs text-ink3">{permission.label}</p> : null}
-          </td>
-          <td className="px-3 py-2 text-ink2 break-words">{permission.description || <span className="text-ink4">—</span>}</td>
-          <td className="px-3 py-2">
-            <div className="max-w-[20rem]">
+    <Surface as="section" className="overflow-hidden p-0">
+      <header className="border-b border-line bg-line2/40 px-4 py-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h3 className="text-sm font-bold text-ink">
+            {label}
+          </h3>
+          <Badge tone="neutral">{permissions.length}</Badge>
+        </div>
+      </header>
+      <div className="divide-y divide-line">
+        {permissions.map((permission) => (
+          <article key={permission.key} className="grid gap-3 px-4 py-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)]">
+            <div className="min-w-0">
+              <code className="block break-all font-mono text-xs font-semibold text-ink">{permission.key}</code>
+              {permission.label ? <p className="mt-1 break-words text-sm text-ink2">{permission.label}</p> : null}
+            </div>
+            <div className="min-w-0 space-y-2">
+              <p className="break-words text-sm text-ink3">{permission.description || "—"}</p>
               <PermissionRoleChips roles={rolesByPermission.get(permission.key) ?? []} />
             </div>
-          </td>
-        </tr>
-      ))}
-    </>
+          </article>
+        ))}
+      </div>
+    </Surface>
   );
 }
 

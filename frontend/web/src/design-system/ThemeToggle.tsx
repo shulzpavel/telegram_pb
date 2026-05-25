@@ -4,12 +4,13 @@ import { cn } from "./utils";
 import { useTheme, type ThemeMode } from "./theme";
 
 type Size = "sm" | "md";
-type Tone = "ghost" | "surface";
+type Tone = "ghost" | "surface" | "plain";
 
 interface ThemeToggleProps {
   className?: string;
   size?: Size;
   tone?: Tone;
+  showTooltips?: boolean;
 }
 
 interface Option {
@@ -41,9 +42,10 @@ const sizeClasses: Record<Size, { wrap: string; option: string; icon: string }> 
 const toneWrapClasses: Record<Tone, string> = {
   ghost:   "bg-surface/65 border border-line/60 shadow-card backdrop-blur-md",
   surface: "bg-surface/90 border border-line shadow-card backdrop-blur-md",
+  plain:   "bg-transparent",
 };
 
-export function ThemeToggle({ className, size = "sm", tone = "ghost" }: ThemeToggleProps) {
+export function ThemeToggle({ className, size = "sm", tone = "ghost", showTooltips = true }: ThemeToggleProps) {
   const { mode, setMode } = useTheme();
   const reduceMotion = useReducedMotion();
   const groupId = useId();
@@ -72,7 +74,7 @@ export function ThemeToggle({ className, size = "sm", tone = "ghost" }: ThemeTog
             role="radio"
             aria-checked={active}
             aria-label={option.description}
-            title={option.description}
+            title={showTooltips ? option.description : undefined}
             tabIndex={active ? 0 : -1}
             onClick={() => setMode(option.value)}
             className={cn(
@@ -88,7 +90,10 @@ export function ThemeToggle({ className, size = "sm", tone = "ghost" }: ThemeTog
                 layoutId={`theme-toggle-thumb-${groupId}`}
                 aria-hidden
                 transition={{ type: "spring", stiffness: 380, damping: 30, duration: reduceMotion ? 0 : undefined }}
-                className="absolute inset-0 rounded-full bg-elevated shadow-card border border-line/60"
+                className={cn(
+                  "absolute inset-0 rounded-full",
+                  tone === "plain" ? "bg-line2" : "border border-line/60 bg-elevated shadow-card",
+                )}
               />
             ) : null}
             <span className="relative inline-flex items-center justify-center">

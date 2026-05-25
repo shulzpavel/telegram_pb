@@ -269,25 +269,27 @@ function RoleDetailContent({ role, isNew, canManage, permissions, onCreated, onU
         </div>
       </div>
 
-      <footer className="sticky bottom-0 z-10 -mx-3 flex items-center justify-end gap-2 border-t border-line bg-surface/95 px-3 py-3 backdrop-blur sm:-mx-4 sm:px-4">
-        <Button variant="ghost" onClick={reset} disabled={!dirty || saving}>
-          Сбросить изменения
-        </Button>
-        <Button
-          variant="primary"
-          onClick={save}
-          loading={saving}
-          disabled={!canSubmit}
-          title={
-            !editable
-              ? isSystem
-                ? "Системная роль не редактируется"
-                : "У вас нет прав на изменение"
-              : undefined
-          }
-        >
-          {isNew ? "Создать роль" : "Сохранить"}
-        </Button>
+      <footer className="sticky bottom-0 z-10 flex justify-end py-3 pointer-events-none">
+        <div className="pointer-events-auto flex flex-wrap items-center justify-end gap-2 rounded-xl border border-line bg-surface/90 p-2 shadow-card backdrop-blur">
+          <Button variant="ghost" onClick={reset} disabled={!dirty || saving}>
+            Сбросить изменения
+          </Button>
+          <Button
+            variant="primary"
+            onClick={save}
+            loading={saving}
+            disabled={!canSubmit}
+            title={
+              !editable
+                ? isSystem
+                  ? "Системная роль не редактируется"
+                  : "У вас нет прав на изменение"
+                : undefined
+            }
+          >
+            {isNew ? "Создать роль" : "Сохранить"}
+          </Button>
+        </div>
       </footer>
     </section>
   );

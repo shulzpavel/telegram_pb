@@ -52,7 +52,6 @@ export default function TokensPage({ canManageSessions }: TokensPageProps) {
       <SectionHeader
         title="Invite-ссылки"
         description="Одноразовые приглашения, по которым участники подключаются к сессии без логина."
-        actions={<Button variant="ghost" size="sm" onClick={list.reload}>Обновить</Button>}
       />
       <HelpCallout title="Что это и зачем">
         <p>

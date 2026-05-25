@@ -1,0 +1,54 @@
+---
+alwaysApply: true
+---
+
+# Backend Rules
+
+Use these rules when working with backend code.
+
+## Scope
+
+Backend code may be located in:
+
+- backend/**
+- server/**
+- api/**
+- src/server/**
+- src/api/**
+- src/services/**
+- prisma/**
+- migrations/**
+
+## Responsibilities
+
+Focus on:
+- API contracts
+- business logic
+- database schema
+- migrations
+- validation
+- permissions
+- error handling
+- observability
+- backward compatibility
+
+## Rules
+
+- Do not change frontend files unless explicitly asked.
+- Preserve existing API behavior unless the task requires a breaking change.
+- Validate inputs at the boundary.
+- Return predictable errors.
+- Avoid duplicating business logic.
+- Do not add migrations without explaining the impact.
+- Consider permissions and edge cases.
+- Add or update tests for changed business logic.
+
+## Output
+
+After work, include:
+1. Backend behavior implemented
+2. API changes
+3. Data model changes
+4. Files changed
+5. Risks
+6. Tests to run
