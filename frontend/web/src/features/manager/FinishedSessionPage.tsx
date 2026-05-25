@@ -186,7 +186,7 @@ export default function FinishedSessionPage() {
   }
 
   return (
-    <main className="min-h-screen-mobile app-gradient-bg pb-28 md:pb-safe-6">
+    <main className="min-h-screen-mobile app-gradient-bg md:pb-safe-6">
       {/* Header: single row at all viewports. Brand + back + stack
           (eyebrow + title) on the left; primary actions hidden on
           mobile (they live in the bottom dock) but kept on `md+`. */}
@@ -270,7 +270,7 @@ export default function FinishedSessionPage() {
           download stays the first thumb-reachable action; cockpit
           and overflow menu come next. */}
       <div
-        className="fixed inset-x-0 bottom-0 z-30 border-t border-line bg-surface/95 px-3 pb-safe-4 pt-2 backdrop-blur md:hidden motion-safe:animate-fade-up"
+        className="sticky bottom-0 z-30 border-t border-line bg-surface/95 px-3 pb-safe-4 pt-2 backdrop-blur md:hidden motion-safe:animate-fade-up"
         role="toolbar"
         aria-label="Действия отчёта"
       >

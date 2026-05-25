@@ -38,8 +38,12 @@ export function ManagerBottomDock({
   principal: CmsPrincipal;
 }) {
   const [copied, setCopied] = useState(false);
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [renameOpen, setRenameOpen] = useState(false);
+  const [sheetMode, setSheetMode] = useState<"menu" | "rename" | null>(null);
+  const [renameValue, setRenameValue] = useState(currentTitle);
+
+  useEffect(() => {
+    if (sheetMode === "rename") setRenameValue(currentTitle);
+  }, [currentTitle, sheetMode]);
 
   async function copyInvite() {
     if (!inviteUrl) return;
@@ -54,13 +58,11 @@ export function ManagerBottomDock({
 
   return (
     <>
-      {/* The dock itself. `md:hidden` so it never reaches desktop; on
-          mobile we use fixed positioning + safe-area inset so iOS
-          home-indicator doesn't eat the buttons. `motion-safe`
-          animation gives a small slide-up on first paint without
-          impacting users with reduced motion. */}
+      {/* Mobile dock lives in the shell flow. That keeps the scroll area ending
+          exactly above the actions instead of reserving overlay space that
+          shows up as a blank gap above the menu. */}
       <div
-        className="fixed inset-x-0 bottom-0 z-30 border-t border-line bg-surface/95 px-3 pb-safe-4 pt-2 backdrop-blur md:hidden motion-safe:animate-fade-up"
+        className="z-30 shrink-0 border-t border-line bg-surface/95 px-3 pb-safe-4 pt-2 backdrop-blur md:hidden motion-safe:animate-fade-up"
         role="toolbar"
         aria-label="Действия сессии"
       >
@@ -90,7 +92,7 @@ export function ManagerBottomDock({
           ) : null}
           <button
             type="button"
-            onClick={() => setMenuOpen(true)}
+            onClick={() => setSheetMode("menu")}
             aria-label="Открыть меню"
             className="inline-flex min-h-12 w-12 items-center justify-center rounded-md border border-line bg-surface text-ink transition-colors hover:bg-line2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue/40 active:scale-[0.96] motion-reduce:active:scale-100"
           >
@@ -100,39 +102,70 @@ export function ManagerBottomDock({
       </div>
 
       <BottomSheet
-        open={menuOpen}
-        onClose={() => setMenuOpen(false)}
-        title="Меню сессии"
-        description={`Вы вошли как ${principal.display_name ?? principal.username}`}
+        open={sheetMode !== null}
+        onClose={() => setSheetMode(null)}
+        title={sheetMode === "rename" ? "Переименовать сессию" : "Меню сессии"}
+        description={
+          sheetMode === "rename"
+            ? "Название видно участникам и в CMS"
+            : `Вы вошли как ${principal.display_name ?? principal.username}`
+        }
+        footer={
+          sheetMode === "rename" ? (
+            <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <Button variant="ghost" onClick={() => setSheetMode("menu")} disabled={Boolean(renameBusy)}>Назад</Button>
+              <Button
+                variant="primary"
+                disabled={!renameValue.trim() || renameValue.trim() === currentTitle || Boolean(renameBusy)}
+                loading={Boolean(renameBusy)}
+                onClick={() => {
+                  if (!onRename) return;
+                  void onRename(renameValue.trim()).then((ok) => {
+                    if (ok) setSheetMode(null);
+                  });
+                }}
+              >
+                Сохранить
+              </Button>
+            </div>
+          ) : undefined
+        }
       >
-        <div className="space-y-0.5 px-2 pb-2">
-          {onRename ? (
-            <SheetItem
-              icon={<PencilIcon />}
-              label="Переименовать сессию"
-              description={currentTitle || "Без названия"}
-              onClick={() => {
-                setMenuOpen(false);
-                setRenameOpen(true);
-              }}
+        {sheetMode === "rename" ? (
+          <form
+            className="px-3 pb-3 pt-1"
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (!onRename || !renameValue.trim() || renameValue.trim() === currentTitle || renameBusy) return;
+              void onRename(renameValue.trim()).then((ok) => {
+                if (ok) setSheetMode(null);
+              });
+            }}
+          >
+            <input
+              autoFocus
+              value={renameValue}
+              maxLength={120}
+              onChange={(event) => setRenameValue(event.target.value)}
+              aria-label="Название сессии"
+              className="w-full rounded-md border border-line bg-surface px-3 py-2.5 text-base font-medium text-ink outline-none ring-blue/30 focus:ring-2"
             />
-          ) : null}
-          <ThemeChooser />
-        </div>
+            <p className="mt-2 text-xs text-ink3">Максимум 120 символов.</p>
+          </form>
+        ) : (
+          <div className="space-y-0.5 px-2 pb-2">
+            {onRename ? (
+              <SheetItem
+                icon={<PencilIcon />}
+                label="Переименовать сессию"
+                description={currentTitle || "Без названия"}
+                onClick={() => setSheetMode("rename")}
+              />
+            ) : null}
+            <ThemeChooser />
+          </div>
+        )}
       </BottomSheet>
-
-      <RenameSheet
-        open={renameOpen}
-        title={currentTitle}
-        busy={Boolean(renameBusy)}
-        onClose={() => setRenameOpen(false)}
-        onSubmit={async (next) => {
-          if (!onRename) return true;
-          const ok = await onRename(next);
-          if (ok) setRenameOpen(false);
-          return ok;
-        }}
-      />
     </>
   );
 }
@@ -164,70 +197,6 @@ function ThemeChooser() {
         ))}
       </div>
     </div>
-  );
-}
-
-function RenameSheet({
-  open,
-  title,
-  busy,
-  onClose,
-  onSubmit,
-}: {
-  open: boolean;
-  title: string;
-  busy: boolean;
-  onClose: () => void;
-  onSubmit: (next: string) => Promise<boolean>;
-}) {
-  const [value, setValue] = useState(title);
-
-  useEffect(() => {
-    if (open) setValue(title);
-  }, [open, title]);
-
-  const trimmed = value.trim();
-  const dirty = trimmed.length > 0 && trimmed !== title;
-
-  return (
-    <BottomSheet
-      open={open}
-      onClose={onClose}
-      title="Переименовать сессию"
-      description="Название видно участникам и в CMS"
-      footer={
-        <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-          <Button variant="ghost" onClick={onClose} disabled={busy}>Отменить</Button>
-          <Button
-            variant="primary"
-            disabled={!dirty || busy}
-            loading={busy}
-            onClick={() => { void onSubmit(trimmed); }}
-          >
-            Сохранить
-          </Button>
-        </div>
-      }
-    >
-      <form
-        className="px-3 pb-3 pt-1"
-        onSubmit={(event) => {
-          event.preventDefault();
-          if (!dirty || busy) return;
-          void onSubmit(trimmed);
-        }}
-      >
-        <input
-          autoFocus
-          value={value}
-          maxLength={120}
-          onChange={(event) => setValue(event.target.value)}
-          aria-label="Название сессии"
-          className="w-full rounded-md border border-line bg-surface px-3 py-2.5 text-base font-medium text-ink outline-none ring-blue/30 focus:ring-2"
-        />
-        <p className="mt-2 text-xs text-ink3">Максимум 120 символов.</p>
-      </form>
-    </BottomSheet>
   );
 }
 

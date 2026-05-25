@@ -29,7 +29,12 @@ function pageScrollLocked(): boolean {
  * without adding layout or stealing clicks.
  */
 function isViewportLockedShell(pathname: string): boolean {
-  return /\/cockpit$/.test(pathname) || /\/report$/.test(pathname);
+  return (
+    /\/cockpit$/.test(pathname)
+    || /\/report$/.test(pathname)
+    || pathname === "/manage"
+    || pathname.startsWith("/manage/")
+  );
 }
 
 export function ScrollHint() {

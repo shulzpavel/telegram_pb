@@ -34,7 +34,7 @@ export default function ParticipantChip({ name, voted }: ParticipantChipProps) {
   const reduceMotion = useReducedMotion();
 
   return (
-    <div className="flex min-h-10 items-center gap-2 rounded-lg border border-line bg-surface px-2.5 py-1.5 shadow-sm">
+    <div className="flex min-h-10 max-w-full min-w-0 items-center gap-2 rounded-lg border border-line bg-surface px-2.5 py-1.5 shadow-sm">
       <div className="relative shrink-0">
         <div className={`w-7 h-7 rounded-full flex items-center justify-center text-2xs font-bold ${color}`}>
           {initials(name)}
@@ -52,13 +52,13 @@ export default function ParticipantChip({ name, voted }: ParticipantChipProps) {
         </motion.div>
       </div>
 
-      <span className={`text-xs font-medium leading-none transition-colors duration-200 ${voted ? "text-ink2" : "text-ink3"}`}>
+      <span className={`min-w-0 truncate text-xs font-medium leading-none transition-colors duration-200 ${voted ? "text-ink2" : "text-ink3"}`}>
         {name}
       </span>
 
       {/* Waiting indicator */}
       {!voted && (
-        <LoadingDots className="ml-0.5 text-ink4" />
+        <LoadingDots className="ml-0.5 shrink-0 text-ink4" />
       )}
     </div>
   );

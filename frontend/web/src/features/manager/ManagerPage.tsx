@@ -890,6 +890,14 @@ function ManagerWorkspace({
  * scroll internally; on mobile the sections stack inside one scroll
  * region below the chrome (no "scroll the page to find the hint").
  */
+type MobileCockpitTab = "session" | "queue" | "more";
+
+const MOBILE_COCKPIT_TABS: { id: MobileCockpitTab; label: string }[] = [
+  { id: "session", label: "Сессия" },
+  { id: "queue", label: "Очередь" },
+  { id: "more", label: "Ещё" },
+];
+
 function CockpitShell({
   principal,
   title,
@@ -914,6 +922,7 @@ function CockpitShell({
 }) {
   const childList = Children.toArray(children);
   const isWizard = childList.length === 1;
+  const [mobileTab, setMobileTab] = useState<MobileCockpitTab>("session");
 
   return (
     <main className="flex h-screen-mobile flex-col overflow-hidden app-gradient-bg">
@@ -928,25 +937,48 @@ function CockpitShell({
           renameBusy={renameBusy}
         />
         <SessionTabsBar chatId={chatId} />
+        {!isWizard ? (
+          <div
+            className="border-b border-line bg-surface px-3 py-2 lg:hidden"
+            role="tablist"
+            aria-label="Разделы cockpit"
+          >
+            <div className="mx-auto flex max-w-[1440px] gap-2">
+              {MOBILE_COCKPIT_TABS.map((tab) => (
+                <button
+                  key={tab.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={mobileTab === tab.id}
+                  onClick={() => setMobileTab(tab.id)}
+                  className={cn(
+                    "min-h-11 flex-1 rounded-md px-3 text-sm font-semibold transition-colors",
+                    mobileTab === tab.id
+                      ? "bg-blue text-white"
+                      : "bg-line2 text-ink2 hover:bg-line",
+                  )}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : null}
       </div>
 
       {isWizard ? (
-        <ScrollArea className="min-h-0 flex-1" viewportClassName="h-full pb-28 md:pb-safe-6" hint="Прокрутите ниже">
+        <ScrollArea className="min-h-0 flex-1" viewportClassName="h-full pb-4 md:pb-safe-6" hint="Прокрутите ниже">
           <div className="mx-auto w-full max-w-3xl px-4 py-4 md:py-6">{children}</div>
         </ScrollArea>
       ) : (
         <>
-          <ScrollArea
-            className="min-h-0 flex-1 lg:hidden"
-            viewportClassName="h-full scroll-pb-cta"
-            hint="Листайте секции ниже"
-          >
-            <div className="mx-auto w-full max-w-[1440px] space-y-4 px-4 py-4">
-              {childList[0]}
-              {childList[1]}
-              {childList[2]}
+          <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-4 py-4 lg:hidden">
+            <div className="mx-auto w-full max-w-[1440px]">
+              {mobileTab === "session" ? <div className="min-w-0">{childList[1]}</div> : null}
+              {mobileTab === "queue" ? <div className="min-w-0">{childList[0]}</div> : null}
+              {mobileTab === "more" ? <div className="min-w-0 space-y-4">{childList[2]}</div> : null}
             </div>
-          </ScrollArea>
+          </div>
 
           <div className="mx-auto hidden min-h-0 w-full max-w-[1440px] flex-1 grid-cols-[360px_minmax(0,1fr)_340px] gap-4 overflow-hidden px-4 py-4 lg:grid lg:px-6">
             <div className="min-h-0 h-full pr-1">{childList[0]}</div>
@@ -1071,22 +1103,11 @@ function QueuePanel({
     return map;
   }, [completedTasks]);
 
-  return (
-    <Surface className={cn("flex max-h-[70dvh] flex-col p-4 lg:h-full lg:max-h-none lg:min-h-0", className)}>
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <h2 className="text-sm font-bold text-ink">Backlog</h2>
-          <p className="text-xs text-ink3">v{tasksVersion} · {tasks.length} loaded · {completedCount} сыграно</p>
-        </div>
-        <Button size="sm" variant="ghost" onClick={onReload}>Refresh</Button>
-      </div>
-      <TextField className="mt-3" aria-label="Search tasks" placeholder="Search by Jira key or summary" value={query} onChange={(event) => onQuery(event.target.value)} />
-      <ScrollArea className="mt-3 min-h-0 flex-1" viewportClassName="h-full pr-1" hint="Ещё задачи">
-        {tasks.length === 0 ? (
-          <EmptyState title="Очередь пуста" description="Добавьте задачи вручную или импортируйте их из Jira." />
-        ) : (
-          <div className="space-y-2">
-            {tasks.map((task) => {
+  const taskListBody = tasks.length === 0 ? (
+    <EmptyState title="Очередь пуста" description="Добавьте задачи вручную или импортируйте их из Jira." />
+  ) : (
+    <div className="space-y-2">
+      {tasks.map((task) => {
               const active = task.task_uid === currentTaskId;
               const editing = editingId === task.task_uid;
               const played = completedById.get(task.task_uid);
@@ -1147,8 +1168,24 @@ function QueuePanel({
                 </div>
               );
             })}
-          </div>
-        )}
+    </div>
+  );
+
+  return (
+    <Surface className={cn("flex flex-col p-4 lg:h-full lg:min-h-0 lg:overflow-hidden", className)}>
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <h2 className="text-sm font-bold text-ink">Backlog</h2>
+          <p className="text-xs text-ink3">v{tasksVersion} · {tasks.length} loaded · {completedCount} сыграно</p>
+        </div>
+        <Button size="sm" variant="ghost" onClick={onReload}>Refresh</Button>
+      </div>
+      <TextField className="mt-3" aria-label="Search tasks" placeholder="Search by Jira key or summary" value={query} onChange={(event) => onQuery(event.target.value)} />
+      {/* Mobile: one page scroll (parent ScrollArea). Nested scroll here caused
+          queue cards to paint over the ControlRoom block below. */}
+      <div className="mt-3 lg:hidden">{taskListBody}</div>
+      <ScrollArea className="mt-3 hidden min-h-0 flex-1 lg:flex" viewportClassName="h-full pr-1" hint="Ещё задачи">
+        {taskListBody}
       </ScrollArea>
       {cursor ? <Button className="mt-3 w-full" variant="secondary" onClick={onLoadMore}>Load more</Button> : null}
       <ConfirmDialog
@@ -1223,7 +1260,7 @@ function ControlRoom({
   const revealedVotes = phase === "results" ? (results ?? []) : [];
 
   return (
-    <Surface className="min-h-[calc(100dvh-96px)] p-4 md:p-6">
+    <Surface className="relative isolate min-h-0 p-4 md:p-6 lg:min-h-[calc(100dvh-96px)]">
       {/* PHASE HEADER --------------------------------------------------- */}
       <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
         <div className="min-w-0">
@@ -1232,7 +1269,7 @@ function ControlRoom({
             {task ? <span className="text-xs font-semibold text-ink3">Задача {task.index} из {task.total}</span> : null}
             {task?.jira_key ? <Badge tone="info">{task.jira_key}</Badge> : null}
           </div>
-          <h2 className="mt-3 text-2xl font-bold leading-tight text-ink md:text-3xl">
+          <h2 className="mt-3 break-words text-balance text-xl font-bold leading-snug text-ink md:text-3xl">
             {task?.text ?? (phase === "complete" ? "Сессия завершена" : "Нет активной задачи")}
           </h2>
           <p className="mt-2 text-sm text-ink3">{meta.description}</p>

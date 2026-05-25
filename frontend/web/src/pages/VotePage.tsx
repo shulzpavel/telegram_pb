@@ -60,8 +60,9 @@ export default function VotePage({ task, participants, onVote, error }: VotePage
           over scrolled content. */}
       <header className="sticky top-0 z-10 border-b border-line/60 bg-surface/85 backdrop-blur pt-safe">
         <div className="mx-auto flex min-h-14 w-full max-w-5xl items-center gap-2 px-3 sm:gap-3 sm:px-4 md:px-8">
-          <BrandMark size="sm" className="min-w-0" />
-          <div className="ml-auto flex shrink-0 items-center gap-2">
+          <BrandMark size="sm" showWordmark={false} className="shrink-0 sm:hidden" />
+          <BrandMark size="sm" className="hidden min-w-0 sm:inline-flex" />
+          <div className="ml-auto flex min-w-0 shrink-0 items-center gap-1.5 sm:gap-2">
             {task.jira_key ? <Badge tone="info">{task.jira_key}</Badge> : null}
             <span className="text-xs font-medium tabular-nums text-ink3">
               {task.index}&thinsp;/&thinsp;{task.total}
