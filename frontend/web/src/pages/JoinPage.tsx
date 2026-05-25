@@ -122,7 +122,7 @@ export default function JoinPage({ task, onJoin, error }: JoinPageProps) {
                 <label className="mb-2 block text-xs font-semibold text-ink3">
                   Роль в команде
                 </label>
-                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                <div className="grid grid-cols-[repeat(auto-fit,minmax(12rem,1fr))] gap-2">
                   {ROLES.map((r) => {
                     const active = role === r.value;
                     return (
