@@ -145,6 +145,8 @@ export interface CmsEventsListParams {
   actor?: string | null;
   action?: string | null;
   status?: string | null;
+  ts_from?: string | null;
+  ts_to?: string | null;
   limit?: number;
 }
 
@@ -159,6 +161,8 @@ export const cmsEventsApi = {
       actor: params.actor ?? undefined,
       action: params.action ?? undefined,
       status: params.status ?? undefined,
+      ts_from: params.ts_from ?? undefined,
+      ts_to: params.ts_to ?? undefined,
       // `buildQuery` initializes `limit` from its own arg, but any key on
       // params overrides it. Pass through so the mini-journal can request
       // a smaller page than the default 50.

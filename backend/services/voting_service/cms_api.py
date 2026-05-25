@@ -1112,16 +1112,23 @@ async def cms_events(
     action: Optional[str] = None,
     status: Optional[str] = None,
     actor: Optional[str] = Query(default=None, max_length=120),
+    ts_from: Optional[datetime] = None,
+    ts_to: Optional[datetime] = None,
     _: CmsPrincipal = Depends(require_permission(PERM_EVENTS_VIEW)),
 ) -> dict:
-    """Paged audit-events feed. ``actor`` filters by exact username (case
-    sensitive) — used by the per-user mini-journal in the Access UI."""
+    """Paged audit-events feed.
+
+    ``actor`` filters by exact username (case sensitive). ``ts_from`` and
+    ``ts_to`` are inclusive bounds and are applied before cursor pagination.
+    """
     return await _get_cms_store(request).list_audit_events(
         limit=limit,
         cursor=cursor,
         action=action,
         status=status,
         actor=actor,
+        ts_from=ts_from,
+        ts_to=ts_to,
     )
 
 

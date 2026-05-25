@@ -2057,6 +2057,8 @@ class PostgresCmsStore:
         action: Optional[str] = None,
         status: Optional[str] = None,
         actor: Optional[str] = None,
+        ts_from: Optional[datetime] = None,
+        ts_to: Optional[datetime] = None,
     ) -> dict[str, Any]:
         limit = clamp_limit(limit)
         cur = decode_cursor(cursor)
@@ -2071,6 +2073,8 @@ class PostgresCmsStore:
                 WHERE ($1::text IS NULL OR action = $1)
                   AND ($2::text IS NULL OR status = $2)
                   AND ($6::text IS NULL OR actor = $6)
+                  AND ($7::timestamptz IS NULL OR ts >= $7::timestamptz)
+                  AND ($8::timestamptz IS NULL OR ts <= $8::timestamptz)
                   AND (
                       $3::timestamptz IS NULL
                       OR (ts, id) < ($3::timestamptz, $4::bigint)
@@ -2084,6 +2088,8 @@ class PostgresCmsStore:
                 cursor_id,
                 limit + 1,
                 normalized_actor,
+                ts_from,
+                ts_to,
             )
         return self._paged_rows(rows, limit, "ts")
 

@@ -51,7 +51,7 @@ export function SessionTabsBar({
         className,
       )}
     >
-      <div className="mx-auto flex max-w-[1440px] items-stretch gap-1 overflow-x-auto px-3 sm:px-4 lg:px-6">
+      <div className="flex w-full items-stretch gap-1 px-3 sm:px-4 lg:px-6">
         {tabs.map((tab) => (
           <NavLink
             key={tab.to}
@@ -59,7 +59,7 @@ export function SessionTabsBar({
             end={tab.end}
             className={({ isActive }) =>
               cn(
-                "relative whitespace-nowrap px-3 py-2.5 text-sm font-medium transition-colors",
+                "relative flex-1 basis-0 whitespace-nowrap px-3 py-2.5 text-center text-sm font-medium transition-colors",
                 "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue/40",
                 isActive
                   ? "text-ink"

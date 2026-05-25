@@ -75,11 +75,6 @@ export default function CmsShell({
     });
     return match ?? visibleTabs[0] ?? null;
   }, [location.pathname, visibleTabs]);
-  const contentWidthClass =
-    activeTab?.key === "overview" || activeTab?.key === "access"
-      ? "max-w-5xl"
-      : "max-w-7xl";
-
   async function logout() {
     await cmsAuthApi.logout().catch(() => undefined);
     onLogout();
@@ -143,7 +138,7 @@ export default function CmsShell({
           aria-label="Разделы CMS"
           className="hidden md:block border-t border-line"
         >
-          <div className="flex w-full gap-1 overflow-x-auto px-4 lg:px-6">
+          <div className="flex w-full gap-1 px-4 lg:px-6">
             {visibleTabs.map((item) => (
               <NavLink
                 key={item.key}
@@ -151,7 +146,7 @@ export default function CmsShell({
                 end={item.key === "overview"}
                 className={({ isActive }) =>
                   [
-                    "shrink-0 whitespace-nowrap px-3 py-2 text-sm font-semibold border-b-2 transition-colors",
+                    "flex-1 basis-0 whitespace-nowrap px-3 py-2 text-center text-sm font-semibold border-b-2 transition-colors",
                     isActive ? "border-blue text-blue" : "border-transparent text-ink3 hover:text-ink",
                   ].join(" ")
                 }
@@ -223,7 +218,7 @@ export default function CmsShell({
         </div>
       </BottomSheet>
 
-      <div className={`mx-auto ${contentWidthClass} space-y-5 px-3 py-5 sm:px-4 lg:py-6`}>
+      <div className="mx-auto max-w-7xl space-y-5 px-3 py-5 sm:px-4 lg:py-6">
         {visibleTabs.length === 0 ? (
           <InlineError text="Для этой учётной записи не настроено ни одного раздела CMS." />
         ) : null}

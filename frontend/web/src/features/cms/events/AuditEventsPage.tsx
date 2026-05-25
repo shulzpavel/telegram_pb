@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { Badge, Button, EmptyState, SelectField, TextField } from "../../../design-system";
+import { Alert, Badge, Button, EmptyState, SelectField, TextField } from "../../../design-system";
 import type { AuditEvent } from "../api/cmsTypes";
 import {
   DataTable,
@@ -43,6 +43,12 @@ const ACTION_LABELS: Record<string, string> = {
 
 function labelForAction(action: string): string {
   return ACTION_LABELS[action] ?? action;
+}
+
+function localDateTimeToIso(value: string): string | undefined {
+  if (!value) return undefined;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
 }
 
 // Backend serializes `payload` as a JSON string when it travels through the
@@ -161,8 +167,12 @@ export default function AuditEventsPage() {
   const [status, setStatus] = useState("");
   const [actionFilter, setActionFilter] = useState("");
   const [actorFilter, setActorFilter] = useState(actorFromUrl);
+  const [fromFilter, setFromFilter] = useState("");
+  const [toFilter, setToFilter] = useState("");
   const debouncedAction = useDebouncedValue(actionFilter);
   const debouncedActor = useDebouncedValue(actorFilter);
+  const debouncedFrom = useDebouncedValue(fromFilter);
+  const debouncedTo = useDebouncedValue(toFilter);
 
   // Reflect URL `actor` changes back into local state — clicking the Access
   // mini-journal link sends users here pre-filtered.
@@ -185,13 +195,21 @@ export default function AuditEventsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [debouncedActor]);
 
+  const tsFrom = useMemo(() => localDateTimeToIso(debouncedFrom), [debouncedFrom]);
+  const tsTo = useMemo(() => localDateTimeToIso(debouncedTo), [debouncedTo]);
+  const dateRangeError =
+    tsFrom && tsTo && new Date(tsFrom).getTime() > new Date(tsTo).getTime()
+      ? "Начало периода должно быть раньше окончания."
+      : null;
   const params = useMemo(
     () => ({
       status: status || undefined,
       action: debouncedAction.trim() ? debouncedAction.trim() : undefined,
       actor: debouncedActor.trim() ? debouncedActor.trim() : undefined,
+      ts_from: tsFrom,
+      ts_to: tsTo,
     }),
-    [debouncedAction, debouncedActor, status]
+    [debouncedAction, debouncedActor, status, tsFrom, tsTo]
   );
   const list = useCmsList<AuditEvent>("/events", params, { scrollKey: "cms-events" });
   const searchRef = useRef<HTMLInputElement | null>(null);
@@ -213,8 +231,10 @@ export default function AuditEventsPage() {
       <HelpCallout title="Что здесь">
         <p>Записи добавляются автоматически. Удалять их нельзя — это аудит.</p>
         <p>Фильтр «Статус» помогает быстро найти неудачные попытки: например, неуспешный логин или конфликт версии очереди.</p>
+        <p>Диапазон времени применяется на сервере до пагинации: страница получает только нужное окно событий, без загрузки полного журнала.</p>
         <p>Если ввели «action», фильтр работает по точному совпадению (например, <code className="rounded bg-line2 px-1 text-xs">cms.session.delete</code>).</p>
       </HelpCallout>
+      {dateRangeError ? <Alert tone="warning">{dateRangeError}</Alert> : null}
       <Toolbar>
         <TextField
           ref={searchRef}
@@ -241,6 +261,36 @@ export default function AuditEventsPage() {
           <option value="ok">Успех</option>
           <option value="failed">Ошибка</option>
         </SelectField>
+        <TextField
+          className="md:max-w-[220px]"
+          aria-label="Начало периода"
+          label="С"
+          type="datetime-local"
+          value={fromFilter}
+          onChange={(event) => setFromFilter(event.target.value)}
+          reserveMessageSpace={false}
+        />
+        <TextField
+          className="md:max-w-[220px]"
+          aria-label="Конец периода"
+          label="По"
+          type="datetime-local"
+          value={toFilter}
+          onChange={(event) => setToFilter(event.target.value)}
+          reserveMessageSpace={false}
+        />
+        <Button
+          variant="ghost"
+          onClick={() => {
+            setActionFilter("");
+            setActorFilter("");
+            setStatus("");
+            setFromFilter("");
+            setToFilter("");
+          }}
+        >
+          Сбросить
+        </Button>
         <Button variant="ghost" onClick={list.reload}>Обновить</Button>
       </Toolbar>
       <DataTable

@@ -201,7 +201,7 @@ function AccessSubTabs() {
   return (
     <nav
       aria-label="Подразделы Доступов"
-      className="-mx-1 flex gap-1 overflow-x-auto rounded-lg bg-line2 p-1 no-scrollbar"
+      className="-mx-1 flex gap-1 rounded-lg bg-line2 p-1"
     >
       {SUB_TABS.map((tab) => {
         const isActive = tab.match(pathname);
@@ -210,7 +210,7 @@ function AccessSubTabs() {
             key={tab.key}
             to={tab.to}
             className={cn(
-              "shrink-0 whitespace-nowrap rounded-md px-3 py-1.5 text-sm font-semibold transition-colors",
+              "flex-1 basis-0 whitespace-nowrap rounded-md px-3 py-1.5 text-center text-sm font-semibold transition-colors",
               "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue/30",
               isActive
                 ? "bg-surface text-ink shadow-card"
