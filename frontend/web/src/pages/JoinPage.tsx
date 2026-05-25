@@ -122,7 +122,7 @@ export default function JoinPage({ task, onJoin, error }: JoinPageProps) {
                 <label className="mb-2 block text-xs font-semibold text-ink3">
                   Роль в команде
                 </label>
-                <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3">
                   {ROLES.map((r) => {
                     const active = role === r.value;
                     return (
@@ -133,7 +133,7 @@ export default function JoinPage({ task, onJoin, error }: JoinPageProps) {
                         disabled={loading}
                         aria-pressed={active}
                         className={cn(
-                          "relative grid min-h-12 grid-cols-[auto_minmax(0,1fr)] items-center gap-2 rounded-lg border px-3 py-2.5 pr-9 text-left text-sm font-semibold sm:gap-2 sm:px-3 sm:py-2.5 sm:pr-7",
+                          "relative grid min-h-12 grid-cols-[auto_minmax(0,1fr)] items-center gap-2 rounded-lg border px-3 py-2.5 pr-9 text-left text-sm font-semibold sm:min-h-14 sm:gap-2 sm:px-3 sm:py-3 sm:pr-7",
                           "transition-[background-color,border-color,color] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue/30 active:scale-[0.98]",
                           active
                             ? "border-blue bg-blue/8 text-blue"
@@ -143,7 +143,7 @@ export default function JoinPage({ task, onJoin, error }: JoinPageProps) {
                       >
                         <span className="text-base leading-none">{r.icon}</span>
                         <span
-                          className="text-clamp-2 block min-w-0 leading-tight sm:truncate sm:whitespace-nowrap"
+                          className="text-clamp-2 block min-w-0 leading-tight"
                           title={r.label}
                         >
                           {r.label}
