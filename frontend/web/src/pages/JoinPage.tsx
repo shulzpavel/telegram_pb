@@ -1,6 +1,7 @@
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { FormEvent, useState } from "react";
 import { Link } from "react-router-dom";
+import TaskTextBlock from "../components/TaskTextBlock";
 import { Alert, Badge, BrandMark, Button, ProgressBar, Surface, TextField, ThemeToggle, cn } from "../design-system";
 import { ParticipantRole, TaskInfo } from "../hooks/useSession";
 import {
@@ -86,7 +87,12 @@ export default function JoinPage({ task, onJoin, error }: JoinPageProps) {
                     {task.jira_key ? <Badge tone="info">{task.jira_key}</Badge> : null}
                     <span className="text-xs tabular-nums text-ink3">{task.index}&thinsp;/&thinsp;{task.total}</span>
                   </div>
-                  <h1 className="text-balance break-words text-base font-bold leading-snug text-ink sm:text-lg">{task.text}</h1>
+                  <TaskTextBlock
+                    as="h1"
+                    text={task.text}
+                    fallback="Без названия"
+                    titleClassName="text-base sm:text-lg"
+                  />
                   <div className="mt-3"><ProgressBar value={task.index / task.total} /></div>
                 </div>
               ) : (

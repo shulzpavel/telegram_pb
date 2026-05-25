@@ -1,6 +1,7 @@
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { useEffect, useState } from "react";
 import ParticipantChip from "../components/ParticipantChip";
+import TaskTextBlock from "../components/TaskTextBlock";
 import VoteCard from "../components/VoteCard";
 import { Alert, Badge, BrandMark, LoadingDots, ProgressBar, Surface, ThemeToggle } from "../design-system";
 import { ParticipantStatus, TaskInfo } from "../hooks/useSession";
@@ -93,9 +94,11 @@ export default function VotePage({ task, participants, onVote, error }: VotePage
           >
             <Surface className="p-4 md:p-5">
               <p className="mb-1.5 text-2xs font-semibold uppercase tracking-widest text-ink3">Задача</p>
-              <h2 className="text-balance break-words text-base font-bold leading-snug text-ink md:text-lg">
-                {task.text}
-              </h2>
+              <TaskTextBlock
+                text={task.text}
+                fallback="Без названия"
+                titleClassName="text-base md:text-lg"
+              />
               <div className="mt-3 md:mt-4">
                 <div className="mb-1.5 flex items-center justify-between text-2xs text-ink3">
                   <span>Прогресс</span>
@@ -149,7 +152,7 @@ export default function VotePage({ task, participants, onVote, error }: VotePage
             Reserve `min-h-[22rem]` so the inner state swap (cards ↔ voted
             confirmation) doesn't push surrounding content around. The
             surface stretches with flex to use the full visual area. */}
-        <section className="flex min-w-0 flex-1 flex-col justify-center">
+        <section className="flex min-w-0 flex-1 flex-col justify-start">
           <Surface className="flex min-h-[22rem] flex-col items-stretch justify-center p-4 md:p-6">
             <AnimatePresence mode="wait" initial={false}>
               {voted ? (

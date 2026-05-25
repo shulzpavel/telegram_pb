@@ -70,14 +70,14 @@ export function ScrollArea({
           role="status"
           aria-live="polite"
           className={cn(
-            "pointer-events-none sticky inset-x-0 bottom-0 z-20 -mt-20 flex justify-center px-3 pb-2 pt-14",
-            "bg-gradient-to-t from-canvas from-40% via-canvas/95 to-transparent",
+            "pointer-events-none sticky inset-x-0 bottom-0 z-20 -mt-10 flex justify-center px-3 pb-0.5 pt-6",
+            "bg-gradient-to-t from-canvas/80 from-20% via-canvas/60 to-transparent",
             "transition-[opacity,transform] duration-200 ease-out motion-reduce:transition-none",
             canScrollDown ? "translate-y-0 opacity-100" : "pointer-events-none translate-y-2 opacity-0",
           )}
         >
-          <div className="flex items-center gap-2 rounded-full border border-blue/25 bg-surface px-3 py-2 text-xs font-semibold text-ink shadow-pop backdrop-blur">
-            <span className="scroll-hint-bob flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-blue/15 text-sm text-blue" aria-hidden="true">
+          <div className="flex items-center gap-2 rounded-full border border-blue/25 bg-surface px-3 py-1.5 text-xs font-semibold text-ink shadow-pop backdrop-blur">
+            <span className="scroll-hint-bob flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-blue/15 text-sm text-blue" aria-hidden="true">
               ↓
             </span>
             <span>{hint}</span>

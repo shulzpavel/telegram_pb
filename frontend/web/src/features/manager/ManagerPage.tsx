@@ -1,6 +1,23 @@
+import {
+  DndContext,
+  KeyboardSensor,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import { Children, FormEvent, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
 import { apiUrl } from "../../app/config";
+import TaskTextBlock from "../../components/TaskTextBlock";
 import { Alert, Badge, Button, ConfirmDialog, EmptyState, ScrollArea, Spinner, Surface, TextField, TextareaField, ThemeToggle, cn, useTheme, useToast, type ThemeMode } from "../../design-system";
 import { cmsAuthApi } from "../cms/api/cmsClient";
 import type { CmsPrincipal } from "../cms/api/cmsTypes";
@@ -1093,6 +1110,15 @@ function QueuePanel({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
   const [deleteTask, setDeleteTask] = useState<TaskItem | null>(null);
+  const sortableIds = useMemo(() => tasks.map((task) => task.task_uid).filter(Boolean), [tasks]);
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: { delay: 140, tolerance: 6 },
+    }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    }),
+  );
 
   // Map task_id → final SP so we can render a "✓ NSP" chip on already-played
   // rows. Tasks that are still alive in the queue but had their SP set
@@ -1103,72 +1129,47 @@ function QueuePanel({
     return map;
   }, [completedTasks]);
 
-  const taskListBody = tasks.length === 0 ? (
+  function handleDragEnd(event: DragEndEvent) {
+    const activeId = String(event.active.id);
+    const overId = event.over ? String(event.over.id) : null;
+    if (!overId || activeId === overId || busy !== null) return;
+
+    const activeTask = tasks.find((task) => task.task_uid === activeId);
+    const overTask = tasks.find((task) => task.task_uid === overId);
+    if (!activeTask || !overTask) return;
+
+    onMove(activeTask, overTask.bucket_index);
+  }
+
+  const queueList = tasks.length === 0 ? (
     <EmptyState title="Очередь пуста" description="Добавьте задачи вручную или импортируйте их из Jira." />
   ) : (
-    <div className="space-y-2">
-      {tasks.map((task) => {
-              const active = task.task_uid === currentTaskId;
-              const editing = editingId === task.task_uid;
-              const played = completedById.get(task.task_uid);
-              const finalSp = task.story_points ?? played?.story_points ?? null;
-              return (
-                <div key={task.task_uid} className={cn(
-                  "rounded-lg border bg-surface p-3",
-                  active ? "border-blue bg-blue/5" : played ? "border-emerald-200 bg-emerald-50/40 dark:border-emerald-900/50 dark:bg-emerald-900/10" : "border-line",
-                )}>
-                  <div className="flex items-start gap-2">
-                    <span className="mt-0.5 w-7 shrink-0 text-right text-xs font-semibold tabular-nums text-ink4">{task.bucket_index + 1}</span>
-                    <div className="min-w-0 flex-1">
-                      {editing ? (
-                        <TextField
-                          aria-label="Task summary"
-                          value={editValue}
-                          onChange={(event) => setEditValue(event.target.value)}
-                          onKeyDown={(event) => {
-                            if (event.key === "Enter" && editValue.trim()) {
-                              onUpdate(task, editValue.trim());
-                              setEditingId(null);
-                            }
-                          }}
-                        />
-                      ) : (
-                        <>
-                          <div className="flex flex-wrap items-center gap-2">
-                            {task.jira_key ? <Badge tone="info">{task.jira_key}</Badge> : <Badge>Manual</Badge>}
-                            {active ? <Badge tone="success">Current</Badge> : null}
-                            {played ? (
-                              <Badge tone="success">
-                                {finalSp !== null ? `✓ ${finalSp} SP` : "✓ Сыграна"}
-                              </Badge>
-                            ) : null}
-                            {played?.consensus ? <Badge tone="info">Consensus</Badge> : null}
-                          </div>
-                          <p className="mt-2 text-sm font-semibold leading-5 text-ink">{task.summary}</p>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                  <div className="mt-3 flex flex-wrap gap-1.5 pl-9">
-                    {editing ? (
-                      <>
-                        <Button size="sm" variant="primary" disabled={!editValue.trim() || busy !== null} onClick={() => { onUpdate(task, editValue.trim()); setEditingId(null); }}>Save</Button>
-                        <Button size="sm" variant="ghost" onClick={() => setEditingId(null)}>Cancel</Button>
-                      </>
-                    ) : (
-                      <>
-                        <Button size="sm" variant="ghost" onClick={() => { setEditingId(task.task_uid); setEditValue(task.summary); }}>Edit</Button>
-                        <Button size="sm" variant="ghost" disabled={task.bucket_index === 0 || busy !== null} onClick={() => onMove(task, 0)}>Top</Button>
-                        <Button size="sm" variant="ghost" disabled={task.bucket_index === 0 || busy !== null} onClick={() => onMove(task, task.bucket_index - 1)}>Up</Button>
-                        <Button size="sm" variant="ghost" disabled={busy !== null} onClick={() => onMove(task, task.bucket_index + 1)}>Down</Button>
-                        <Button size="sm" variant="danger" disabled={busy !== null} onClick={() => setDeleteTask(task)}>Delete</Button>
-                      </>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-    </div>
+    <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+      <SortableContext items={sortableIds} strategy={verticalListSortingStrategy}>
+        <div className="space-y-2">
+          {tasks.map((task) => (
+            <SortableQueueTaskCard
+              key={task.task_uid}
+              task={task}
+              active={task.task_uid === currentTaskId}
+              editing={editingId === task.task_uid}
+              editValue={editValue}
+              played={completedById.get(task.task_uid)}
+              busy={busy}
+              onEditValue={setEditValue}
+              onStartEdit={() => { setEditingId(task.task_uid); setEditValue(task.summary); }}
+              onCancelEdit={() => setEditingId(null)}
+              onSaveEdit={() => {
+                if (!editValue.trim()) return;
+                onUpdate(task, editValue.trim());
+                setEditingId(null);
+              }}
+              onDelete={() => setDeleteTask(task)}
+            />
+          ))}
+        </div>
+      </SortableContext>
+    </DndContext>
   );
 
   return (
@@ -1181,12 +1182,9 @@ function QueuePanel({
         <Button size="sm" variant="ghost" onClick={onReload}>Refresh</Button>
       </div>
       <TextField className="mt-3" aria-label="Search tasks" placeholder="Search by Jira key or summary" value={query} onChange={(event) => onQuery(event.target.value)} />
-      {/* Mobile: one page scroll (parent ScrollArea). Nested scroll here caused
-          queue cards to paint over the ControlRoom block below. */}
-      <div className="mt-3 lg:hidden">{taskListBody}</div>
-      <ScrollArea className="mt-3 hidden min-h-0 flex-1 lg:flex" viewportClassName="h-full pr-1" hint="Ещё задачи">
-        {taskListBody}
-      </ScrollArea>
+      <div className="mt-3 min-h-0 overflow-auto pr-1 lg:flex-1">
+        {queueList}
+      </div>
       {cursor ? <Button className="mt-3 w-full" variant="secondary" onClick={onLoadMore}>Load more</Button> : null}
       <ConfirmDialog
         open={Boolean(deleteTask)}
@@ -1200,6 +1198,103 @@ function QueuePanel({
         }}
       />
     </Surface>
+  );
+}
+
+function SortableQueueTaskCard({
+  task,
+  active,
+  editing,
+  editValue,
+  played,
+  busy,
+  onEditValue,
+  onStartEdit,
+  onCancelEdit,
+  onSaveEdit,
+  onDelete,
+}: {
+  task: TaskItem;
+  active: boolean;
+  editing: boolean;
+  editValue: string;
+  played?: CompletedTask;
+  busy: string | null;
+  onEditValue: (value: string) => void;
+  onStartEdit: () => void;
+  onCancelEdit: () => void;
+  onSaveEdit: () => void;
+  onDelete: () => void;
+}) {
+  const sortable = useSortable({
+    id: task.task_uid,
+    disabled: editing || busy !== null || !task.task_uid,
+  });
+  const finalSp = task.story_points ?? played?.story_points ?? null;
+  const dragging = sortable.isDragging;
+
+  return (
+    <div
+      ref={sortable.setNodeRef}
+      style={{
+        transform: CSS.Transform.toString(sortable.transform),
+        transition: sortable.transition,
+        opacity: dragging ? 0.72 : 1,
+      }}
+      className={cn(
+        "rounded-lg border bg-surface p-3",
+        "touch-manipulation transition-[border-color,background-color,box-shadow]",
+        dragging ? "shadow-pop ring-2 ring-blue/20" : "",
+        active ? "border-blue bg-blue/5" : played ? "border-emerald-200 bg-emerald-50/40 dark:border-emerald-900/50 dark:bg-emerald-900/10" : "border-line",
+      )}
+      {...sortable.attributes}
+      {...sortable.listeners}
+    >
+      <div className="flex items-start gap-2">
+        <span className="mt-0.5 w-7 shrink-0 text-right text-xs font-semibold tabular-nums text-ink4">{task.bucket_index + 1}</span>
+        <div className="min-w-0 flex-1">
+          {editing ? (
+            <TextField
+              aria-label="Task summary"
+              value={editValue}
+              onPointerDown={(event) => event.stopPropagation()}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && editValue.trim()) onSaveEdit();
+              }}
+              onChange={(event) => onEditValue(event.target.value)}
+            />
+          ) : (
+            <>
+              <div className="flex flex-wrap items-center gap-2">
+                {task.jira_key ? <Badge tone="info">{task.jira_key}</Badge> : <Badge>Manual</Badge>}
+                {active ? <Badge tone="success">Current</Badge> : null}
+                {played ? (
+                  <Badge tone="success">
+                    {finalSp !== null ? `✓ ${finalSp} SP` : "✓ Сыграна"}
+                  </Badge>
+                ) : null}
+                {played?.consensus ? <Badge tone="info">Consensus</Badge> : null}
+                <span className="text-2xs font-semibold uppercase tracking-wide text-ink4">Drag</span>
+              </div>
+              <p className="mt-2 text-sm font-semibold leading-5 text-ink">{task.summary}</p>
+            </>
+          )}
+        </div>
+      </div>
+      <div className="mt-3 flex flex-wrap gap-1.5 pl-9" onPointerDown={(event) => event.stopPropagation()}>
+        {editing ? (
+          <>
+            <Button size="sm" variant="primary" disabled={!editValue.trim() || busy !== null} onClick={onSaveEdit}>Save</Button>
+            <Button size="sm" variant="ghost" onClick={onCancelEdit}>Cancel</Button>
+          </>
+        ) : (
+          <>
+            <Button size="sm" variant="ghost" onClick={onStartEdit}>Edit</Button>
+            <Button size="sm" variant="danger" disabled={busy !== null} onClick={onDelete}>Delete</Button>
+          </>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -1269,9 +1364,12 @@ function ControlRoom({
             {task ? <span className="text-xs font-semibold text-ink3">Задача {task.index} из {task.total}</span> : null}
             {task?.jira_key ? <Badge tone="info">{task.jira_key}</Badge> : null}
           </div>
-          <h2 className="mt-3 break-words text-balance text-xl font-bold leading-snug text-ink md:text-3xl">
-            {task?.text ?? (phase === "complete" ? "Сессия завершена" : "Нет активной задачи")}
-          </h2>
+          <TaskTextBlock
+            text={task?.text}
+            fallback={phase === "complete" ? "Сессия завершена" : "Нет активной задачи"}
+            titleClassName="text-xl md:text-3xl"
+            linkClassName="md:text-base"
+          />
           <p className="mt-2 text-sm text-ink3">{meta.description}</p>
         </div>
         <div className="rounded-lg border border-line bg-line2 px-4 py-3 text-right">
@@ -1480,7 +1578,7 @@ function LiveVotesPanel({
   return (
     <div className="rounded-lg border border-line bg-line2 p-4">
       <p className="text-xs font-semibold uppercase tracking-wide text-ink3">Голоса (видны только вам)</p>
-      <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="mt-3 grid gap-2 md:grid-cols-2">
         {participants.length === 0 ? (
           <p className="text-sm text-ink3">Пока никого не подключилось — отправьте invite link.</p>
         ) : participants.map((participant, idx) => {
@@ -1490,15 +1588,17 @@ function LiveVotesPanel({
             <div
               key={`${participant.name}-${idx}`}
               className={cn(
-                "flex items-center justify-between gap-3 rounded-lg border bg-surface px-3 py-2.5",
+                "grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-3 rounded-lg border bg-surface px-3 py-2.5",
                 voted ? "border-blue/30" : "border-line",
               )}
             >
-              <span className="min-w-0 truncate text-sm font-semibold text-ink">{participant.name}</span>
+              <span className="min-w-0 whitespace-normal break-all text-sm font-semibold leading-5 text-ink">
+                {participant.name}
+              </span>
               {voted ? (
                 <span className="rounded-md bg-blue px-2 py-0.5 text-sm font-bold tabular-nums text-white">{value}</span>
               ) : (
-                <span className="text-xs font-semibold text-ink3">ждёт…</span>
+                <span className="pt-0.5 text-xs font-semibold text-ink3">ждёт…</span>
               )}
             </div>
           );
@@ -1662,8 +1762,8 @@ function BacklogWizard({
   completedCount: number;
   onAction: (label: string, action: () => Promise<ManagerSession | TaskMutation>) => Promise<void>;
 }) {
-  type Tab = "manual" | "bulk" | "jira";
-  const [tab, setTab] = useState<Tab>("manual");
+  type Tab = "jira" | "manual" | "bulk";
+  const [tab, setTab] = useState<Tab>("jira");
   const tabHints: Record<Tab, string> = {
     manual: "Добавьте одну задачу — название обязательно, Jira-ключ и URL по желанию.",
     bulk: "Вставьте список одной колонкой — каждая строка станет отдельной задачей в очереди.",
@@ -1704,7 +1804,7 @@ function BacklogWizard({
       {error ? <Alert tone="danger" className="mt-6">{error}</Alert> : null}
 
       <div className="mt-7 flex flex-wrap justify-center gap-2">
-        {(["manual", "bulk", "jira"] as Tab[]).map((value) => (
+        {(["jira", "manual", "bulk"] as Tab[]).map((value) => (
           <button
             key={value}
             type="button"
@@ -1718,7 +1818,7 @@ function BacklogWizard({
                 : "border-line bg-surface text-ink2 hover:border-blue/30",
             )}
           >
-            {value === "manual" ? "Manual" : value === "bulk" ? "Bulk paste" : "Jira import"}
+            {value === "jira" ? "Jira import" : value === "manual" ? "Manual" : "Bulk paste"}
           </button>
         ))}
       </div>
@@ -1728,12 +1828,12 @@ function BacklogWizard({
       <p className="mt-2 text-center text-xs text-ink3 md:text-sm">{tabHints[tab]}</p>
 
       <div className="mt-4">
-        {tab === "manual" ? (
-          <WizardManualForm chatId={chatId} tasksVersion={tasksVersion} busy={busy} onAction={onAction} />
-        ) : tab === "bulk" ? (
-          <WizardBulkForm chatId={chatId} tasksVersion={tasksVersion} busy={busy} onAction={onAction} />
-        ) : (
+        {tab === "jira" ? (
           <WizardJiraForm chatId={chatId} tasksVersion={tasksVersion} busy={busy} onAction={onAction} />
+        ) : tab === "manual" ? (
+          <WizardManualForm chatId={chatId} tasksVersion={tasksVersion} busy={busy} onAction={onAction} />
+        ) : (
+          <WizardBulkForm chatId={chatId} tasksVersion={tasksVersion} busy={busy} onAction={onAction} />
         )}
       </div>
 
@@ -1862,7 +1962,7 @@ function WizardJiraForm({
   busy: string | null;
   onAction: (label: string, action: () => Promise<ManagerSession | TaskMutation>) => Promise<void>;
 }) {
-  const [jql, setJql] = useState("project = DEMO ORDER BY priority DESC");
+  const [jql, setJql] = useState("");
   const [preview, setPreview] = useState<JiraPreview | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [previewBusy, setPreviewBusy] = useState(false);
@@ -1876,7 +1976,7 @@ function WizardJiraForm({
       setPreview(data);
       setSelected(new Set(data.items.filter((item) => !item.duplicate).map((item) => item.key)));
       if (data.items.length === 0) {
-        setPreviewError("Jira не вернула задач по этому JQL. Для локальной проверки используйте project = DEMO ORDER BY priority DESC.");
+        setPreviewError("Jira не вернула задач по этому JQL. Проверьте фильтр и доступы к проекту.");
       }
     } catch (err) {
       setPreview(null);
@@ -1890,8 +1990,15 @@ function WizardJiraForm({
   return (
     <Surface className="p-5">
       <p className="text-sm font-semibold text-ink">Импорт из Jira</p>
-      <p className="mt-1 text-xs text-ink3">Используйте JQL для выборки. После preview отметьте нужные задачи.</p>
-      <TextareaField className="mt-4" label="JQL" value={jql} onChange={(event) => setJql(event.target.value)} rows={3} />
+      <p className="mt-1 text-xs text-ink3">После preview отметьте нужные задачи.</p>
+      <TextareaField
+        className="mt-4"
+        label="JQL"
+        placeholder="Пользуйтесь поиском задач в Jira через JQL"
+        value={jql}
+        onChange={(event) => setJql(event.target.value)}
+        rows={3}
+      />
       {previewError ? <Alert tone="danger" className="mt-4">{previewError}</Alert> : null}
       {/* Preview list is rendered above the sticky CTA so its `max-h-64`
           scroll area always fits between the JQL field and the action
@@ -1994,7 +2101,7 @@ function TaskAddPanel({
   const [jiraKey, setJiraKey] = useState("");
   const [storyPoints, setStoryPoints] = useState("");
   const [bulk, setBulk] = useState("");
-  const [jql, setJql] = useState("project = DEMO ORDER BY priority DESC");
+  const [jql, setJql] = useState("");
   const [preview, setPreview] = useState<JiraPreview | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
@@ -2018,54 +2125,14 @@ function TaskAddPanel({
   return (
     <div className="space-y-4">
       <Surface className="p-4">
-        <h2 className="text-sm font-bold text-ink">Manual task</h2>
-        <div className="mt-3 space-y-3">
-          <TextField label="Summary" value={summary} onChange={(event) => setSummary(event.target.value)} />
-          <div className="grid grid-cols-2 gap-2">
-            <TextField label="Jira key" value={jiraKey} onChange={(event) => setJiraKey(event.target.value)} />
-            <TextField label="SP" value={storyPoints} onChange={(event) => setStoryPoints(event.target.value)} />
-          </div>
-          <Button
-            className="w-full"
-            variant="primary"
-            disabled={!summary.trim() || busy !== null}
-            onClick={() => onAction("add", async () => {
-              const result = await managerApi.addTask(chatId, {
-                summary: summary.trim(),
-                jira_key: normalizeOptionalText(jiraKey),
-                story_points: normalizeOptionalNumber(storyPoints),
-                expected_version: tasksVersion,
-              });
-              setSummary("");
-              setJiraKey("");
-              setStoryPoints("");
-              return result;
-            })}
-          >
-            Add task
-          </Button>
-        </div>
-      </Surface>
-
-      <Surface className="p-4">
-        <h2 className="text-sm font-bold text-ink">Bulk paste</h2>
-        <TextareaField className="mt-3" label="One task per line" value={bulk} onChange={(event) => setBulk(event.target.value)} />
-        <Button
-          className="mt-3 w-full"
-          disabled={bulkTasks.length === 0 || busy !== null}
-          onClick={() => onAction("bulk", async () => {
-            const result = await managerApi.addTasksBulk(chatId, bulkTasks, tasksVersion);
-            setBulk("");
-            return result;
-          })}
-        >
-          Add {bulkTasks.length || ""} tasks
-        </Button>
-      </Surface>
-
-      <Surface className="p-4">
         <h2 className="text-sm font-bold text-ink">Jira import</h2>
-        <TextareaField className="mt-3" label="JQL" value={jql} onChange={(event) => setJql(event.target.value)} />
+        <TextareaField
+          className="mt-3"
+          label="JQL"
+          placeholder="Пользуйтесь поиском задач в Jira через JQL"
+          value={jql}
+          onChange={(event) => setJql(event.target.value)}
+        />
         <div className="mt-3 flex gap-2">
           <Button className="flex-1" disabled={!jql.trim() || busy !== null} onClick={() => onAction("jira-preview", previewJira)}>
             Preview
@@ -2116,6 +2183,53 @@ function TaskAddPanel({
           </ScrollArea>
         ) : null}
       </Surface>
+
+      <Surface className="p-4">
+        <h2 className="text-sm font-bold text-ink">Manual task</h2>
+        <div className="mt-3 space-y-3">
+          <TextField label="Summary" value={summary} onChange={(event) => setSummary(event.target.value)} />
+          <div className="grid grid-cols-2 gap-2">
+            <TextField label="Jira key" value={jiraKey} onChange={(event) => setJiraKey(event.target.value)} />
+            <TextField label="SP" value={storyPoints} onChange={(event) => setStoryPoints(event.target.value)} />
+          </div>
+          <Button
+            className="w-full"
+            variant="primary"
+            disabled={!summary.trim() || busy !== null}
+            onClick={() => onAction("add", async () => {
+              const result = await managerApi.addTask(chatId, {
+                summary: summary.trim(),
+                jira_key: normalizeOptionalText(jiraKey),
+                story_points: normalizeOptionalNumber(storyPoints),
+                expected_version: tasksVersion,
+              });
+              setSummary("");
+              setJiraKey("");
+              setStoryPoints("");
+              return result;
+            })}
+          >
+            Add task
+          </Button>
+        </div>
+      </Surface>
+
+      <Surface className="p-4">
+        <h2 className="text-sm font-bold text-ink">Bulk paste</h2>
+        <TextareaField className="mt-3" label="One task per line" value={bulk} onChange={(event) => setBulk(event.target.value)} />
+        <Button
+          className="mt-3 w-full"
+          disabled={bulkTasks.length === 0 || busy !== null}
+          onClick={() => onAction("bulk", async () => {
+            const result = await managerApi.addTasksBulk(chatId, bulkTasks, tasksVersion);
+            setBulk("");
+            return result;
+          })}
+        >
+          Add {bulkTasks.length || ""} tasks
+        </Button>
+      </Surface>
+
     </div>
   );
 }

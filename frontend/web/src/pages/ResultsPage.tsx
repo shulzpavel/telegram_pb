@@ -1,6 +1,7 @@
 import { motion, useReducedMotion } from "framer-motion";
 import { useEffect, useState } from "react";
 import FlipCard from "../components/FlipCard";
+import TaskTextBlock from "../components/TaskTextBlock";
 import { Badge, BrandMark, Button, LoadingDots, Surface } from "../design-system";
 import { staggerDelay } from "../design-system/motion";
 import { TaskInfo, VoteResult } from "../hooks/useSession";
@@ -111,7 +112,7 @@ export default function ResultsPage({ task, results, _skipAnimation, onNextTask,
           {task && (
             <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
               <p className="text-2xs font-semibold text-ink3 uppercase tracking-widest mb-1">Задача</p>
-              <h2 className="text-lg font-bold text-ink leading-snug">{task.text}</h2>
+              <TaskTextBlock text={task.text} fallback="Без названия" titleClassName="text-lg" />
             </motion.div>
           )}
 

@@ -1222,6 +1222,12 @@ function ManualTaskPanel({
 
   return (
     <div className="grid gap-3 xl:grid-cols-3">
+      <JiraImportPanel
+        sessionId={sessionId}
+        expectedVersion={expectedVersion}
+        busy={busy}
+        onRun={onRun}
+      />
       <Surface as="form" className="space-y-3 p-3" onSubmit={submitManual}>
         <p className="text-xs font-semibold uppercase tracking-wide text-ink3">Добавить задачу вручную</p>
         <div className="grid gap-2 sm:grid-cols-[1fr_120px]">
@@ -1248,12 +1254,6 @@ function ManualTaskPanel({
           Добавить из вставки
         </Button>
       </Surface>
-      <JiraImportPanel
-        sessionId={sessionId}
-        expectedVersion={expectedVersion}
-        busy={busy}
-        onRun={onRun}
-      />
     </div>
   );
 }
@@ -1324,7 +1324,7 @@ function JiraImportPanel({
     <Surface as="form" className="space-y-3 p-3" onSubmit={loadPreview}>
       <p className="text-xs font-semibold uppercase tracking-wide text-ink3">Импорт из Jira</p>
       <div className="grid gap-2 sm:grid-cols-[1fr_110px]">
-        <TextField label="JQL" placeholder="project = APP order by rank" value={jql} onChange={(event) => setJql(event.target.value)} />
+        <TextField label="JQL" placeholder="Пользуйтесь поиском задач в Jira через JQL" value={jql} onChange={(event) => setJql(event.target.value)} />
         <TextField label="Лимит" inputMode="numeric" value={maxResults} onChange={(event) => setMaxResults(event.target.value)} />
       </div>
       <Button type="submit" variant="secondary" className="w-full" disabled={busy !== null || previewBusy || !jql.trim()} loading={previewBusy}>
