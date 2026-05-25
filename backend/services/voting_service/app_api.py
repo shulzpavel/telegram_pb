@@ -1421,6 +1421,89 @@ def _markdown_report(summary: dict) -> str:
     return "\n".join(lines).strip() + "\n"
 
 
+def _csv_report(summary: dict) -> str:
+    """Build an Excel/Sheets-friendly report with readable sections."""
+    participant_names: list[str] = summary["participants"]
+    stats = summary["stats"]
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+
+    writer.writerow(["Planning Poker Report"])
+    writer.writerow(["Title", summary["title"]])
+    writer.writerow(["Chat ID", summary["chat_id"]])
+    writer.writerow(["Topic ID", summary["topic_id"] if summary["topic_id"] is not None else "—"])
+    writer.writerow(["Started", summary["started_at"] or "—"])
+    writer.writerow(["Finished", summary["finished_at"] or "—"])
+    writer.writerow(["Phase", summary["phase"]])
+    writer.writerow([])
+
+    writer.writerow(["Summary"])
+    writer.writerow(["Metric", "Value"])
+    writer.writerow(["TOTAL SP", stats["total_story_points"]])
+    writer.writerow(["Completed tasks", stats["total_completed"]])
+    writer.writerow(["With final estimate", f"{stats['with_estimate']} / {stats['total_completed']}"])
+    writer.writerow(["Consensus", f"{stats['consensus_count']} / {stats['total_completed']}"])
+    writer.writerow(["Votes cast", stats["votes_cast"]])
+    writer.writerow([])
+
+    writer.writerow(["Participants"])
+    if participant_names:
+        writer.writerow(["Name"])
+        for name in participant_names:
+            writer.writerow([name])
+    else:
+        writer.writerow(["—"])
+    writer.writerow([])
+
+    writer.writerow(["Results By Task"])
+    writer.writerow([
+        "#",
+        "Jira Key",
+        "Task",
+        "Final SP",
+        "Votes",
+        "Consensus",
+        "AI Description",
+        "AI Complexity",
+        "AI Methods",
+        "URL",
+        "Completed At",
+    ])
+    for idx, entry in enumerate(summary["completed_tasks"], start=1):
+        ai_description, ai_complexity, ai_methods = _csv_ai_summary_fields(entry.get("ai_summary"))
+        writer.writerow([
+            idx,
+            entry["jira_key"] or "",
+            entry["summary"],
+            entry["story_points"] if entry["story_points"] is not None else "—",
+            _format_distribution(entry["distribution"]) or "—",
+            "yes" if entry["consensus"] else "no",
+            ai_description or "—",
+            ai_complexity or "—",
+            ai_methods or "—",
+            entry["url"] or "",
+            entry["completed_at"] or "",
+        ])
+    writer.writerow([])
+
+    writer.writerow(["Vote Details"])
+    writer.writerow(["Task #", "Jira Key", "Task", "Participant", "Vote"])
+    for idx, entry in enumerate(summary["completed_tasks"], start=1):
+        if entry["votes"]:
+            for vote in entry["votes"]:
+                writer.writerow([
+                    idx,
+                    entry["jira_key"] or "",
+                    entry["summary"],
+                    vote["name"],
+                    vote["value"],
+                ])
+        else:
+            writer.writerow([idx, entry["jira_key"] or "", entry["summary"], "—", "—"])
+
+    return buf.getvalue()
+
+
 @app_router.get("/app/sessions/{chat_id}/summary.csv")
 async def app_session_summary_csv(
     chat_id: int,
@@ -1429,76 +1512,12 @@ async def app_session_summary_csv(
     title: Optional[str] = Query(default=None),
     actor: CmsPrincipal = Depends(_manager_dep),
 ) -> StreamingResponse:
-    """Export the session summary as a structured, human-readable CSV.
-
-    Format:
-        - Header block with session metadata (commented with leading '#').
-        - Blank line separator.
-        - Tabular rows: index, jira_key, summary, AI description/complexity/methods,
-          url, source, final SP, consensus, voter count, vote distribution,
-          then a column per participant with their individual vote.
-    """
+    """Export the session summary as a structured, human-readable CSV."""
     session = await _get_repo_session(request.app.state.repository, chat_id, topic_id)
     stored_title = await _stored_session_title(request, chat_id, topic_id)
     resolved_title = _resolve_session_title(title, stored_title)
     summary = _summary_payload(session, title=resolved_title)
-    participant_names: list[str] = summary["participants"]
-
-    buf = io.StringIO()
-    writer = csv.writer(buf)
-
-    writer.writerow([f"# Planning Poker Session Summary"])
-    writer.writerow([f"# Title: {summary['title']}"])
-    writer.writerow([f"# Chat ID: {summary['chat_id']}"])
-    writer.writerow([f"# Topic ID: {summary['topic_id'] if summary['topic_id'] is not None else '—'}"])
-    writer.writerow([f"# Started at: {summary['started_at'] or '—'}"])
-    writer.writerow([f"# Finished at: {summary['finished_at'] or '—'}"])
-    writer.writerow([f"# Phase: {summary['phase']}"])
-    writer.writerow([f"# Completed tasks: {summary['stats']['total_completed']}"])
-    writer.writerow([f"# With final estimate: {summary['stats']['with_estimate']}"])
-    writer.writerow([f"# Total SP: {summary['stats']['total_story_points']}"])
-    writer.writerow([f"# Consensus reached: {summary['stats']['consensus_count']}"])
-    writer.writerow([f"# Votes cast: {summary['stats']['votes_cast']}"])
-    writer.writerow([])
-
-    header = [
-        "Index",
-        "Jira Key",
-        "Summary",
-        "AI Description",
-        "AI Complexity",
-        "AI Methods",
-        "URL",
-        "Source",
-        "Final SP",
-        "Consensus",
-        "Voter Count",
-        "Vote Distribution",
-        "Completed At",
-    ] + participant_names
-    writer.writerow(header)
-
-    for idx, entry in enumerate(summary["completed_tasks"], start=1):
-        name_to_value = {vote["name"]: vote["value"] for vote in entry["votes"]}
-        ai_description, ai_complexity, ai_methods = _csv_ai_summary_fields(entry.get("ai_summary"))
-        row = [
-            idx,
-            entry["jira_key"] or "",
-            entry["summary"],
-            ai_description,
-            ai_complexity,
-            ai_methods,
-            entry["url"] or "",
-            entry["source"],
-            entry["story_points"] if entry["story_points"] is not None else "",
-            "yes" if entry["consensus"] else "no",
-            entry["voter_count"],
-            _format_distribution(entry["distribution"]),
-            entry["completed_at"] or "",
-        ] + [name_to_value.get(name, "") for name in participant_names]
-        writer.writerow(row)
-
-    csv_bytes = buf.getvalue().encode("utf-8-sig")  # BOM so Excel detects UTF-8
+    csv_bytes = _csv_report(summary).encode("utf-8-sig")  # BOM so Excel detects UTF-8
 
     content_disposition = _content_disposition(summary["title"], chat_id, "csv")
 

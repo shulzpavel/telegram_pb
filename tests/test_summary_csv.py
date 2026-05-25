@@ -1,11 +1,15 @@
 """Tests for session summary CSV helpers."""
 
+import csv
+import io
+
 from app.domain.participant import Participant
 from app.domain.session import Session
 from app.domain.task import Task
 from config import UserRole
 from services.voting_service.app_api import (
     _csv_ai_summary_fields,
+    _csv_report,
     _markdown_report,
     _serialize_completed_task,
     _summary_payload,
@@ -102,3 +106,39 @@ def test_markdown_report_contains_confluence_summary() -> None:
     assert "**TOTAL SP:** 8" in report
     assert "[BB-1](https://jira.example/browse/BB-1)" in report
     assert "Payment rollout" in report
+
+
+def test_csv_report_is_sectioned_and_contains_total() -> None:
+    session = Session(chat_id=1, topic_id=None)
+    session.participants[1] = Participant(user_id=1, name="dev@betboom.com", role=UserRole.PARTICIPANT)
+    task = Task(
+        jira_key="BB-1",
+        summary="Checkout flow",
+        url="https://jira.example/browse/BB-1",
+        story_points=8,
+        ai_summary={"description": "Payment rollout", "methods": ["API"], "complexity": "Medium"},
+    )
+    task.votes[1] = "8"
+    session.batch_completed = True
+    session.last_batch = [task]
+
+    rows = list(csv.reader(io.StringIO(_csv_report(_summary_payload(session, title="Sprint Planning")))))
+
+    assert ["Planning Poker Report"] in rows
+    assert ["TOTAL SP", "8"] in rows
+    assert ["Results By Task"] in rows
+    assert [
+        "1",
+        "BB-1",
+        "Checkout flow",
+        "8",
+        "8×1",
+        "yes",
+        "Payment rollout",
+        "Medium",
+        "API",
+        "https://jira.example/browse/BB-1",
+        "",
+    ] in rows
+    assert ["Vote Details"] in rows
+    assert ["1", "BB-1", "Checkout flow", "dev@betboom.com", "8"] in rows
