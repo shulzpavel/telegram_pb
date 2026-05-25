@@ -2,8 +2,16 @@
 	email {$ACME_EMAIL}
 }
 
+http://{$APP_DOMAIN} {
+	redir https://{$APP_DOMAIN}{uri} permanent
+}
+
 {$APP_DOMAIN} {
 	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+	}
 
 	reverse_proxy /api/* voting-service:8002
 	reverse_proxy /health/* voting-service:8002
