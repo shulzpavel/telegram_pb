@@ -1,5 +1,7 @@
 export type TabKey = "overview" | "sessions" | "users" | "votes" | "tokens" | "web" | "events" | "access";
 
+export type ThemeMode = "dark" | "light" | "system";
+
 export interface CmsRoleRef {
   id: number;
   key: string;
@@ -24,6 +26,7 @@ export interface CmsPrincipal {
   permissions: string[];
   roles: CmsRoleRef[];
   pages: CmsPageAccess[];
+  theme_preference?: ThemeMode;
 }
 
 export interface CmsPermission {
@@ -70,6 +73,7 @@ export interface Overview {
 export interface SessionItem {
   id: number;
   session_key: string;
+  title: string | null;
   chat_id: number;
   topic_id: number | null;
   current_task_id: string | null;

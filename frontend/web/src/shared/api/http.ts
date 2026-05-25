@@ -27,6 +27,8 @@ function formatValidationDetail(detail: unknown, fallback: string): string {
 }
 
 export async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
+  // `signal` flows through native `fetch`, so callers can pass an
+  // AbortController.signal in `init` and get cancellation for free.
   const response = await fetch(url, {
     ...init,
     headers: {

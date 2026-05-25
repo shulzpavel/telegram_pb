@@ -1,6 +1,7 @@
-import { motion, useReducedMotion } from "framer-motion";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { FormEvent, useState } from "react";
-import { Alert, Badge, Button, ProgressBar, Surface, TextField, cn } from "../design-system";
+import { Link } from "react-router-dom";
+import { Alert, Badge, BrandMark, Button, ProgressBar, Surface, TextField, ThemeToggle, cn } from "../design-system";
 import { ParticipantRole, TaskInfo } from "../hooks/useSession";
 
 interface JoinPageProps {
@@ -27,19 +28,23 @@ function validateName(v: string): string | null {
 
 export default function JoinPage({ task, onJoin, error }: JoinPageProps) {
   const reduceMotion = useReducedMotion();
-  const [name, setName]       = useState("");
-  const [role, setRole]       = useState<ParticipantRole | null>(null);
-  const [touched, setTouched] = useState(false);
+  const [name, setName] = useState("");
+  const [role, setRole] = useState<ParticipantRole | null>(null);
+  // Validation is field-scoped so blurring the name input doesn't suddenly
+  // flash "Выберите роль" before the user has even reached the role picker.
+  const [nameTouched, setNameTouched] = useState(false);
+  const [roleTouched, setRoleTouched] = useState(false);
+  const [submitAttempted, setSubmitAttempted] = useState(false);
   const [loading, setLoading] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
-  const nameError = touched ? validateName(name) : null;
-  const roleError = touched && !role ? "Выберите роль" : null;
+  const nameError = nameTouched || submitAttempted ? validateName(name) : null;
+  const roleError = (roleTouched || submitAttempted) && !role ? "Выберите роль" : null;
   const canSubmit = !loading && validateName(name) === null && role !== null;
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
-    setTouched(true);
+    setSubmitAttempted(true);
     if (!canSubmit || !role) return;
     setLoading(true);
     setSubmitError(null);
@@ -54,47 +59,53 @@ export default function JoinPage({ task, onJoin, error }: JoinPageProps) {
   const displayError = submitError ?? error;
 
   return (
-    <div className="min-h-dvh bg-canvas flex flex-col items-center justify-center p-4">
+    <div className="relative flex min-h-screen-mobile flex-col app-gradient-bg px-4 pb-safe-6 pt-safe">
+      {/* Floating theme toggle — kept out of the form flow so the join
+          screen stays a single centered card on mobile. `safe-area`
+          padding is inherited from the parent's `pt-safe`. */}
+      <div className="absolute right-3 top-3 z-10 sm:right-4 sm:top-4">
+        <ThemeToggle size="sm" tone="ghost" />
+      </div>
       <motion.div
-        className="relative w-full max-w-md"
+        className="mx-auto flex w-full max-w-md flex-1 flex-col justify-center py-6"
         initial={{ opacity: 0, y: reduceMotion ? 0 : 12 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: reduceMotion ? 0 : 0.18, ease: [0.2, 0, 0, 1] }}
       >
-        {/* Logo */}
-        <div className="flex items-center gap-2 mb-8 justify-center">
-          <PokerIcon />
-          <span className="text-sm font-semibold text-ink2 tracking-tight">Planning Poker</span>
+        <div className="mb-6 flex items-center justify-center md:mb-8">
+          <BrandMark size="sm" />
         </div>
 
-        <Surface className="p-6 md:p-8">
-          <div className="space-y-6">
-            {/* Task preview */}
-            {task ? (
-              <div>
-                <div className="flex items-center gap-2 mb-2">
-                  {task.jira_key && (
-                    <Badge tone="info">{task.jira_key}</Badge>
-                  )}
-                  <span className="text-xs text-ink3">{task.index}&thinsp;/&thinsp;{task.total}</span>
+        <Surface className="p-5 sm:p-6 md:p-8">
+          <div className="space-y-5 md:space-y-6">
+            {/* Task preview slot — reserves vertical space whether or not a
+                task is loaded yet so the form below doesn't jump when the
+                websocket state arrives. */}
+            <div className="min-h-[5.5rem]">
+              {task ? (
+                <div>
+                  <div className="mb-2 flex items-center gap-2">
+                    {task.jira_key ? <Badge tone="info">{task.jira_key}</Badge> : null}
+                    <span className="text-xs tabular-nums text-ink3">{task.index}&thinsp;/&thinsp;{task.total}</span>
+                  </div>
+                  <h1 className="text-balance break-words text-base font-bold leading-snug text-ink sm:text-lg">{task.text}</h1>
+                  <div className="mt-3"><ProgressBar value={task.index / task.total} /></div>
                 </div>
-                <h1 className="text-lg font-bold text-ink leading-snug text-balance">{task.text}</h1>
-                <div className="mt-3"><ProgressBar value={task.index / task.total} /></div>
-              </div>
-            ) : (
-              <div className="text-center">
-                <h1 className="text-xl font-bold text-ink">Сессия голосования</h1>
-                <p className="text-sm text-ink3 mt-1">Ожидание задачи...</p>
-              </div>
-            )}
+              ) : (
+                <div className="text-center">
+                  <h1 className="text-lg font-bold text-ink sm:text-xl">Сессия голосования</h1>
+                  <p className="mt-1 text-sm text-ink3">Ожидание задачи…</p>
+                </div>
+              )}
+            </div>
 
-            <form onSubmit={handleSubmit} className="space-y-5" noValidate>
+            <form onSubmit={handleSubmit} className="space-y-4 sm:space-y-5" noValidate>
               <TextField
                 label="Ваше имя"
                 type="text"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                onBlur={() => setTouched(true)}
+                onBlur={() => setNameTouched(true)}
                 placeholder="Например: Маша"
                 autoFocus
                 autoComplete="name"
@@ -107,35 +118,38 @@ export default function JoinPage({ task, onJoin, error }: JoinPageProps) {
                 <label className="mb-2 block text-xs font-semibold text-ink3">
                   Роль в команде
                 </label>
-                <div className="grid grid-cols-2 gap-2">
+                {/* 2 cols on the smallest viewports (320–375) keeps labels
+                    one-line; 3 cols on 376+ shows all five roles in two
+                    rows with a balanced grid. */}
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
                   {ROLES.map((r) => {
                     const active = role === r.value;
                     return (
                       <button
                         key={r.value}
                         type="button"
-                        onClick={() => { setRole(r.value); setTouched(true); }}
+                        onClick={() => { setRole(r.value); setRoleTouched(true); }}
                         disabled={loading}
                         aria-pressed={active}
                         className={cn(
-                          "flex min-h-12 items-center gap-2.5 rounded-lg border px-4 py-3 text-left text-sm font-semibold",
-                          "transition-[background-color,border-color,color] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue/30",
+                          "flex min-h-12 items-center gap-2 rounded-lg border px-3 py-2.5 text-left text-sm font-semibold sm:gap-2.5 sm:px-4 sm:py-3",
+                          "transition-[background-color,border-color,color] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue/30 active:scale-[0.98]",
                           active
                             ? "border-blue bg-blue/8 text-blue"
                             : "border-line bg-surface text-ink2 hover:border-blue/30 hover:bg-line2",
-                          loading ? "opacity-50 pointer-events-none" : "",
+                          loading ? "pointer-events-none opacity-50" : "",
                         )}
                       >
                         <span className="text-base leading-none">{r.icon}</span>
-                        {r.label}
+                        <span className="truncate">{r.label}</span>
                         {active && (
                           <motion.div
-                            className="ml-auto w-4 h-4 rounded-full bg-blue flex items-center justify-center shrink-0"
+                            className="ml-auto flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-blue"
                             initial={{ scale: 0 }}
                             animate={{ scale: 1 }}
                             transition={{ duration: reduceMotion ? 0 : 0.14 }}
                           >
-                            <svg width="8" height="6" viewBox="0 0 8 6" fill="none">
+                            <svg width="8" height="6" viewBox="0 0 8 6" fill="none" aria-hidden="true">
                               <path d="M1 3L3 5L7 1" stroke="white" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
                             </svg>
                           </motion.div>
@@ -144,33 +158,64 @@ export default function JoinPage({ task, onJoin, error }: JoinPageProps) {
                     );
                   })}
                 </div>
-                {roleError ? <p className="mt-1.5 text-xs text-red">{roleError}</p> : null}
+                {/* Reserve a row for the inline error so the CTA below
+                    stays at a stable Y coordinate. */}
+                <p
+                  className={cn(
+                    "mt-1.5 min-h-[1rem] text-xs text-red transition-opacity duration-150",
+                    roleError ? "opacity-100" : "opacity-0",
+                  )}
+                  aria-live="polite"
+                >
+                  {roleError ?? "\u00a0"}
+                </p>
               </div>
 
-              {displayError && (
-                <Alert tone="danger">{displayError}</Alert>
-              )}
+              {/* Pre-reserved error slot — Alert renders inside, so the
+                  CTA position is stable even when a server error surfaces
+                  after the form has been submitted.
+
+                  Recovery: when an error appears, we also surface a
+                  small "go home / ask for a new link" footer so the
+                  user is never stuck on a broken invite. */}
+              <div className="min-h-[3.25rem]">
+                <AnimatePresence initial={false}>
+                  {displayError ? (
+                    <motion.div
+                      key="join-err"
+                      initial={{ opacity: 0, y: -4 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -4 }}
+                      transition={{ duration: reduceMotion ? 0 : 0.16 }}
+                      className="space-y-2"
+                    >
+                      <Alert tone="danger">{displayError}</Alert>
+                      <p className="text-xs text-ink3">
+                        Если ссылка не работает — попросите фасилитатора прислать новую.
+                        Иногда invite-ссылки живут несколько часов и истекают.
+                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        <Link to="/">
+                          <Button variant="ghost" size="sm">На главную</Button>
+                        </Link>
+                        <Link to="/demo?mock=1">
+                          <Button variant="ghost" size="sm">Попробовать demo</Button>
+                        </Link>
+                      </div>
+                    </motion.div>
+                  ) : null}
+                </AnimatePresence>
+              </div>
 
               <Button type="submit" variant="primary" size="lg" className="w-full" disabled={!canSubmit} loading={loading}>
-                {loading ? "Подключение..." : "Войти в сессию"}
+                {loading ? "Подключение…" : "Войти в сессию"}
               </Button>
             </form>
           </div>
         </Surface>
 
-        <p className="text-center text-xs text-ink4 mt-5">Ссылка действительна 8 часов</p>
+        <p className="mt-5 text-center text-xs text-ink4">Ссылка действительна 8 часов</p>
       </motion.div>
-    </div>
-  );
-}
-
-function PokerIcon() {
-  return (
-    <div className="w-7 h-7 rounded-lg bg-blue flex items-center justify-center">
-      <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-        <rect x="1" y="1" width="5.5" height="7.5" rx="1" fill="white" fillOpacity=".9"/>
-        <rect x="7.5" y="5.5" width="5.5" height="7.5" rx="1" fill="white" fillOpacity=".5"/>
-      </svg>
     </div>
   );
 }

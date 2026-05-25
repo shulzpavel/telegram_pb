@@ -1,32 +1,83 @@
 import { expect, test } from "@playwright/test";
 
-test("demo join flow reaches voting screen", async ({ page }) => {
-  await page.goto("/demo?mock=1");
+// -----------------------------------------------------------------------------
+// Smoke suite
+// -----------------------------------------------------------------------------
+// Each test exercises a critical user path that *must* keep working between
+// releases. They are intentionally short and assertion-light: smoke is about
+// "does it render and react?", deeper behaviour is covered by unit tests and
+// (eventually) full integration suites.
+//
+// All tests run against a static `vite preview` build — no backend — so they
+// avoid any state that could leak between runs.
+// -----------------------------------------------------------------------------
 
-  await expect(page.getByRole("heading", { name: /Добавить авторизацию/ })).toBeVisible();
-  await page.getByLabel("Ваше имя").fill("QA User");
-  await page.getByRole("button", { name: "QA" }).click();
-  await page.getByRole("button", { name: "Войти в сессию" }).click();
+test.describe("public surfaces", () => {
+  test("landing page presents the product headline and CTAs", async ({ page }) => {
+    await page.goto("/");
+    await expect(
+      page.getByRole("heading", { name: /Planning Poker, который не мешает оценивать/ }),
+    ).toBeVisible();
+  });
 
-  await expect(page.getByText("Выберите оценку")).toBeVisible();
-  await page.getByRole("button", { name: "5" }).click();
-  await expect(page.getByText("Вы проголосовали!")).toBeVisible();
+  test("unknown URL falls back to the 404 mascot", async ({ page }) => {
+    await page.goto("/this-route-does-not-exist");
+    await expect(
+      page.getByRole("heading", { name: /Бибизяныч не нашёл эту страницу/ }),
+    ).toBeVisible();
+  });
 });
 
-test("cms unauthenticated route renders login on desktop and mobile", async ({ page }) => {
-  await page.goto("/cms");
+test.describe("CMS routing", () => {
+  test("unauthenticated /cms shows the CMS login form", async ({ page }) => {
+    await page.goto("/cms");
 
-  await expect(page.getByRole("heading", { name: "CMS" })).toBeVisible();
-  await expect(page.getByLabel("Username")).toBeVisible();
-  await expect(page.getByLabel("Password")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Sign in" })).toBeDisabled();
+    await expect(page.getByRole("heading", { name: /Админка Planning Poker/ })).toBeVisible();
+    await expect(page.getByLabel("Username")).toBeVisible();
+    await expect(page.getByLabel("Пароль")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Войти" })).toBeDisabled();
+  });
+
+  test("/manage without auth redirects into the unified CMS login", async ({ page }) => {
+    // Phase 2 / A1 — the standalone `/manage` landing was retired in
+    // favour of the CMS sessions list as a single entry-point.
+    await page.goto("/manage");
+
+    await expect(page).toHaveURL(/\/cms\/sessions$/);
+    await expect(page.getByRole("heading", { name: /Админка Planning Poker/ })).toBeVisible();
+  });
+
+  test("/cms/sessions/:id/cockpit shows the CMS login when not authed", async ({ page }) => {
+    // Deep-link to a session detail without a cookie: the auth-unification
+    // logic in ManagerPage routes this through CmsLoginPage rather than the
+    // legacy ManagerLogin so the framing matches the rest of CMS.
+    await page.goto("/cms/sessions/424242/cockpit");
+
+    await expect(page.getByRole("heading", { name: /Админка Planning Poker/ })).toBeVisible();
+    await expect(page.getByLabel("Username")).toBeVisible();
+  });
 });
 
-test("manager route renders product login without CMS shell", async ({ page }) => {
-  await page.goto("/manage");
+test.describe("participant flow", () => {
+  test("demo mock join flow reaches the voting screen and accepts a vote", async ({ page }) => {
+    await page.goto("/demo?mock=1");
 
-  await expect(page.getByRole("heading", { name: "Вход менеджера" })).toBeVisible();
-  await expect(page.getByLabel("Username")).toBeVisible();
-  await expect(page.getByLabel("Password")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Войти" })).toBeDisabled();
+    // JoinPage is rendered with a mock task. Form labels are stable
+    // across UI iterations, so we assert on them rather than on the
+    // task title or marketing copy.
+    await expect(page.getByLabel("Ваше имя")).toBeVisible();
+    await page.getByLabel("Ваше имя").fill("QA User");
+
+    // Role chips are buttons. The "QA" label is shared across the chip
+    // text and the assistive icon — `getByRole` with exact match keeps
+    // us aimed at the actual button.
+    await page.getByRole("button", { name: "QA" }).click();
+    await page.getByRole("button", { name: "Войти в сессию" }).click();
+
+    // VotePage exposes the card grid; clicking "5" should transition
+    // to the "Вы проголосовали!" success state.
+    await expect(page.getByText("Выберите оценку")).toBeVisible();
+    await page.getByRole("button", { name: "5" }).click();
+    await expect(page.getByText("Вы проголосовали!")).toBeVisible();
+  });
 });

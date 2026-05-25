@@ -169,8 +169,25 @@ class TestUpdateJiraStoryPointsUseCase:
 
         assert updated == 0
         assert failed == []
-        assert skipped == ["TEST-1: нет валидных голосов"]
+        assert skipped == ["TEST-1: нет финальной оценки SP"]
         assert self.repo.save_count == 0
+
+    @pytest.mark.asyncio
+    async def test_prefers_manager_final_sp_over_max_vote(self):
+        session = Session(chat_id=123, topic_id=456)
+        session.last_batch = [
+            Task(jira_key="TEST-1", summary="Task 1", votes={1: "8", 2: "5"}, story_points=3),
+        ]
+        await self.repo.save_session(session)
+        self.repo.save_count = 0
+        self.jira_client.update_story_points.return_value = True
+
+        updated, failed, skipped = await self.use_case.execute(123, 456, skip_errors=True)
+
+        assert updated == 1
+        assert failed == []
+        assert skipped == []
+        self.jira_client.update_story_points.assert_awaited_once_with("TEST-1", 3)
 
     @pytest.mark.asyncio
     async def test_skip_errors_updates_all_valid_tasks(self):

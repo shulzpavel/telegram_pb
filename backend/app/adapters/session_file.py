@@ -58,6 +58,15 @@ class FileSessionRepository(SessionRepository):
         """Convert SessionState to Session model."""
         return SessionFactory.from_dict(state.to_dict(), state.chat_id, state.topic_id)
 
+    async def close(self) -> None:
+        """No-op for parity with networked repositories.
+
+        Lifespan shutdown calls close() generically across all adapters; the
+        file-backed adapter has nothing to release but must expose the method
+        so a local-dev run without Redis/Postgres can still shut down cleanly.
+        """
+        return None
+
     def _session_to_state(self, session: Session) -> SessionState:
         """Convert Session model to SessionState."""
         data = SessionFactory.to_dict(session)

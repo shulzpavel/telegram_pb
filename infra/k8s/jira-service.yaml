@@ -41,6 +41,11 @@ spec:
             configMapKeyRef:
               name: jira-config
               key: story-points-field
+        - name: JIRA_DEMO_FALLBACK
+          valueFrom:
+            configMapKeyRef:
+              name: jira-config
+              key: jira-demo-fallback
         livenessProbe:
           httpGet:
             path: /health/live

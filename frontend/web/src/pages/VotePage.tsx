@@ -1,19 +1,23 @@
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import ParticipantChip from "../components/ParticipantChip";
 import VoteCard from "../components/VoteCard";
-import { Alert, Badge, LoadingDots, ProgressBar, Surface } from "../design-system";
+import { Alert, Badge, BrandMark, LoadingDots, ProgressBar, Surface, ThemeToggle } from "../design-system";
 import { ParticipantStatus, TaskInfo } from "../hooks/useSession";
 
-const VOTE_ROWS = [
-  ["0", "1", "2", "3", "5"],
-  ["8", "13", "21", "34", "?"],
-];
+/**
+ * Ten Fibonacci-style vote values rendered as a single 5-column grid. The
+ * grid keeps tap targets aligned across viewports (column widths follow the
+ * container, gap stays consistent) and reflows from 5×2 on mobile to 5×2 on
+ * desktop. We intentionally avoid 2 different layouts to keep CLS at zero
+ * when the viewport changes mid-session (foldables, browser chrome resize).
+ */
+const VOTE_VALUES = ["0", "1", "2", "3", "5", "8", "13", "21", "34", "?"];
 
 interface VotePageProps {
   task: TaskInfo;
   participants: ParticipantStatus[];
-  onVote: (value: string) => Promise<void>;
+  onVote: (value: string) => Promise<boolean>;
   error: string | null;
 }
 
@@ -22,180 +26,207 @@ export default function VotePage({ task, participants, onVote, error }: VotePage
   const [selected, setSelected] = useState<string | null>(null);
   const [voted, setVoted] = useState(false);
 
+  // Reset local "voted" UI whenever the active task changes so the participant
+  // is not stuck on the previous task's success screen after the manager
+  // advances or restarts voting.
+  const taskKey = task.task_id ?? `${task.index}-${task.text}`;
+  useEffect(() => {
+    setSelected(null);
+    setVoted(false);
+  }, [taskKey]);
+
   async function handleSelect(value: string) {
     if (voted) return;
     setSelected(value);
     setVoted(true);
-    await onVote(value);
+    const ok = await onVote(value);
+    if (!ok) {
+      // Server rejected the vote — let the participant try again instead of
+      // showing a permanent "you voted" screen.
+      setVoted(false);
+      setSelected(null);
+    }
   }
 
   const votedCount = participants.filter((p) => p.voted).length;
   const totalCount = participants.length;
   const progress = totalCount > 0 ? votedCount / totalCount : 0;
+  const transitionBase = { duration: reduceMotion ? 0 : 0.18, ease: [0.2, 0, 0, 1] as const };
 
   return (
-    <div className="min-h-dvh bg-canvas flex flex-col">
-      {/* Top bar */}
-      <header className="flex items-center justify-between px-4 md:px-8 py-4 border-b border-line/60 bg-surface/80 backdrop-blur sticky top-0 z-10">
-        <div className="flex items-center gap-2.5">
-          <PokerMiniIcon />
-          <span className="text-sm font-semibold text-ink2">Planning Poker</span>
-        </div>
-        <div className="flex items-center gap-2">
-          {task.jira_key && (
-            <Badge tone="info">{task.jira_key}</Badge>
-          )}
-          <span className="text-xs font-medium text-ink3">
-            {task.index}&thinsp;/&thinsp;{task.total}
-          </span>
+    <div className="flex min-h-screen-mobile flex-col app-gradient-bg">
+      {/* Sticky header. `pt-safe` honors the iPhone notch; `bg-surface/80
+          backdrop-blur` keeps focus on the cards below while staying legible
+          over scrolled content. */}
+      <header className="sticky top-0 z-10 border-b border-line/60 bg-surface/85 backdrop-blur pt-safe">
+        <div className="mx-auto flex min-h-14 w-full max-w-5xl items-center gap-2 px-3 sm:gap-3 sm:px-4 md:px-8">
+          <BrandMark size="sm" className="min-w-0" />
+          <div className="ml-auto flex shrink-0 items-center gap-2">
+            {task.jira_key ? <Badge tone="info">{task.jira_key}</Badge> : null}
+            <span className="text-xs font-medium tabular-nums text-ink3">
+              {task.index}&thinsp;/&thinsp;{task.total}
+            </span>
+            <ThemeToggle size="sm" tone="ghost" />
+          </div>
         </div>
       </header>
 
-      {/* Main layout */}
-      <div className="flex-1 flex flex-col md:flex-row max-w-5xl mx-auto w-full px-4 md:px-8 py-6 gap-6 md:gap-10">
-
-        {/* Left / top panel — task info */}
+      {/* Main column. `flex-1` consumes remaining viewport height; the
+          bottom padding reserves space for safe-area + breathing room so
+          neither the cards nor the success-state get clipped by the home
+          indicator on iOS. */}
+      <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-4 px-4 py-4 pb-safe-6 md:flex-row md:gap-8 md:px-8 md:py-6">
+        {/* === Context panel ===
+            On mobile it sits above the cards and stays compact so the CTA
+            grid is reachable without scrolling. On md+ it becomes a fixed
+            side column. Animated `key` keeps task swaps smooth without
+            shifting the cards below. */}
         <AnimatePresence mode="wait">
           <motion.aside
-            key={task.index}
-            className="md:w-64 lg:w-72 shrink-0 flex flex-col gap-5"
-            initial={{ opacity: 0, x: -12 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: -8 }}
-            transition={{ duration: reduceMotion ? 0 : 0.18 }}
+            key={taskKey}
+            className="flex flex-col gap-3 md:w-64 md:shrink-0 md:gap-5 lg:w-72"
+            initial={{ opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -6 }}
+            transition={transitionBase}
           >
-            {/* Task card */}
-            <Surface className="p-5">
-              <p className="text-2xs font-semibold text-ink3 uppercase tracking-widest mb-2">Задача</p>
-              <h2 className="text-base font-bold text-ink leading-snug text-balance">
+            <Surface className="p-4 md:p-5">
+              <p className="mb-1.5 text-2xs font-semibold uppercase tracking-widest text-ink3">Задача</p>
+              <h2 className="text-balance break-words text-base font-bold leading-snug text-ink md:text-lg">
                 {task.text}
               </h2>
-              <div className="mt-4">
-                <div className="flex justify-between text-2xs text-ink3 mb-1.5">
+              <div className="mt-3 md:mt-4">
+                <div className="mb-1.5 flex items-center justify-between text-2xs text-ink3">
                   <span>Прогресс</span>
-                  <span>{votedCount} / {totalCount}</span>
+                  <span className="tabular-nums">{votedCount} / {totalCount}</span>
                 </div>
                 <ProgressBar value={progress} />
               </div>
             </Surface>
 
-            {/* Participants */}
-            {participants.length > 0 && (
-              <Surface className="p-5">
-                <p className="text-2xs font-semibold text-ink3 uppercase tracking-widest mb-3">Участники</p>
+            {task.ai_summary ? (
+              <Surface className="border-blue/25 bg-blue/5 p-4 md:p-5">
+                <div className="mb-2 flex flex-wrap items-center gap-2">
+                  <Badge tone="info">AI-подсказка</Badge>
+                  <span className="text-2xs font-semibold uppercase tracking-wide text-ink3">для оценки</span>
+                </div>
+                <p className="text-sm leading-6 text-ink2">{task.ai_summary.description}</p>
+                <div className="mt-3 space-y-3">
+                  <div>
+                    <p className="text-2xs font-semibold uppercase tracking-widest text-ink3">Зоны внимания</p>
+                    <ul className="mt-1 space-y-1 text-xs text-ink2">
+                      {task.ai_summary.methods.map((method) => (
+                        <li key={method} className="flex gap-2">
+                          <span className="text-blue" aria-hidden="true">•</span>
+                          <span>{method}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                  <div>
+                    <p className="text-2xs font-semibold uppercase tracking-widest text-ink3">AI оценка сложности</p>
+                    <p className="mt-1 text-xs leading-5 text-ink2">{task.ai_summary.complexity}</p>
+                  </div>
+                </div>
+              </Surface>
+            ) : null}
+
+            {participants.length > 0 ? (
+              <Surface className="p-4 md:p-5">
+                <p className="mb-2 text-2xs font-semibold uppercase tracking-widest text-ink3 md:mb-3">Участники</p>
                 <div className="flex flex-wrap gap-2">
-                  {participants.map((p) => (
-                    <ParticipantChip key={p.name} name={p.name} voted={p.voted} />
+                  {participants.map((p, i) => (
+                    <ParticipantChip key={`${p.name}-${i}`} name={p.name} voted={p.voted} />
                   ))}
                 </div>
               </Surface>
-            )}
-
-            {/* My vote status (desktop only) */}
-            {voted && (
-              <motion.div
-                className="hidden md:flex rounded-lg border border-line bg-surface p-5 shadow-card items-center gap-3"
-                initial={{ opacity: 0, scale: 0.95 }}
-                animate={{ opacity: 1, scale: 1 }}
-                transition={{ duration: reduceMotion ? 0 : 0.16 }}
-              >
-                <div className="w-9 h-9 rounded-full bg-green/15 flex items-center justify-center shrink-0">
-                  <CheckIcon />
-                </div>
-                <div>
-                  <p className="text-sm font-semibold text-ink">Голос отдан</p>
-                  <p className="text-xs text-ink3">Вы выбрали <span className="font-bold text-blue">{selected}</span></p>
-                </div>
-              </motion.div>
-            )}
+            ) : null}
           </motion.aside>
         </AnimatePresence>
 
-        {/* Right / bottom panel — cards */}
-        <div className="flex-1 flex flex-col justify-center">
-          <Surface className="min-h-[390px] p-4 md:p-6 flex items-center justify-center">
-          <AnimatePresence mode="wait">
-            {voted ? (
-              <motion.div
-                key="voted"
-                className="flex w-full flex-col items-center justify-center gap-4 py-10 md:py-0"
-                initial={{ opacity: 0, scale: 0.9 }}
-                animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0 }}
-                transition={{ duration: reduceMotion ? 0 : 0.18 }}
-              >
-                <div className="w-20 h-20 rounded-full bg-green/12 flex items-center justify-center">
-                  <svg width="36" height="28" viewBox="0 0 36 28" fill="none">
-                    <path d="M3 14L13 24L33 4" stroke="#30D158" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
-                </div>
-                <div className="text-center">
-                  <p className="text-xl font-bold text-ink">Вы проголосовали!</p>
-                  <p className="text-base text-ink3 mt-1">
-                    Ваш выбор: <span className="font-bold text-blue text-lg">{selected}</span>
-                  </p>
-                </div>
-                <p className="text-sm text-ink4">Ожидаем остальных участников...</p>
-
-                <LoadingDots className="mt-2 text-ink4" />
-              </motion.div>
-            ) : (
-              <motion.div
-                key="cards"
-                className="w-full max-w-xl"
-                initial={{ opacity: 0, y: 16 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0 }}
-                transition={{ duration: reduceMotion ? 0 : 0.18 }}
-              >
-                <p className="text-xs font-semibold text-ink3 uppercase tracking-widest mb-4 text-center md:text-left">
-                  Выберите оценку
-                </p>
-                <div className="flex flex-col gap-3">
-                  {VOTE_ROWS.map((row, ri) => (
-                    <div key={ri} className="grid grid-cols-5 gap-3">
-                      {row.map((v) => (
-                        <VoteCard
-                          key={v}
-                          value={v}
-                          selected={selected === v}
-                          disabled={voted}
-                          onSelect={() => handleSelect(v)}
-                        />
-                      ))}
-                    </div>
-                  ))}
-                </div>
-                {error && (
-                  <div className="mt-4">
-                    <Alert tone="danger">{error}</Alert>
+        {/* === Card grid ===
+            Reserve `min-h-[22rem]` so the inner state swap (cards ↔ voted
+            confirmation) doesn't push surrounding content around. The
+            surface stretches with flex to use the full visual area. */}
+        <section className="flex min-w-0 flex-1 flex-col justify-center">
+          <Surface className="flex min-h-[22rem] flex-col items-stretch justify-center p-4 md:p-6">
+            <AnimatePresence mode="wait" initial={false}>
+              {voted ? (
+                <motion.div
+                  key="voted"
+                  className="flex flex-col items-center justify-center gap-4 py-6 text-center md:py-8"
+                  initial={{ opacity: 0, scale: 0.96 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0 }}
+                  transition={transitionBase}
+                >
+                  <div className="flex h-16 w-16 items-center justify-center rounded-full bg-green/12 md:h-20 md:w-20">
+                    <svg width="32" height="26" viewBox="0 0 36 28" fill="none" aria-hidden="true">
+                      <path d="M3 14L13 24L33 4" stroke="#30D158" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
                   </div>
-                )}
-              </motion.div>
-            )}
-          </AnimatePresence>
+                  <div>
+                    <p className="text-lg font-bold text-ink md:text-xl">Вы проголосовали!</p>
+                    <p className="mt-1 text-sm text-ink3 md:text-base">
+                      Ваш выбор: <span className="text-lg font-bold text-blue">{selected}</span>
+                    </p>
+                  </div>
+                  <p className="text-xs text-ink4 md:text-sm">Ожидаем остальных участников…</p>
+                  <LoadingDots className="text-ink4" />
+                </motion.div>
+              ) : (
+                <motion.div
+                  key="cards"
+                  className="flex flex-col"
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0 }}
+                  transition={transitionBase}
+                >
+                  <p className="mb-1 text-center text-2xs font-semibold uppercase tracking-widest text-ink3 md:text-left md:text-xs">
+                    Выберите оценку
+                  </p>
+                  {/* Tell the user up-front that the vote is final after
+                      submission — surfacing this expectation here avoids
+                      a "wait, can I change it?" moment on the voted
+                      screen. Compact, single line, single visual weight. */}
+                  <p className="mb-3 text-center text-2xs text-ink4 md:mb-4 md:text-left">
+                    Выбор подтвердится сразу после тапа. Голос станет виден после Reveal от фасилитатора.
+                  </p>
+                  <div className="grid grid-cols-5 gap-2 sm:gap-3">
+                    {VOTE_VALUES.map((v) => (
+                      <VoteCard
+                        key={v}
+                        value={v}
+                        selected={selected === v}
+                        disabled={voted}
+                        onSelect={() => handleSelect(v)}
+                      />
+                    ))}
+                  </div>
+                  {/* Reserve a fixed-height row so inline server errors don't
+                      push the grid up when they appear/disappear. */}
+                  <div className="mt-3 min-h-[3.25rem]">
+                    <AnimatePresence initial={false}>
+                      {error ? (
+                        <motion.div
+                          key="err"
+                          initial={{ opacity: 0, y: -4 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0, y: -4 }}
+                          transition={{ duration: reduceMotion ? 0 : 0.16 }}
+                        >
+                          <Alert tone="danger">{error}</Alert>
+                        </motion.div>
+                      ) : null}
+                    </AnimatePresence>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </Surface>
-        </div>
-      </div>
+        </section>
+      </main>
     </div>
-  );
-}
-
-function PokerMiniIcon() {
-  return (
-    <div className="w-6 h-6 rounded-md bg-blue flex items-center justify-center">
-      <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-        <rect x="1" y="1" width="4.5" height="6.5" rx=".8" fill="white" fillOpacity=".9" />
-        <rect x="6.5" y="4.5" width="4.5" height="6.5" rx=".8" fill="white" fillOpacity=".5" />
-      </svg>
-    </div>
-  );
-}
-
-function CheckIcon() {
-  return (
-    <svg width="18" height="14" viewBox="0 0 18 14" fill="none">
-      <path d="M1 7L6 12L17 1" stroke="#30D158" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
   );
 }

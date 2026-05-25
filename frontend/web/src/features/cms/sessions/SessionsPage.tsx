@@ -18,107 +18,536 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
-import { cmsFetch, cmsTasksApi, type CmsTaskBody } from "../api/cmsClient";
-import type { JiraPreview, ParticipantItem, SessionDetail, SessionItem, TaskItem } from "../api/cmsTypes";
-import { Alert, Button, ConfirmDialog, EmptyState, SelectField, Surface, TextareaField, TextField } from "../../../design-system";
-import { CompactList, DataTable, InlineError, MobileRecordCard, MobileRecordField, Skeleton, Status, Toolbar } from "../components/CmsPrimitives";
+import { useNavigate } from "react-router-dom";
+import { cmsFetch, cmsSessionsApi, cmsTasksApi, type CmsTaskBody } from "../api/cmsClient";
+import { managerApi } from "../../manager/api/managerClient";
+import { storeManagerSession } from "../../manager/ManagerPage";
+import type {
+  JiraPreview,
+  ParticipantItem,
+  SessionDetail,
+  SessionItem,
+  TaskItem,
+  WebParticipantItem,
+} from "../api/cmsTypes";
+import { Alert, Badge, Button, ConfirmDialog, EmptyState, ScrollArea, SelectField, Surface, TextareaField, TextField } from "../../../design-system";
+import {
+  CompactList,
+  DataTable,
+  HelpCallout,
+  InlineError,
+  LoadMoreFooter,
+  MobileRecordCard,
+  MobileRecordField,
+  SectionHeader,
+  Skeleton,
+  Status,
+  Toolbar,
+} from "../components/CmsPrimitives";
 import { useCmsList } from "../hooks/useCmsList";
 import { useDebouncedValue } from "../hooks/useDebouncedValue";
-import { formatDate } from "../../../shared/lib/format";
+import { formatDate, shortHash } from "../../../shared/lib/format";
+import { displaySessionTitle, sessionKeyChip } from "./sessionTitle";
 import { normalizeOptionalNumber, normalizeOptionalText, parseBulkTasks } from "./taskInput";
 import { canUseFullReorder, reorderedTaskIds } from "./taskQueueList";
 
-export default function SessionsPage({ canManageTasks }: { canManageTasks: boolean }) {
+interface SessionsPageProps {
+  canManageTasks: boolean;
+  canManageSessions: boolean;
+}
+
+export default function SessionsPage({ canManageTasks, canManageSessions }: SessionsPageProps) {
   const [q, setQ] = useState("");
   const [active, setActive] = useState("");
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [confirmAction, setConfirmAction] = useState<
+    | { kind: "close"; item: SessionItem }
+    | { kind: "delete"; item: SessionItem }
+    | null
+  >(null);
+  const [actionBusy, setActionBusy] = useState<number | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [actionInfo, setActionInfo] = useState<string | null>(null);
+  // CMS-native session creation (Option B follow-up): instead of
+  // bouncing the user out of CMS into `/manage`, we create the
+  // session in-place and navigate straight to its cockpit. Three
+  // separate state slots keep the dialog dumb — open/closed, draft
+  // title, and an in-flight indicator.
+  const [createOpen, setCreateOpen] = useState(false);
+  const [createTitle, setCreateTitle] = useState("");
+  const [createBusy, setCreateBusy] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
   const debouncedQ = useDebouncedValue(q);
   const params = useMemo(
     () => ({ q: debouncedQ, active: active === "" ? undefined : active === "true" }),
     [active, debouncedQ]
   );
-  const list = useCmsList<SessionItem>("/sessions", params);
+  const list = useCmsList<SessionItem>("/sessions", params, { scrollKey: "cms-sessions" });
+  const navigate = useNavigate();
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const focusSearch = () => searchInputRef.current?.focus();
+
+  // Option B navigation: every session detail lives under
+  // `/cms/sessions/:id/...`. Completed sessions auto-route to the
+  // report tab; active ones open the cockpit. Both new URLs map to
+  // the same components as before — only the address changed.
+  function openCockpit(item: SessionItem) {
+    if (item.batch_completed && !item.is_active) {
+      navigate(`/cms/sessions/${item.chat_id}/report`);
+      return;
+    }
+    navigate(`/cms/sessions/${item.chat_id}/cockpit`);
+  }
+
+  async function submitCreate(event: FormEvent) {
+    event.preventDefault();
+    if (createBusy) return;
+    setCreateBusy(true);
+    setCreateError(null);
+    const title = createTitle.trim() || "Planning Poker";
+    try {
+      const session = await managerApi.createSession(title);
+      // Cache the just-minted invite token so the cockpit doesn't
+      // immediately call regenerate-invite (which would burn the
+      // token we just got from the create response).
+      storeManagerSession(session);
+      setCreateOpen(false);
+      setCreateTitle("");
+      navigate(`/cms/sessions/${session.chat_id}/cockpit`);
+    } catch (err) {
+      setCreateError(err instanceof Error ? err.message : "Не удалось создать сессию");
+    } finally {
+      setCreateBusy(false);
+    }
+  }
+
+  async function runSessionAction(kind: "close" | "delete", item: SessionItem) {
+    setActionBusy(item.id);
+    setActionError(null);
+    setActionInfo(null);
+    try {
+      if (kind === "close") {
+        const result = await cmsSessionsApi.close(item.id);
+        setActionInfo(`Сессия закрыта. Обработано задач: ${result.completed_count}.`);
+      } else {
+        await cmsSessionsApi.delete(item.id);
+        setActionInfo("Сессия удалена из истории.");
+        if (selectedId === item.id) {
+          setSelectedId(null);
+        }
+      }
+      await list.reload();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Действие не удалось");
+    } finally {
+      setActionBusy(null);
+      setConfirmAction(null);
+    }
+  }
 
   return (
     <section className="space-y-4">
+      <SectionHeader
+        title="Сессии"
+        description="Все планинг-покер сессии. «Открыть» ведёт в cockpit (или отчёт, если сессия завершена). «Подробнее» открывает карточку с переименованием, закрытием и удалением."
+        actions={
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={() => {
+              setCreateTitle("");
+              setCreateError(null);
+              setCreateOpen(true);
+            }}
+          >
+            Новая сессия
+          </Button>
+        }
+      />
+      <HelpCallout title="Подсказки">
+        <p>«Открыть cockpit» — фасилитаторский экран для управления сессией: ставить SP, переключать задачи, видеть голоса участников.</p>
+        <p>«Открыть отчёт» — итоги завершённой сессии с экспортом в CSV. Работает даже если сессия ещё не закрыта (покажет текущие голосования).</p>
+        <p>«Закрыть» переносит все оставшиеся задачи в last_batch и фиксирует консенсус — после этого сессия доступна только для чтения.</p>
+        <p>«Удалить из истории» прячет сессию вместе с её задачами, голосами и invite-ссылками; запись в журнал действий остаётся.</p>
+      </HelpCallout>
+      {actionInfo ? <Alert tone="success">{actionInfo}</Alert> : null}
+      {actionError ? <InlineError text={actionError} /> : null}
+
       <Toolbar>
-        <TextField className="md:max-w-sm" aria-label="Search session" placeholder="Search session" value={q} onChange={(event) => setQ(event.target.value)} />
-        <SelectField className="md:max-w-[180px]" aria-label="Session status" value={active} onChange={(event) => setActive(event.target.value)}>
-          <option value="">All statuses</option>
-          <option value="true">Active</option>
-          <option value="false">Inactive</option>
+        <TextField
+          ref={searchInputRef}
+          className="md:max-w-sm"
+          aria-label="Поиск сессии"
+          placeholder="Поиск по названию или идентификатору"
+          value={q}
+          onChange={(event) => setQ(event.target.value)}
+        />
+        <SelectField
+          className="md:max-w-[200px]"
+          aria-label="Статус сессии"
+          value={active}
+          onChange={(event) => setActive(event.target.value)}
+        >
+          <option value="">Все статусы</option>
+          <option value="true">Идут сейчас</option>
+          <option value="false">Завершены / не запущены</option>
         </SelectField>
-        <Button variant="ghost" size="md" onClick={list.reload}>Refresh</Button>
+        <Button variant="ghost" size="md" onClick={list.reload}>Обновить</Button>
       </Toolbar>
+
       <DataTable
         error={list.error}
         loading={list.loading}
-        hasMore={Boolean(list.cursor)}
+        loadingMore={list.loadingMore}
+        hasMore={list.hasMore}
+        reachedCap={list.reachedCap}
+        loadedCount={list.items.length}
+        total={list.total}
         onMore={list.loadMore}
-        columns={["Session", "Users", "Tasks", "Votes", "State", "Updated"]}
+        onFocusSearch={focusSearch}
+        itemNoun="сессий"
+        columns={["Сессия", "Участники", "Задачи", "Голоса", "Статус", "Обновлена", "Действия"]}
         empty={
           list.items.length === 0 && !list.loading ? (
-            <EmptyState title="No sessions found" description="Try a different search or status filter." />
+            // Branching on filter state: with active filters the next
+            // logical action is to clear them; on a clean slate the
+            // next logical action is to create the very first session.
+            // Either way the user always has a CTA — no dead-end.
+            (q.trim() || active) ? (
+              <EmptyState
+                title="Ничего не найдено"
+                description="По текущим фильтрам сессий нет. Сбросьте фильтры, чтобы увидеть полный список."
+                action={
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => { setQ(""); setActive(""); }}
+                  >
+                    Сбросить фильтры
+                  </Button>
+                }
+              />
+            ) : (
+              <EmptyState
+                title="Ещё нет ни одной сессии"
+                description="Создайте первую planning-сессию — позже сюда попадут все ваши прошедшие и активные."
+                action={
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    onClick={() => {
+                      setCreateTitle("");
+                      setCreateError(null);
+                      setCreateOpen(true);
+                    }}
+                  >
+                    Создать первую сессию
+                  </Button>
+                }
+              />
+            )
           ) : null
         }
         mobileCards={list.items.map((item) => (
           <MobileRecordCard
             key={item.id}
             title={
-              <button className="text-left text-blue" onClick={() => setSelectedId(item.id)}>
-                {item.session_key}
+              <button
+                type="button"
+                className="text-left text-base font-bold text-blue underline-offset-2 hover:underline"
+                onClick={() => setSelectedId(item.id)}
+              >
+                {displaySessionTitle(item)}
               </button>
             }
-            meta={`chat ${item.chat_id} · topic ${item.topic_id ?? "none"}`}
+            meta={
+              <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-ink3">
+                <span>id {item.id}</span>
+                <span aria-hidden>·</span>
+                <span>{sessionKeyChip(item)}</span>
+                <span aria-hidden>·</span>
+                <span>обновлена {formatDate(item.updated_at)}</span>
+              </span>
+            }
             action={<Status active={item.is_active} done={item.batch_completed} />}
+            footer={
+              // Simplified list-card: one primary CTA "Открыть" that
+              // routes by status. Detailed actions (Закрыть / Удалить
+              // / Переименовать) moved into the drawer below — same
+              // place where the full session preview lives, so the
+              // list stays scannable.
+              <>
+                <Button
+                  size="sm"
+                  variant="primary"
+                  className="flex-1 min-w-[120px]"
+                  onClick={() => openCockpit(item)}
+                >
+                  {item.batch_completed && !item.is_active ? "Открыть отчёт" : "Открыть"}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="flex-1 min-w-[120px]"
+                  onClick={() => setSelectedId(item.id)}
+                >
+                  Подробнее
+                </Button>
+              </>
+            }
           >
-            <MobileRecordField label="Users" value={item.participants_count} />
-            <MobileRecordField label="Tasks" value={item.total_tasks} />
-            <MobileRecordField label="Votes" value={item.total_votes} />
-            <MobileRecordField label="Updated" value={formatDate(item.updated_at)} />
+            <MobileRecordField label="Участники" value={item.participants_count} />
+            <MobileRecordField label="Задачи" value={item.total_tasks} />
+            <MobileRecordField label="Голоса" value={item.total_votes} />
           </MobileRecordCard>
         ))}
       >
         {list.items.map((item) => (
           <tr key={item.id} className="border-t border-line hover:bg-line2/60">
-            <td className="px-3 py-2">
-              <button className="text-left font-semibold text-blue" onClick={() => setSelectedId(item.id)}>
-                {item.session_key}
+            <td className="px-3 py-2 align-top">
+              <button
+                type="button"
+                className="block w-full max-w-[22rem] break-words text-left font-semibold text-blue"
+                onClick={() => setSelectedId(item.id)}
+              >
+                {displaySessionTitle(item)}
               </button>
-              <p className="text-xs text-ink3">chat {item.chat_id} · topic {item.topic_id ?? "none"}</p>
+              <p className="text-xs text-ink3">id {item.id} · {sessionKeyChip(item)}</p>
             </td>
-            <td className="px-3 py-2">{item.participants_count}</td>
-            <td className="px-3 py-2">{item.total_tasks}</td>
-            <td className="px-3 py-2">{item.total_votes}</td>
-            <td className="px-3 py-2"><Status active={item.is_active} done={item.batch_completed} /></td>
-            <td className="px-3 py-2 text-ink3">{formatDate(item.updated_at)}</td>
+            <td className="px-3 py-2 align-top tabular-nums">{item.participants_count}</td>
+            <td className="px-3 py-2 align-top tabular-nums">{item.total_tasks}</td>
+            <td className="px-3 py-2 align-top tabular-nums">{item.total_votes}</td>
+            <td className="px-3 py-2 align-top"><Status active={item.is_active} done={item.batch_completed} /></td>
+            <td className="px-3 py-2 align-top text-ink3 whitespace-nowrap">{formatDate(item.updated_at)}</td>
+            <td className="px-3 py-2 align-top">
+              {/* List rows: one primary action + a quieter "Подробнее"
+                  that opens the drawer with everything else (rename,
+                  close, delete, participants, queue editor). This
+                  removes 2–3 duplicate buttons per row that were
+                  competing for the user's attention. */}
+              <div className="flex flex-wrap gap-1.5">
+                <Button size="sm" variant="primary" onClick={() => openCockpit(item)}>
+                  {item.batch_completed && !item.is_active ? "Открыть отчёт" : "Открыть"}
+                </Button>
+                <Button size="sm" variant="ghost" onClick={() => setSelectedId(item.id)}>
+                  Подробнее
+                </Button>
+              </div>
+            </td>
           </tr>
         ))}
       </DataTable>
+
+      <ConfirmDialog
+        open={confirmAction?.kind === "close"}
+        title="Закрыть сессию?"
+        description={
+          confirmAction?.kind === "close"
+            ? `Все оставшиеся задачи сессии «${displaySessionTitle(confirmAction.item)}» будут зафиксированы как завершённые. Действие безопасно — повторное закрытие ничего не сломает.`
+            : ""
+        }
+        confirmLabel="Закрыть"
+        cancelLabel="Отмена"
+        tone="primary"
+        onCancel={() => setConfirmAction(null)}
+        onConfirm={() => {
+          if (confirmAction?.kind === "close") {
+            void runSessionAction("close", confirmAction.item);
+          }
+        }}
+      />
+      <ConfirmDialog
+        open={confirmAction?.kind === "delete"}
+        title="Удалить сессию из истории?"
+        description={
+          confirmAction?.kind === "delete"
+            ? `Сессия «${displaySessionTitle(confirmAction.item)}», её задачи, голоса и invite-ссылки исчезнут из CMS. Запись в журнале действий сохранится. Действие отменить из интерфейса нельзя.`
+            : ""
+        }
+        confirmLabel="Удалить"
+        cancelLabel="Отмена"
+        tone="danger"
+        onCancel={() => setConfirmAction(null)}
+        onConfirm={() => {
+          if (confirmAction?.kind === "delete") {
+            void runSessionAction("delete", confirmAction.item);
+          }
+        }}
+      />
+
+      <CreateSessionDialog
+        open={createOpen}
+        title={createTitle}
+        busy={createBusy}
+        error={createError}
+        onTitleChange={setCreateTitle}
+        onCancel={() => {
+          if (createBusy) return;
+          setCreateOpen(false);
+          setCreateError(null);
+        }}
+        onSubmit={submitCreate}
+      />
+
       {selectedId ? (
         <SessionDetails
           sessionId={selectedId}
           canManageTasks={canManageTasks}
+          canManageSessions={canManageSessions}
           onClose={() => setSelectedId(null)}
+          onRenamed={() => {
+            void list.reload();
+          }}
+          onOpenCockpit={(detail) => {
+            if (detail.batch_completed && !detail.is_active) {
+              navigate(`/cms/sessions/${detail.chat_id}/report`);
+              return;
+            }
+            navigate(`/cms/sessions/${detail.chat_id}/cockpit`);
+          }}
+          onOpenReport={(detail) => navigate(`/cms/sessions/${detail.chat_id}/report`)}
+          onSessionAction={(kind, detail) => setConfirmAction({ kind, item: detail })}
+          actionBusyId={actionBusy}
         />
       ) : null}
     </section>
   );
 }
 
+/**
+ * Minimal modal for creating a new planning-poker session directly
+ * from CMS. Reuses the design-system surface + an auto-focused
+ * single-line text field. The default name ("Planning Poker") is
+ * applied server-side if the user submits an empty value, mirroring
+ * the legacy `/manage` flow so behaviour stays predictable.
+ *
+ * Implemented as a focused dialog (backdrop + escape-to-close +
+ * scroll-lock) rather than an inline panel because the user is about
+ * to leave the list view — we want unambiguous attention on the
+ * single decision being made.
+ */
+function CreateSessionDialog({
+  open,
+  title,
+  busy,
+  error,
+  onTitleChange,
+  onCancel,
+  onSubmit,
+}: {
+  open: boolean;
+  title: string;
+  busy: boolean;
+  error: string | null;
+  onTitleChange: (next: string) => void;
+  onCancel: () => void;
+  onSubmit: (event: FormEvent) => void;
+}) {
+  useEffect(() => {
+    if (!open) return;
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !busy) onCancel();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.body.style.overflow = previous;
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open, busy, onCancel]);
+
+  if (!open) return null;
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="cms-create-session-title"
+      className="fixed inset-0 z-40 flex items-end justify-center bg-canvas/70 px-4 pb-safe-6 pt-safe backdrop-blur sm:items-center"
+      onClick={(event) => {
+        if (event.target === event.currentTarget && !busy) onCancel();
+      }}
+    >
+      <Surface
+        as="form"
+        className="w-full max-w-md p-5 sm:p-6 motion-safe:animate-scale-in"
+        onSubmit={onSubmit}
+      >
+        <h2 id="cms-create-session-title" className="text-base font-bold text-ink">
+          Новая сессия
+        </h2>
+        <p className="mt-1 text-sm text-ink3">
+          Создадим пустую сессию и сразу откроем cockpit, чтобы вы могли добавить задачи и пригласить участников.
+        </p>
+        <div className="mt-4 space-y-3">
+          <TextField
+            label="Название сессии"
+            placeholder="Planning Poker"
+            value={title}
+            maxLength={200}
+            autoFocus
+            disabled={busy}
+            onChange={(event) => onTitleChange(event.target.value)}
+            hint="Можно оставить пустым — подставим «Planning Poker»."
+          />
+          {error ? <Alert tone="danger">{error}</Alert> : null}
+        </div>
+        <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+          <Button
+            type="button"
+            variant="ghost"
+            size="md"
+            disabled={busy}
+            onClick={onCancel}
+            className="w-full sm:w-auto"
+          >
+            Отмена
+          </Button>
+          <Button
+            type="submit"
+            variant="primary"
+            size="md"
+            loading={busy}
+            disabled={busy}
+            className="w-full sm:w-auto"
+          >
+            Создать и открыть
+          </Button>
+        </div>
+      </Surface>
+    </div>
+  );
+}
+
 function SessionDetails({
   sessionId,
   canManageTasks,
+  canManageSessions,
   onClose,
+  onRenamed,
+  onOpenCockpit,
+  onOpenReport,
+  onSessionAction,
+  actionBusyId,
 }: {
   sessionId: number;
   canManageTasks: boolean;
+  canManageSessions: boolean;
   onClose: () => void;
+  onRenamed?: (sessionId: number) => void;
+  onOpenCockpit: (detail: SessionDetail) => void;
+  onOpenReport: (detail: SessionDetail) => void;
+  onSessionAction: (kind: "close" | "delete", detail: SessionDetail) => void;
+  actionBusyId: number | null;
 }) {
   const [detail, setDetail] = useState<SessionDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [bucket, setBucket] = useState("tasks_queue");
   const [taskSearch, setTaskSearch] = useState("");
+  const [renaming, setRenaming] = useState(false);
+  const [renameDraft, setRenameDraft] = useState("");
+  const [renameBusy, setRenameBusy] = useState(false);
+  const [renameError, setRenameError] = useState<string | null>(null);
   const debouncedTaskSearch = useDebouncedValue(taskSearch);
   const participantList = useCmsList<ParticipantItem>(`/sessions/${sessionId}/participants`, {});
   const taskParams = useMemo(
@@ -132,7 +561,7 @@ function SessionDetails({
     try {
       setDetail(await cmsFetch<SessionDetail>(`/sessions/${sessionId}`));
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Session failed");
+      setError(err instanceof Error ? err.message : "Не удалось загрузить сессию");
     }
   }, [sessionId]);
 
@@ -145,49 +574,165 @@ function SessionDetails({
     await taskList.reload();
   }, [refreshDetail, taskList]);
 
+  function startRename() {
+    if (!detail) return;
+    setRenameDraft(detail.title ?? "");
+    setRenameError(null);
+    setRenaming(true);
+  }
+
+  function cancelRename() {
+    setRenaming(false);
+    setRenameError(null);
+    setRenameDraft("");
+  }
+
+  async function submitRename(event: FormEvent) {
+    event.preventDefault();
+    if (!detail || renameBusy) return;
+    const trimmed = renameDraft.trim();
+    if (trimmed.length > 200) {
+      setRenameError("Название не должно превышать 200 символов.");
+      return;
+    }
+    setRenameBusy(true);
+    setRenameError(null);
+    try {
+      await cmsSessionsApi.rename(detail.id, trimmed.length > 0 ? trimmed : null);
+      await refreshDetail();
+      onRenamed?.(detail.id);
+      setRenaming(false);
+      setRenameDraft("");
+    } catch (err) {
+      setRenameError(err instanceof Error ? err.message : "Не удалось переименовать сессию");
+    } finally {
+      setRenameBusy(false);
+    }
+  }
+
   return (
-    <section className="rounded-lg border border-line bg-surface">
-      <div className="px-4 py-3 border-b border-line flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-        <div>
-          <h2 className="text-base font-bold text-ink">Session {detail?.session_key ?? sessionId}</h2>
-          <p className="text-xs text-ink3">
-            {detail ? `${formatDate(detail.updated_at)} · queue v${detail.tasks_version}` : "Loading"}
-          </p>
+    <section className="rounded-lg border border-line bg-surface shadow-card">
+      <header className="border-b border-line px-4 py-3">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0 flex-1">
+            {renaming && detail ? (
+              <form className="space-y-2" onSubmit={submitRename}>
+                <TextField
+                  aria-label="Название сессии"
+                  placeholder={`Сессия #${detail.id}`}
+                  value={renameDraft}
+                  maxLength={200}
+                  autoFocus
+                  disabled={renameBusy}
+                  onChange={(event) => setRenameDraft(event.target.value)}
+                />
+                <p className="text-xs text-ink3">
+                  Оставьте пусто, чтобы вернуть стандартное название «Сессия #{detail.id}». Не более 200 символов.
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <Button type="submit" variant="primary" size="sm" disabled={renameBusy} loading={renameBusy}>
+                    Сохранить
+                  </Button>
+                  <Button type="button" variant="ghost" size="sm" disabled={renameBusy} onClick={cancelRename}>
+                    Отмена
+                  </Button>
+                </div>
+                {renameError ? <InlineError text={renameError} /> : null}
+              </form>
+            ) : (
+              <>
+                <h3 className="truncate text-base font-bold text-ink">
+                  {detail ? displaySessionTitle(detail) : `Сессия #${sessionId}`}
+                </h3>
+                <p className="text-xs text-ink3">
+                  {detail
+                    ? `обновлена ${formatDate(detail.updated_at)} · версия очереди v${detail.tasks_version} · id ${detail.id} · ${sessionKeyChip(detail)}`
+                    : "Загрузка"}
+                </p>
+              </>
+            )}
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Primary path: jump to the detail screens with tabs.
+                The drawer keeps these two as quick-shortcuts; full
+                page navigation is one click away. */}
+            {detail ? (
+              <>
+                <Button variant="primary" size="sm" onClick={() => onOpenCockpit(detail)}>
+                  Открыть cockpit
+                </Button>
+                <Button variant="ghost" size="sm" onClick={() => onOpenReport(detail)}>
+                  Открыть отчёт
+                </Button>
+              </>
+            ) : null}
+            <Button variant="ghost" size="sm" onClick={() => void refreshTasks()}>
+              Обновить
+            </Button>
+            {canManageSessions && detail && !renaming ? (
+              <Button variant="ghost" size="sm" onClick={startRename}>
+                Переименовать
+              </Button>
+            ) : null}
+            {/* Destructive actions live here — moved out of the list
+                rows so each session card stays scannable. They retain
+                their colour (secondary / danger) so weight matches
+                intent. */}
+            {canManageSessions && detail && detail.is_active ? (
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={actionBusyId === detail.id}
+                loading={actionBusyId === detail.id}
+                onClick={() => onSessionAction("close", detail)}
+              >
+                Закрыть сессию
+              </Button>
+            ) : null}
+            {canManageSessions && detail ? (
+              <Button
+                variant="danger"
+                size="sm"
+                disabled={actionBusyId === detail.id}
+                onClick={() => onSessionAction("delete", detail)}
+              >
+                Удалить из истории
+              </Button>
+            ) : null}
+            {/* Renamed from "Закрыть карточку" — the old label
+                clashed with "Закрыть сессию" right next to it. */}
+            <Button variant="ghost" size="sm" onClick={onClose}>
+              Свернуть
+            </Button>
+          </div>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <Button variant="ghost" size="sm" onClick={() => void refreshTasks()}>Refresh</Button>
-          <Button variant="ghost" size="sm" onClick={onClose}>Close</Button>
-        </div>
-      </div>
+      </header>
       {error ? <div className="p-4"><InlineError text={error} /></div> : null}
       {detail ? (
-        <div className="grid xl:grid-cols-[minmax(260px,360px)_1fr] gap-4 p-4">
-          <div className="space-y-3">
-            <h3 className="text-sm font-bold text-ink">Participants</h3>
-            <CompactList
+        <div className="grid gap-4 p-4 xl:grid-cols-[minmax(280px,360px)_1fr]">
+          <div className="space-y-4">
+            <ParticipantsBlock
+              participants={participantList.items}
               loading={participantList.loading}
+              loadingMore={participantList.loadingMore}
               error={participantList.error}
-              hasMore={Boolean(participantList.cursor)}
+              hasMore={participantList.hasMore}
+              reachedCap={participantList.reachedCap}
+              total={participantList.total}
               onMore={participantList.loadMore}
-            >
-              {participantList.items.map((item) => (
-                <div key={item.user_id} className="grid grid-cols-[1fr_auto] gap-3 py-2 border-b border-line last:border-b-0">
-                  <div>
-                    <p className="text-sm font-semibold text-ink">{item.name}</p>
-                    <p className="text-xs text-ink3">{item.user_id} · {item.source}</p>
-                  </div>
-                  <p className="text-xs font-semibold text-ink3">{item.role}</p>
-                </div>
-              ))}
-            </CompactList>
+            />
+            <WebInviteesBlock sessionKey={detail.session_key} canManageSessions={canManageSessions} />
           </div>
           <TaskQueueEditor
             sessionId={sessionId}
             detail={detail}
             tasks={taskList.items}
             loading={taskList.loading}
+            loadingMore={taskList.loadingMore}
             error={taskList.error}
-            hasMore={Boolean(taskList.cursor)}
+            hasMore={taskList.hasMore}
+            reachedCap={taskList.reachedCap}
+            total={taskList.total}
             bucket={bucket}
             search={taskSearch}
             canManage={canManageTasks}
@@ -196,9 +741,6 @@ function SessionDetails({
             onMore={taskList.loadMore}
             onChanged={refreshTasks}
           />
-          <pre className="xl:col-span-2 max-h-80 overflow-auto rounded-lg bg-line2 p-3 text-xs text-ink2">
-            {JSON.stringify(detail.raw, null, 2)}
-          </pre>
         </div>
       ) : (
         <Skeleton height="h-40" />
@@ -207,13 +749,129 @@ function SessionDetails({
   );
 }
 
+function ParticipantsBlock({
+  participants,
+  loading,
+  loadingMore,
+  error,
+  hasMore,
+  reachedCap,
+  total,
+  onMore,
+}: {
+  participants: ParticipantItem[];
+  loading: boolean;
+  loadingMore: boolean;
+  error: string | null;
+  hasMore: boolean;
+  reachedCap: boolean;
+  total: number | null;
+  onMore: () => void;
+}) {
+  return (
+    <div className="space-y-2">
+      <h4 className="text-sm font-bold text-ink">Участники</h4>
+      <p className="text-xs text-ink3">Кто сейчас в сессии и какие у них роли. Имена обновляются при каждом подключении.</p>
+      <CompactList
+        loading={loading}
+        loadingMore={loadingMore}
+        error={error}
+        hasMore={hasMore}
+        reachedCap={reachedCap}
+        loadedCount={participants.length}
+        total={total}
+        itemNoun="участников"
+        onMore={onMore}
+      >
+        {participants.length === 0 && !loading ? (
+          <p className="py-3 text-xs text-ink3">Пока никто не присоединился.</p>
+        ) : null}
+        {participants.map((item) => (
+          <div
+            key={item.user_id}
+            className="grid grid-cols-[1fr_auto] gap-3 border-b border-line py-2 last:border-b-0"
+          >
+            <div className="min-w-0">
+              <p className="truncate text-sm font-semibold text-ink">{item.name}</p>
+              <p className="text-xs text-ink3">id {item.user_id}</p>
+            </div>
+            <Badge tone={item.role === "lead" ? "info" : "neutral"}>{item.role}</Badge>
+          </div>
+        ))}
+      </CompactList>
+    </div>
+  );
+}
+
+function WebInviteesBlock({
+  sessionKey,
+  canManageSessions,
+}: {
+  sessionKey: string;
+  canManageSessions: boolean;
+}) {
+  const params = useMemo(() => ({}), []);
+  // The CMS API filters by token_hash; we instead pull recent entries and
+  // narrow client-side by chat_id+topic_id from session_key (cheap for the
+  // typical < 200 row payload). Saves another bespoke endpoint.
+  const list = useCmsList<WebParticipantItem>("/web-participants", params);
+  const [chatRaw, topicRaw] = sessionKey.split(":");
+  const expectedChatId = Number(chatRaw);
+  const expectedTopic = topicRaw === "none" ? null : Number(topicRaw);
+  const filtered = list.items.filter((item) => {
+    if (item.chat_id !== expectedChatId) return false;
+    if ((item.topic_id ?? null) !== expectedTopic) return false;
+    return true;
+  });
+
+  return (
+    <div className="space-y-2">
+      <h4 className="text-sm font-bold text-ink">Заходили по invite-ссылке</h4>
+      <p className="text-xs text-ink3">
+        Лог веб-участников, которые открыли invite-ссылку и присоединились к сессии. Помогает понять, кто кого пригласил.
+        {canManageSessions ? " Управление самими ссылками — в разделе «Invite-ссылки»." : ""}
+      </p>
+      <CompactList
+        loading={list.loading}
+        loadingMore={list.loadingMore}
+        error={list.error}
+        hasMore={list.hasMore}
+        reachedCap={list.reachedCap}
+        loadedCount={filtered.length}
+        total={list.total}
+        itemNoun="приглашений"
+        onMore={list.loadMore}
+      >
+        {filtered.length === 0 && !list.loading ? (
+          <p className="py-3 text-xs text-ink3">Никто не присоединялся по invite-ссылке.</p>
+        ) : null}
+        {filtered.map((item) => (
+          <div key={item.id} className="grid grid-cols-[1fr_auto] gap-3 border-b border-line py-2 last:border-b-0">
+            <div className="min-w-0">
+              <p className="truncate text-sm font-semibold text-ink">{item.name}</p>
+              <p className="text-xs text-ink3">
+                {item.role} · присоединился {formatDate(item.joined_at)}
+              </p>
+              <p className="text-xs text-ink4">токен {shortHash(item.token_hash)}</p>
+            </div>
+            <Status active={item.is_active} label={item.is_active ? "активен" : "истёк"} />
+          </div>
+        ))}
+      </CompactList>
+    </div>
+  );
+}
+
 function TaskQueueEditor({
   sessionId,
   detail,
   tasks,
   loading,
+  loadingMore,
   error,
   hasMore,
+  reachedCap,
+  total,
   bucket,
   search,
   canManage,
@@ -226,8 +884,11 @@ function TaskQueueEditor({
   detail: SessionDetail;
   tasks: TaskItem[];
   loading: boolean;
+  loadingMore: boolean;
   error: string | null;
   hasMore: boolean;
+  reachedCap: boolean;
+  total: number | null;
   bucket: string;
   search: string;
   canManage: boolean;
@@ -248,9 +909,9 @@ function TaskQueueEditor({
     try {
       await mutation();
       await onChanged();
-      setMessage("Task queue updated.");
+      setMessage("Очередь обновлена.");
     } catch (err) {
-      setMutationError(err instanceof Error ? err.message : "Task update failed");
+      setMutationError(err instanceof Error ? err.message : "Не удалось обновить очередь");
     } finally {
       setBusy(null);
     }
@@ -259,19 +920,28 @@ function TaskQueueEditor({
   return (
     <div className="space-y-3 min-w-0">
       <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
-        <div>
-          <h3 className="text-sm font-bold text-ink">Tasks</h3>
+        <div className="min-w-0">
+          <h4 className="text-sm font-bold text-ink">Задачи</h4>
           <p className="text-xs text-ink3">
-            Loaded {tasks.length} · queue {detail.tasks_queue_count} · version {detail.tasks_version}
+            Показано {tasks.length} · в очереди {detail.tasks_queue_count} · версия очереди v{detail.tasks_version}
           </p>
         </div>
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(180px,1fr)_170px] lg:min-w-[420px]">
-          <TextField aria-label="Search tasks" placeholder="Search tasks" value={search} onChange={(event) => onSearchChange(event.target.value)} />
-          <SelectField aria-label="Task bucket" value={bucket} onChange={(event) => onBucketChange(event.target.value)}>
-            <option value="tasks_queue">Queue</option>
-            <option value="history">History</option>
-            <option value="last_batch">Last batch</option>
-            <option value="">All buckets</option>
+        <div className="grid w-full max-w-full grid-cols-1 gap-2 sm:grid-cols-[minmax(180px,1fr)_180px]">
+          <TextField
+            aria-label="Поиск задач"
+            placeholder="Поиск по summary, jira_key, id"
+            value={search}
+            onChange={(event) => onSearchChange(event.target.value)}
+          />
+          <SelectField
+            aria-label="Раздел очереди"
+            value={bucket}
+            onChange={(event) => onBucketChange(event.target.value)}
+          >
+            <option value="tasks_queue">Очередь</option>
+            <option value="history">История</option>
+            <option value="last_batch">Последняя пачка</option>
+            <option value="">Все разделы</option>
           </SelectField>
         </div>
       </div>
@@ -284,7 +954,7 @@ function TaskQueueEditor({
           onRun={run}
         />
       ) : (
-        <Alert>You can view tasks, but cannot manage the queue.</Alert>
+        <Alert>Просмотр доступен, но изменение очереди — нет.</Alert>
       )}
 
       {message ? <Alert tone="success">{message}</Alert> : null}
@@ -295,8 +965,11 @@ function TaskQueueEditor({
         detail={detail}
         tasks={tasks}
         loading={loading}
+        loadingMore={loadingMore}
         error={error}
         hasMore={hasMore}
+        reachedCap={reachedCap}
+        total={total}
         bucket={bucket}
         search={search}
         canManage={canManage}
@@ -314,8 +987,11 @@ function TaskVirtualList({
   detail,
   tasks,
   loading,
+  loadingMore,
   error,
   hasMore,
+  reachedCap,
+  total,
   bucket,
   search,
   canManage,
@@ -328,8 +1004,11 @@ function TaskVirtualList({
   detail: SessionDetail;
   tasks: TaskItem[];
   loading: boolean;
+  loadingMore: boolean;
   error: string | null;
   hasMore: boolean;
+  reachedCap: boolean;
+  total: number | null;
   bucket: string;
   search: string;
   canManage: boolean;
@@ -349,7 +1028,7 @@ function TaskVirtualList({
   const rowVirtualizer = useVirtualizer({
     count: tasks.length,
     getScrollElement: () => parentRef.current,
-    estimateSize: () => 112,
+    estimateSize: () => 128,
     overscan: 8,
   });
 
@@ -380,7 +1059,12 @@ function TaskVirtualList({
   }
 
   const content = (
-    <div ref={parentRef} className="max-h-[640px] overflow-auto">
+    <ScrollArea
+      className="max-h-[min(640px,70dvh)]"
+      viewportClassName="max-h-[min(640px,70dvh)]"
+      viewportRef={parentRef}
+      hint="Ещё задачи"
+    >
       <div style={{ height: `${rowVirtualizer.getTotalSize()}px`, position: "relative" }}>
         <AnimatePresence initial={false}>
           {rowVirtualizer.getVirtualItems().map((virtualRow) => {
@@ -424,13 +1108,13 @@ function TaskVirtualList({
           })}
         </AnimatePresence>
       </div>
-    </div>
+    </ScrollArea>
   );
 
   return (
     <div className="rounded-lg border border-line px-3">
       {error ? <InlineError text={error} /> : null}
-      {tasks.length === 0 && !loading ? <p className="py-4 text-sm text-ink3">No tasks found.</p> : null}
+      {tasks.length === 0 && !loading ? <p className="py-4 text-sm text-ink3">Задач не найдено.</p> : null}
       {queueMode && canManage ? (
         <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={(event) => void handleDragEnd(event)}>
           <SortableContext items={sortableIds} strategy={verticalListSortingStrategy}>
@@ -440,10 +1124,17 @@ function TaskVirtualList({
       ) : (
         content
       )}
-      <div className="py-2 flex items-center justify-between">
-        <p className="text-xs text-ink3">{loading ? "Loading" : hasMore ? "More rows available" : "End"}</p>
-        <Button variant="ghost" size="sm" onClick={onMore} disabled={loading || !hasMore}>More</Button>
-      </div>
+      <LoadMoreFooter
+        variant="compact"
+        loading={loading}
+        loadingMore={loadingMore}
+        hasMore={hasMore}
+        reachedCap={reachedCap}
+        loadedCount={tasks.length}
+        total={total}
+        onMore={onMore}
+        itemNoun="задач"
+      />
     </div>
   );
 }
@@ -531,9 +1222,10 @@ function ManualTaskPanel({
 
   return (
     <div className="grid gap-3 xl:grid-cols-3">
-      <Surface as="form" className="p-3 space-y-3" onSubmit={submitManual}>
-        <div className="grid gap-2 sm:grid-cols-[1fr_130px]">
-          <TextField label="Task summary" placeholder="Checkout edge case" value={summary} onChange={(event) => setSummary(event.target.value)} />
+      <Surface as="form" className="space-y-3 p-3" onSubmit={submitManual}>
+        <p className="text-xs font-semibold uppercase tracking-wide text-ink3">Добавить задачу вручную</p>
+        <div className="grid gap-2 sm:grid-cols-[1fr_120px]">
+          <TextField label="Summary" placeholder="Кейс или фича" value={summary} onChange={(event) => setSummary(event.target.value)} />
           <TextField label="SP" inputMode="numeric" value={storyPoints} onChange={(event) => setStoryPoints(event.target.value)} />
         </div>
         <div className="grid gap-2 sm:grid-cols-2">
@@ -541,18 +1233,19 @@ function ManualTaskPanel({
           <TextField label="URL" placeholder="https://..." value={url} onChange={(event) => setUrl(event.target.value)} />
         </div>
         <Button type="submit" variant="primary" className="w-full" disabled={busy !== null || !summary.trim()}>
-          Add task
+          Добавить задачу
         </Button>
       </Surface>
-      <Surface as="form" className="p-3 space-y-3" onSubmit={submitBulk}>
+      <Surface as="form" className="space-y-3 p-3" onSubmit={submitBulk}>
+        <p className="text-xs font-semibold uppercase tracking-wide text-ink3">Массовая вставка</p>
         <TextareaField
-          label="Bulk paste"
-          placeholder="Paste tasks, one per line"
+          label="По одной задаче на строку"
+          placeholder={"Чек-аут крайних случаев\nNotifications: rate limit\nSearch facets"}
           value={bulk}
           onChange={(event) => setBulk(event.target.value)}
         />
         <Button type="submit" variant="secondary" className="w-full" disabled={busy !== null || parseBulkTasks(bulk, 1).length === 0}>
-          Add pasted tasks
+          Добавить из вставки
         </Button>
       </Surface>
       <JiraImportPanel
@@ -595,7 +1288,7 @@ function JiraImportPanel({
       setPreview(result);
       setSelected(new Set(result.items.filter((item) => !item.duplicate).map((item) => item.key)));
     } catch (err) {
-      setPreviewError(err instanceof Error ? err.message : "Jira preview failed");
+      setPreviewError(err instanceof Error ? err.message : "Не удалось получить выборку из Jira");
     } finally {
       setPreviewBusy(false);
     }
@@ -628,28 +1321,29 @@ function JiraImportPanel({
   }
 
   return (
-    <Surface as="form" className="p-3 space-y-3" onSubmit={loadPreview}>
+    <Surface as="form" className="space-y-3 p-3" onSubmit={loadPreview}>
+      <p className="text-xs font-semibold uppercase tracking-wide text-ink3">Импорт из Jira</p>
       <div className="grid gap-2 sm:grid-cols-[1fr_110px]">
-        <TextField label="Jira JQL" placeholder="project = APP order by rank" value={jql} onChange={(event) => setJql(event.target.value)} />
-        <TextField label="Limit" inputMode="numeric" value={maxResults} onChange={(event) => setMaxResults(event.target.value)} />
+        <TextField label="JQL" placeholder="project = APP order by rank" value={jql} onChange={(event) => setJql(event.target.value)} />
+        <TextField label="Лимит" inputMode="numeric" value={maxResults} onChange={(event) => setMaxResults(event.target.value)} />
       </div>
       <Button type="submit" variant="secondary" className="w-full" disabled={busy !== null || previewBusy || !jql.trim()} loading={previewBusy}>
-        {previewBusy ? "Loading Jira" : "Preview Jira import"}
+        {previewBusy ? "Запрашиваем" : "Предпросмотр"}
       </Button>
       {previewError ? <InlineError text={previewError} /> : null}
       {preview ? (
         <div className="space-y-2">
-          <div className="flex items-center justify-between gap-2 text-xs text-ink3">
-            <span>{preview.importable}/{preview.total} importable · {selectedKeys.length} selected</span>
+          <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-ink3">
+            <span>можно импортировать {preview.importable} из {preview.total} · выбрано {selectedKeys.length}</span>
             <button
               type="button"
               className="font-semibold text-blue"
               onClick={() => setSelected(new Set(importable.map((item) => item.key)))}
             >
-              Select all
+              Выбрать все
             </button>
           </div>
-          <div className="max-h-56 overflow-auto rounded-lg border border-line px-2">
+          <ScrollArea className="max-h-56 rounded-lg border border-line" viewportClassName="max-h-56 px-2" hint="Ещё задачи">
             {preview.items.map((item) => (
               <label key={item.key} className="flex items-start gap-2 border-b border-line py-2 last:border-b-0">
                 <input
@@ -660,12 +1354,12 @@ function JiraImportPanel({
                   onChange={() => toggle(item.key)}
                 />
                 <span className="min-w-0">
-                  <span className="block text-xs font-bold text-ink">{item.key}{item.duplicate ? " · duplicate" : ""}</span>
+                  <span className="block text-xs font-bold text-ink">{item.key}{item.duplicate ? " · уже в очереди" : ""}</span>
                   <span className="block truncate text-xs text-ink3">{item.summary}</span>
                 </span>
               </label>
             ))}
-          </div>
+          </ScrollArea>
           <Button
             type="button"
             variant="primary"
@@ -673,7 +1367,7 @@ function JiraImportPanel({
             disabled={busy !== null || selectedKeys.length === 0}
             onClick={() => void importSelected()}
           >
-            Import selected
+            Импортировать выбранные
           </Button>
         </div>
       ) : null}
@@ -756,7 +1450,7 @@ function TaskRow({
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, height: 0 }}
       transition={{ duration: reduceMotion ? 0 : 0.16 }}
-      className="py-3 border-b border-line last:border-b-0"
+      className="border-b border-line py-3 last:border-b-0"
     >
       {editing ? (
         <form className="space-y-2" onSubmit={save}>
@@ -767,55 +1461,56 @@ function TaskRow({
             <TextField label="SP" placeholder="SP" inputMode="numeric" value={storyPoints} onChange={(event) => setStoryPoints(event.target.value)} />
           </div>
           <div className="flex flex-wrap gap-2">
-            <Button type="submit" variant="primary" size="sm" disabled={busy !== null || !summary.trim()}>Save</Button>
-            <Button variant="ghost" size="sm" onClick={() => setEditing(false)}>Cancel</Button>
+            <Button type="submit" variant="primary" size="sm" disabled={busy !== null || !summary.trim()}>Сохранить</Button>
+            <Button variant="ghost" size="sm" onClick={() => setEditing(false)}>Отмена</Button>
           </div>
         </form>
       ) : (
         <div className="grid gap-3 lg:grid-cols-[1fr_auto]">
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
-              <p className="text-sm font-semibold text-ink truncate">{task.jira_key ?? `manual ${task.bucket_index + 1}`}</p>
+              <p className="truncate text-sm font-semibold text-ink">{task.jira_key ?? `manual ${task.bucket_index + 1}`}</p>
               <Status active={task.bucket === "tasks_queue"} done={task.bucket !== "tasks_queue"} label={task.source} />
-              {isCurrent ? <Status active done={false} label="current" /> : null}
+              {isCurrent ? <Badge tone="info">текущая</Badge> : null}
             </div>
-            <p className="text-sm text-ink2 break-words">{task.summary || "No summary"}</p>
+            <p className="break-words text-sm text-ink2">{task.summary || "Без описания"}</p>
             <p className="text-xs text-ink4">
-              #{task.bucket_index + 1} · {task.bucket} · {task.votes_count} votes · avg {task.numeric_avg ?? "-"} · max {task.numeric_max ?? "-"}
+              #{task.bucket_index + 1} · {task.bucket} · {task.votes_count} голосов · среднее {task.numeric_avg ?? "—"} · максимум {task.numeric_max ?? "—"}
             </p>
           </div>
           {canManage ? (
-            <div className="grid grid-cols-4 gap-1 sm:flex sm:flex-wrap sm:justify-end sm:max-w-[340px]">
+            <div className="grid grid-cols-3 gap-1 sm:flex sm:flex-wrap sm:justify-end sm:max-w-[360px]">
               <Button
                 type="button"
                 variant="ghost"
                 size="sm"
                 className={dragHandleProps?.isDragging ? "bg-line2 text-blue" : ""}
                 disabled={disabled || !dragHandleProps}
-                title="Drag to reorder"
+                title="Перетащить"
                 {...(dragHandleProps?.attributes ?? {})}
                 {...(dragHandleProps?.listeners ?? {})}
               >
                 Drag
               </Button>
-              <Button variant="ghost" size="sm" disabled={disabled || task.bucket_index === 0} title="Move to top" onClick={() => void move(0)}>Top</Button>
-              <Button variant="ghost" size="sm" disabled={disabled || task.bucket_index === 0} title="Move up" onClick={() => void move(task.bucket_index - 1)}>Up</Button>
-              <Button variant="ghost" size="sm" disabled={disabled || task.bucket_index >= detail.tasks_queue_count - 1} title="Move down" onClick={() => void move(task.bucket_index + 1)}>Down</Button>
-              <Button variant="ghost" size="sm" disabled={disabled || task.bucket_index >= detail.tasks_queue_count - 1} title="Move to bottom" onClick={() => void move(detail.tasks_queue_count - 1)}>End</Button>
-              <Button variant="ghost" size="sm" className="sm:min-w-[72px]" disabled={busy !== null || !canManage} onClick={() => setEditing(true)}>Edit</Button>
-              <Button variant="danger" size="sm" className="sm:min-w-[72px]" disabled={disabled} onClick={() => setDeleteOpen(true)}>Delete</Button>
+              <Button variant="ghost" size="sm" disabled={disabled || task.bucket_index === 0} title="В начало" onClick={() => void move(0)}>В начало</Button>
+              <Button variant="ghost" size="sm" disabled={disabled || task.bucket_index === 0} title="Вверх" onClick={() => void move(task.bucket_index - 1)}>↑</Button>
+              <Button variant="ghost" size="sm" disabled={disabled || task.bucket_index >= detail.tasks_queue_count - 1} title="Вниз" onClick={() => void move(task.bucket_index + 1)}>↓</Button>
+              <Button variant="ghost" size="sm" disabled={disabled || task.bucket_index >= detail.tasks_queue_count - 1} title="В конец" onClick={() => void move(detail.tasks_queue_count - 1)}>В конец</Button>
+              <Button variant="ghost" size="sm" disabled={busy !== null || !canManage} onClick={() => setEditing(true)}>Изменить</Button>
+              <Button variant="danger" size="sm" disabled={disabled} onClick={() => setDeleteOpen(true)}>Удалить</Button>
             </div>
           ) : null}
           {currentLocked ? (
-            <p className="text-xs text-ink4 lg:col-span-2">Current active task is locked while voting is running.</p>
+            <p className="text-xs text-ink4 lg:col-span-2">Текущая задача заблокирована — идёт голосование.</p>
           ) : null}
         </div>
       )}
       <ConfirmDialog
         open={deleteOpen}
-        title="Delete task"
-        description="This removes the task from the active queue. The action cannot be undone from the CMS screen."
-        confirmLabel="Delete"
+        title="Удалить задачу?"
+        description="Задача будет убрана из активной очереди. Это действие нельзя отменить через CMS."
+        confirmLabel="Удалить"
+        cancelLabel="Отмена"
         onCancel={() => setDeleteOpen(false)}
         onConfirm={() => void remove()}
       />

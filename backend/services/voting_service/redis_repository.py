@@ -9,7 +9,10 @@ import redis.asyncio as redis
 from redis.exceptions import WatchError
 
 from app.domain.session import Session, SessionFactory
-from app.ports.session_repository import SessionRepository
+from app.ports.session_repository import (
+    SessionMutationConflictError,
+    SessionRepository,
+)
 from services.voting_service.cms_sync import CmsSyncScheduler
 
 logger = logging.getLogger(__name__)
@@ -115,7 +118,9 @@ class RedisSessionRepository(SessionRepository):
                 finally:
                     await pipe.reset()
 
-        raise RuntimeError("Session mutation conflict. Retry later.") from last_error
+        raise SessionMutationConflictError(
+            "Session mutation conflict. Retry later."
+        ) from last_error
 
     async def delete_session(self, chat_id: int, topic_id: Optional[int]) -> None:
         """Delete session."""

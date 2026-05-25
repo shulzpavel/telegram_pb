@@ -18,7 +18,7 @@ export default function CmsPage() {
   }, []);
 
   if (!authChecked) {
-    return <Centered text="Loading" />;
+    return <Centered text="Загружаем CMS" />;
   }
 
   if (!principal) {

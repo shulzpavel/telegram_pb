@@ -1,6 +1,14 @@
 import { appUrl } from "../../../app/config";
 import { requestJson } from "../../../shared/api/http";
-import type { JiraPreview, ManagerSession, TaskMutation, TaskPage } from "./managerTypes";
+import type {
+  CompletedTasksPage,
+  JiraPreview,
+  JiraStoryPointsSyncResult,
+  ManagerSession,
+  SessionSummary,
+  TaskMutation,
+  TaskPage,
+} from "./managerTypes";
 
 function appFetch<T>(path: string, init?: RequestInit): Promise<T> {
   return requestJson<T>(appUrl(path), {
@@ -30,8 +38,62 @@ export const managerApi = {
       method: "POST",
     }),
 
-  state: (chatId: number, title: string, topicId: number | null = null) =>
-    appFetch<ManagerSession>(`/sessions/${chatId}/state${query({ topic_id: topicId, title })}`),
+  /**
+   * Fetch the cockpit state. When `completedLimit` is provided the response
+   * is paginated: `completed_tasks` carries only the first page (oldest
+   * first), and the response gains `completed_count` plus
+   * `completed_next_cursor`. Pass `null` (default) to keep the legacy
+   * unpaginated payload.
+   */
+  state: (
+    chatId: number,
+    title: string,
+    topicId: number | null = null,
+    completedLimit: number | null = null,
+    init?: { signal?: AbortSignal },
+  ) =>
+    appFetch<ManagerSession>(
+      `/sessions/${chatId}/state${query({ topic_id: topicId, title, completed_limit: completedLimit })}`,
+      init,
+    ),
+
+  /**
+   * Paginated chunk of already-played tasks for the active batch. Uses an
+   * opaque cursor; pass the `next_cursor` returned by the previous call.
+   */
+  completed: (
+    chatId: number,
+    opts: { cursor?: string | null; limit?: number; topicId?: number | null } = {},
+    init?: { signal?: AbortSignal },
+  ) =>
+    appFetch<CompletedTasksPage>(
+      `/sessions/${chatId}/completed${query({
+        topic_id: opts.topicId ?? null,
+        cursor: opts.cursor ?? null,
+        limit: opts.limit ?? 20,
+      })}`,
+      init,
+    ),
+
+  /** Mint a fresh invite token + URL for an existing session. Used to recover
+   *  from an expired/missing token without recreating the whole session. */
+  regenerateInvite: (chatId: number, title: string, topicId: number | null = null) =>
+    appFetch<{ token: string; invite_url: string }>(
+      `/sessions/${chatId}/invite${query({ topic_id: topicId, title })}`,
+      { method: "POST" },
+    ),
+
+  /** Rename an active session. The title is also persisted to CMS so the
+   *  read model (`cms_sessions.title`) stays in sync — manual renames here
+   *  always win over the value provided at session-create time. */
+  renameSession: (chatId: number, title: string, topicId: number | null = null) =>
+    appFetch<{ chat_id: number; topic_id: number | null; title: string }>(
+      `/sessions/${chatId}/title${query({ topic_id: topicId })}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({ title }),
+      },
+    ),
 
   tasks: (chatId: number, cursor: string | null = null, q = "", topicId: number | null = null) =>
     appFetch<TaskPage>(`/sessions/${chatId}/tasks${query({ topic_id: topicId, cursor, q, limit: 100 })}`),
@@ -98,12 +160,58 @@ export const managerApi = {
 
   start: (chatId: number) => appFetch<ManagerSession>(`/sessions/${chatId}/start`, { method: "POST" }),
   reveal: (chatId: number) => appFetch<ManagerSession>(`/sessions/${chatId}/reveal`, { method: "POST" }),
+  generateAiSummary: (chatId: number) => appFetch<ManagerSession>(`/sessions/${chatId}/ai-summary`, { method: "POST" }),
   next: (chatId: number) => appFetch<ManagerSession>(`/sessions/${chatId}/next`, { method: "POST" }),
   skip: (chatId: number) => appFetch<ManagerSession>(`/sessions/${chatId}/skip`, { method: "POST" }),
   finish: (chatId: number) => appFetch<ManagerSession>(`/sessions/${chatId}/finish`, { method: "POST" }),
+  syncJiraStoryPoints: (chatId: number, topicId: number | null = null) =>
+    appFetch<JiraStoryPointsSyncResult>(`/sessions/${chatId}/jira-story-points/sync${query({ topic_id: topicId })}`, {
+      method: "POST",
+      body: JSON.stringify({ skip_errors: true }),
+    }),
   finalEstimate: (chatId: number, value: number) =>
     appFetch<ManagerSession>(`/sessions/${chatId}/final-estimate`, {
       method: "POST",
       body: JSON.stringify({ value }),
     }),
+
+  /**
+   * Detailed report for the finished session screen. Returns completed
+   * tasks with full vote breakdowns, aggregate stats and timing.
+   *
+   * When `tasksLimit` is provided, `completed_tasks` is the first page
+   * only and the response gains `completed_next_cursor`. Stats fields are
+   * always exact (computed against the full batch on the server).
+   */
+  summary: (
+    chatId: number,
+    title: string,
+    topicId: number | null = null,
+    tasksLimit: number | null = null,
+    init?: { signal?: AbortSignal },
+  ) =>
+    appFetch<SessionSummary>(
+      `/sessions/${chatId}/summary${query({ topic_id: topicId, title, tasks_limit: tasksLimit })}`,
+      init,
+    ),
+
+  /** Paginated completed-tasks list for the finished-session screen. */
+  summaryTasks: (
+    chatId: number,
+    opts: { cursor?: string | null; limit?: number; topicId?: number | null } = {},
+    init?: { signal?: AbortSignal },
+  ) =>
+    appFetch<CompletedTasksPage>(
+      `/sessions/${chatId}/summary/tasks${query({
+        topic_id: opts.topicId ?? null,
+        cursor: opts.cursor ?? null,
+        limit: opts.limit ?? 20,
+      })}`,
+      init,
+    ),
+
+  /** Direct CSV download URL — opened via window.location.assign so the
+   *  browser triggers an "attach" download with the session-cookie auth. */
+  summaryCsvUrl: (chatId: number, title: string, topicId: number | null = null) =>
+    appUrl(`/sessions/${chatId}/summary.csv${query({ topic_id: topicId, title })}`),
 };

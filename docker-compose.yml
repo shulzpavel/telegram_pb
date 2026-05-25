@@ -14,6 +14,7 @@ services:
       - JIRA_USERNAME=${JIRA_USERNAME}
       - JIRA_API_TOKEN=${JIRA_API_TOKEN}
       - STORY_POINTS_FIELD=${STORY_POINTS_FIELD}
+      - JIRA_DEMO_FALLBACK=${JIRA_DEMO_FALLBACK:-true}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
       interval: 30s
@@ -40,6 +41,12 @@ services:
       - WEB_UI_URL=${WEB_UI_URL:-}
       - CORS_ORIGINS=${CORS_ORIGINS:-}
       - ENABLE_DEMO_SESSION=${ENABLE_DEMO_SESSION:-true}
+      - JIRA_SERVICE_URL=${JIRA_SERVICE_URL:-http://jira-service:8001}
+      - JIRA_SERVICE_TIMEOUT_SECONDS=${JIRA_SERVICE_TIMEOUT_SECONDS:-30}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - ANTHROPIC_MODEL=${ANTHROPIC_MODEL:-claude-haiku-4-5-20251001}
+      - ANTHROPIC_TIMEOUT_SECONDS=${ANTHROPIC_TIMEOUT_SECONDS:-20}
+      - ANTHROPIC_MAX_CONTEXT_CHARS=${ANTHROPIC_MAX_CONTEXT_CHARS:-6000}
     volumes:
       - voting-data:/data
     depends_on:

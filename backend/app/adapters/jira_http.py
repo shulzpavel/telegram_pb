@@ -2,12 +2,15 @@
 
 import asyncio
 import logging
+import os
 import re
 from typing import Any, Dict, Iterable, List, Optional
+from urllib.parse import quote
 
 import aiohttp
 
 from app.ports.jira_client import JiraClient
+from app.utils.jira_text import adf_to_plain_text, truncate_text
 
 logger = logging.getLogger(__name__)
 
@@ -273,3 +276,54 @@ class JiraHttpClient(JiraClient):
             "url": self.get_issue_url(issue_key),
             "story_points": story_points,
         }
+
+    def _issue_context_from_fields(self, issue_key: str, fields: Dict[str, Any]) -> Dict[str, Any]:
+        summary = str(fields.get("summary") or issue_key)
+        raw_description = fields.get("description")
+        if isinstance(raw_description, dict):
+            description = adf_to_plain_text(raw_description)
+        else:
+            description = str(raw_description or "").strip()
+
+        max_chars = max(500, int(os.getenv("ANTHROPIC_MAX_CONTEXT_CHARS", "6000")))
+        description = truncate_text(description, max_chars)
+
+        issue_type_field = fields.get("issuetype") or {}
+        issue_type = issue_type_field.get("name") if isinstance(issue_type_field, dict) else None
+
+        labels = [str(item) for item in (fields.get("labels") or []) if item]
+        components = [
+            str(component.get("name"))
+            for component in (fields.get("components") or [])
+            if isinstance(component, dict) and component.get("name")
+        ]
+
+        raw_story_points = fields.get(self.story_points_field)
+        story_points = raw_story_points if isinstance(raw_story_points, (int, float)) else None
+
+        return {
+            "key": issue_key,
+            "summary": summary,
+            "url": self.get_issue_url(issue_key),
+            "description": description,
+            "issue_type": issue_type,
+            "labels": labels[:20],
+            "components": components[:20],
+            "story_points": story_points,
+        }
+
+    async def fetch_issue_context(self, issue_key: str) -> Optional[Dict[str, Any]]:
+        """Fetch issue fields used for LLM planning hints."""
+        fields_list = quote(
+            f"summary,description,labels,components,issuetype,{self.story_points_field}",
+            safe=",",
+        )
+        issue = await self._make_request(
+            "GET",
+            f"issue/{issue_key}?fields={fields_list}",
+            api_versions=["3", "2"],
+        )
+        if not issue:
+            return None
+        fields = issue.get("fields") or {}
+        return self._issue_context_from_fields(issue_key, fields)

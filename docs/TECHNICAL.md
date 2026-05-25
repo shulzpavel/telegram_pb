@@ -134,6 +134,15 @@ Runtime env:
 
 - `CORS_ORIGINS`: comma-separated browser origins for FastAPI services.
 - `JIRA_SERVICE_CORS_ORIGINS`: optional override for Jira Service CORS origins.
+- `JIRA_URL`: Atlassian site base URL, for example `https://company.atlassian.net`.
+- `JIRA_USERNAME`: Jira account email used with the API token.
+- `JIRA_API_TOKEN`: Jira API token. Keep it in the runtime env only; never commit a real token.
+- `STORY_POINTS_FIELD`: Jira custom field id used for Story Points, for example `customfield_10022`.
+- `JIRA_DEMO_FALLBACK`: enables local DEMO issue fallback when Jira returns no issues, default `true` locally and `false` in production compose.
+- `ANTHROPIC_API_KEY`: Anthropic API key for manager AI task summaries (required for `/ai-summary`; no heuristic fallback).
+- `ANTHROPIC_MODEL`: Claude model id, default `claude-haiku-4-5-20251001`.
+- `ANTHROPIC_TIMEOUT_SECONDS`: LLM HTTP timeout, default `20`.
+- `ANTHROPIC_MAX_CONTEXT_CHARS`: max Jira/task text sent to the model, default `6000`.
 - `JIRA_CACHE_MAX_ITEMS`: max in-memory Jira cache entries, default `1000`.
 - `JIRA_UPDATE_CONCURRENCY`: concurrent Jira Story Points writes in skip-errors mode, default `5`.
 - `JIRA_SERVICE_TIMEOUT_SECONDS`: CMS Jira preview/import HTTP timeout, default `30`.

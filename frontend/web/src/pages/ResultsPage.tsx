@@ -1,7 +1,7 @@
 import { motion, useReducedMotion } from "framer-motion";
 import { useEffect, useState } from "react";
 import FlipCard from "../components/FlipCard";
-import { Badge, Button, LoadingDots, Surface } from "../design-system";
+import { Badge, BrandMark, Button, LoadingDots, Surface } from "../design-system";
 import { staggerDelay } from "../design-system/motion";
 import { TaskInfo, VoteResult } from "../hooks/useSession";
 
@@ -85,20 +85,22 @@ export default function ResultsPage({ task, results, _skipAnimation, onNextTask,
   }, [results, results.length, skipAnimation]);
 
   return (
-    <div className="min-h-dvh bg-canvas flex flex-col">
-      {/* Top bar */}
-      <header className="flex items-center justify-between px-4 md:px-8 py-4 border-b border-line/60 bg-surface/80 backdrop-blur sticky top-0 z-10">
-        <div className="flex items-center gap-2">
-          <span className="text-sm font-semibold text-ink2">Результаты</span>
-          {task?.jira_key && (
-            <Badge>{task.jira_key}</Badge>
-          )}
+    <div className="flex min-h-screen-mobile flex-col app-gradient-bg pb-safe">
+      {/* Top bar: matches Vote/Join shells — BrandMark + section
+          label + counter on the right. Single row, no wraps. */}
+      <header className="sticky top-0 z-10 border-b border-line/60 bg-surface/85 backdrop-blur pt-safe">
+        <div className="mx-auto flex min-h-14 w-full max-w-5xl items-center gap-2 px-3 sm:px-4 md:px-8">
+          <BrandMark size="sm" showWordmark={false} className="shrink-0" />
+          <div className="flex min-w-0 items-center gap-2">
+            <span className="truncate text-sm font-semibold text-ink2">Результаты</span>
+            {task?.jira_key ? <Badge>{task.jira_key}</Badge> : null}
+          </div>
+          {task ? (
+            <span className="ml-auto shrink-0 text-xs font-medium tabular-nums text-ink3">
+              {task.index}&thinsp;/&thinsp;{task.total}
+            </span>
+          ) : null}
         </div>
-        {task && (
-          <span className="text-xs text-ink3">
-            {task.index}&thinsp;/&thinsp;{task.total}
-          </span>
-        )}
       </header>
 
       <div className="flex-1 flex flex-col md:flex-row max-w-5xl mx-auto w-full px-4 md:px-8 py-8 gap-8 md:gap-12">

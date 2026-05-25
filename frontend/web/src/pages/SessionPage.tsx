@@ -1,6 +1,6 @@
 import { motion, useReducedMotion } from "framer-motion";
-import { useParams } from "react-router-dom";
-import { Spinner as DsSpinner, Surface } from "../design-system";
+import { Link, useParams } from "react-router-dom";
+import { BrandMark, Button, Spinner as DsSpinner, Surface, ThemeToggle } from "../design-system";
 import { useSession } from "../hooks/useSession";
 import JoinPage from "./JoinPage";
 import ResultsPage from "./ResultsPage";
@@ -8,8 +8,13 @@ import VotePage from "./VotePage";
 
 export default function SessionPage() {
   const { token } = useParams<{ token: string }>();
-  if (!token) return <FullScreen><ErrorMessage text="Неверная ссылка на сессию" /></FullScreen>;
-  return <SessionInner token={token} />;
+  return token ? (
+    <SessionInner token={token} />
+  ) : (
+    <FullScreen>
+      <ErrorMessage text="Неверная ссылка на сессию" />
+    </FullScreen>
+  );
 }
 
 function SessionInner({ token }: { token: string }) {
@@ -52,6 +57,9 @@ function SessionInner({ token }: { token: string }) {
   }
 
   if (phase === "complete") {
+    // Voting Complete was previously a true dead-end — a thank-you
+    // message with no next step. We now give the user a "go home" CTA
+    // and a secondary route into the demo so the screen is actionable.
     return (
       <FullScreen>
         <motion.div
@@ -64,8 +72,19 @@ function SessionInner({ token }: { token: string }) {
             <path d="M3 14L13 24L33 4" stroke="#30D158" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
         </motion.div>
-        <p className="text-xl font-bold text-ink mt-5">Голосование завершено</p>
-        <p className="text-sm text-ink3 mt-1">Спасибо за участие!</p>
+        <p className="mt-5 text-xl font-bold text-ink">Голосование завершено</p>
+        <p className="mt-1 max-w-sm text-sm text-ink3">
+          Спасибо за участие! Эта вкладка больше не получает обновлений — её можно
+          закрыть, или вернитесь на главную, если хотите попробовать ещё.
+        </p>
+        <div className="mt-6 flex flex-col items-stretch gap-2 sm:flex-row sm:items-center">
+          <Link to="/">
+            <Button variant="primary" className="w-full sm:w-auto">На главную</Button>
+          </Link>
+          <Link to="/demo?mock=1">
+            <Button variant="ghost" className="w-full sm:w-auto">Пройти demo</Button>
+          </Link>
+        </div>
       </FullScreen>
     );
   }
@@ -79,15 +98,30 @@ function SessionInner({ token }: { token: string }) {
 }
 
 function FullScreen({ children }: { children: React.ReactNode }) {
+  // Shared "single message + brand" layout used by all transient
+  // session states (joining / waiting / complete / error). Keeping the
+  // brand visible avoids the "where am I?" feeling between phases and
+  // gives the ThemeToggle a stable anchor instead of a floating overlay.
   return (
-    <div className="min-h-dvh bg-canvas flex flex-col items-center justify-center gap-0">
-      <motion.div
-        className="flex flex-col items-center text-center px-4"
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-      >
-        {children}
-      </motion.div>
+    <div className="flex min-h-screen-mobile flex-col app-gradient-bg">
+      <header className="sticky top-0 z-10 border-b border-line/60 bg-surface/85 pt-safe backdrop-blur">
+        <div className="mx-auto flex min-h-14 w-full max-w-5xl items-center px-3 sm:px-4">
+          <BrandMark size="sm" showWordmark={false} />
+          <span className="ml-2 truncate text-sm font-semibold text-ink2">Planning Poker</span>
+          <div className="ml-auto">
+            <ThemeToggle size="sm" tone="ghost" />
+          </div>
+        </div>
+      </header>
+      <div className="flex flex-1 items-center justify-center px-4 py-10 pb-safe-6">
+        <motion.div
+          className="flex flex-col items-center text-center"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+        >
+          {children}
+        </motion.div>
+      </div>
     </div>
   );
 }

@@ -82,6 +82,11 @@ CMS_PERMISSION_DEFINITIONS: list[dict[str, str]] = [
     },
 ]
 
+# CMS pages that were inherited from the Telegram-era console. They are kept
+# in the database for audit/backfill compatibility, but disabled at boot via
+# ``DEPRECATED_CMS_PAGE_KEYS`` so they never appear in the navigation.
+DEPRECATED_CMS_PAGE_KEYS = ("votes", "web")
+
 CMS_PAGE_DEFINITIONS: list[dict[str, Any]] = [
     {
         "key": "overview",

@@ -1,4 +1,4 @@
-import { type ButtonHTMLAttributes, type HTMLAttributes, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes, useEffect, useId, useRef } from "react";
+import { forwardRef, type ButtonHTMLAttributes, type HTMLAttributes, type InputHTMLAttributes, type ReactNode, type Ref, type SelectHTMLAttributes, type TextareaHTMLAttributes, useEffect, useId, useRef } from "react";
 import { cn } from "./utils";
 
 type Tone = "neutral" | "info" | "success" | "warning" | "danger";
@@ -21,7 +21,7 @@ export function Surface({
   );
 }
 
-type ButtonVariant = "primary" | "secondary" | "ghost" | "danger";
+type ButtonVariant = "primary" | "secondary" | "ghost" | "danger" | "success";
 type ButtonSize = "sm" | "md" | "lg";
 
 const buttonVariants: Record<ButtonVariant, string> = {
@@ -29,6 +29,10 @@ const buttonVariants: Record<ButtonVariant, string> = {
   secondary: "border-line bg-surface text-ink2 hover:border-ink4 hover:bg-line2",
   ghost: "border-transparent bg-transparent text-ink3 hover:bg-line2 hover:text-ink",
   danger: "border-red/20 bg-red/5 text-red hover:bg-red/10",
+  // Confirming a positive intent (apply / accept / save) — distinct from
+  // `primary` to keep the destructive/positive distinction obvious in
+  // bulk forms (Jira import "Apply selected", etc.).
+  success: "border-green/30 bg-green/10 text-green hover:bg-green/15",
 };
 
 const buttonSizes: Record<ButtonSize, string> = {
@@ -56,7 +60,12 @@ export function Button({
       type={type}
       className={cn(
         "inline-flex items-center justify-center gap-2 rounded-lg border font-semibold leading-none",
-        "transition-[background-color,border-color,color,box-shadow] duration-150",
+        // Transition only the visual properties so a tab/route change
+        // doesn't reset the in-flight active scale animation. Native
+        // mobile tap feedback via `active:scale-[0.98]` keeps within the
+        // 150ms motion budget.
+        "transition-[background-color,border-color,color,box-shadow,transform] duration-150 ease-out",
+        "active:scale-[0.98] motion-reduce:active:scale-100",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue/30 focus-visible:ring-offset-2 focus-visible:ring-offset-canvas",
         "disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-45",
         buttonVariants[variant],
@@ -68,7 +77,13 @@ export function Button({
       {...props}
     >
       {loading ? <Spinner size="sm" /> : null}
-      {children}
+      {/* While loading, fade the label so the spinner stays the focal
+          point — text still occupies the same width to keep the button
+          from snapping size mid-action.
+          inline-flex + items-center keeps inline SVG icons vertically
+          aligned with the label instead of sitting on the text baseline,
+          so callers can pass `<Icon /> <span>label</span>` directly. */}
+      <span className={cn("inline-flex min-w-0 items-center gap-2", loading ? "opacity-70" : undefined)}>{children}</span>
     </button>
   );
 }
@@ -107,18 +122,24 @@ export function FieldLabel({ children, htmlFor }: { children: ReactNode; htmlFor
 const inputClassName =
   "w-full rounded-lg border border-line bg-surface px-3 py-2.5 text-sm text-ink placeholder-ink4 shadow-none outline-none transition-[border-color,box-shadow] duration-150 focus:border-blue focus:ring-2 focus:ring-blue/20 disabled:cursor-not-allowed disabled:bg-line2 disabled:text-ink4";
 
-export function TextField({
-  label,
-  hint,
-  error,
-  className,
-  id,
-  ...props
-}: InputHTMLAttributes<HTMLInputElement> & {
+type TextFieldProps = InputHTMLAttributes<HTMLInputElement> & {
   label?: ReactNode;
   hint?: ReactNode;
   error?: string | null;
-}) {
+  /** When true (default), reserve a line of vertical space for the
+   *  hint/error message even when it's empty. Prevents the form CTA
+   *  from jumping the moment validation surfaces. Set to `false` on
+   *  one-off fields where a stable layout isn't important. */
+  reserveMessageSpace?: boolean;
+};
+
+export const TextField = forwardRef(function TextField(
+  { label, hint, error, className, id, reserveMessageSpace = true, ...props }: TextFieldProps,
+  ref: Ref<HTMLInputElement>,
+) {
+  // Inline `useId` works inside forwardRef just like in regular function
+  // components — keeps the existing label/aria-describedby wiring intact.
+  // eslint-disable-next-line react-hooks/rules-of-hooks
   const generatedId = useId();
   const inputId = id ?? generatedId;
   const descriptionId = `${inputId}-description`;
@@ -126,18 +147,49 @@ export function TextField({
     <div className={cn("space-y-1.5", className)}>
       {label ? <FieldLabel htmlFor={inputId}>{label}</FieldLabel> : null}
       <input
+        ref={ref}
         id={inputId}
         className={cn(inputClassName, error ? "border-red focus:border-red focus:ring-red/20" : "")}
         aria-invalid={Boolean(error) || undefined}
         aria-describedby={hint || error ? descriptionId : undefined}
         {...props}
       />
-      {hint || error ? (
-        <p id={descriptionId} className={cn("text-xs", error ? "text-red" : "text-ink3")}>
-          {error ?? hint}
-        </p>
-      ) : null}
+      <FieldMessage id={descriptionId} error={error} hint={hint} reserveSpace={reserveMessageSpace} />
     </div>
+  );
+});
+
+/**
+ * Hint/error pair under a form field. Keeps a stable bbox so the CTA
+ * below the field doesn't jump when validation first appears — the
+ * message itself fades in/out within the reserved row.
+ */
+function FieldMessage({
+  id,
+  hint,
+  error,
+  reserveSpace,
+}: {
+  id: string;
+  hint?: ReactNode;
+  error?: string | null;
+  reserveSpace: boolean;
+}) {
+  const hasContent = Boolean(error) || hint != null;
+  if (!hasContent && !reserveSpace) return null;
+  return (
+    <p
+      id={id}
+      role={error ? "alert" : undefined}
+      aria-live={error ? "polite" : undefined}
+      className={cn(
+        "text-xs leading-snug transition-colors duration-150",
+        reserveSpace ? "min-h-[1rem]" : undefined,
+        error ? "text-red" : "text-ink3",
+      )}
+    >
+      {error ?? hint ?? (reserveSpace ? "\u00a0" : null)}
+    </p>
   );
 }
 
@@ -147,11 +199,13 @@ export function TextareaField({
   error,
   className,
   id,
+  reserveMessageSpace = true,
   ...props
 }: TextareaHTMLAttributes<HTMLTextAreaElement> & {
   label?: ReactNode;
   hint?: ReactNode;
   error?: string | null;
+  reserveMessageSpace?: boolean;
 }) {
   const generatedId = useId();
   const inputId = id ?? generatedId;
@@ -166,11 +220,7 @@ export function TextareaField({
         aria-describedby={hint || error ? descriptionId : undefined}
         {...props}
       />
-      {hint || error ? (
-        <p id={descriptionId} className={cn("text-xs", error ? "text-red" : "text-ink3")}>
-          {error ?? hint}
-        </p>
-      ) : null}
+      <FieldMessage id={descriptionId} error={error} hint={hint} reserveSpace={reserveMessageSpace} />
     </div>
   );
 }
@@ -182,11 +232,13 @@ export function SelectField({
   className,
   id,
   children,
+  reserveMessageSpace = true,
   ...props
 }: SelectHTMLAttributes<HTMLSelectElement> & {
   label?: ReactNode;
   hint?: ReactNode;
   error?: string | null;
+  reserveMessageSpace?: boolean;
 }) {
   const generatedId = useId();
   const inputId = id ?? generatedId;
@@ -194,21 +246,46 @@ export function SelectField({
   return (
     <div className={cn("space-y-1.5", className)}>
       {label ? <FieldLabel htmlFor={inputId}>{label}</FieldLabel> : null}
-      <select
-        id={inputId}
-        className={cn(inputClassName, "appearance-none", error ? "border-red focus:border-red focus:ring-red/20" : "")}
-        aria-invalid={Boolean(error) || undefined}
-        aria-describedby={hint || error ? descriptionId : undefined}
-        {...props}
-      >
-        {children}
-      </select>
-      {hint || error ? (
-        <p id={descriptionId} className={cn("text-xs", error ? "text-red" : "text-ink3")}>
-          {error ?? hint}
-        </p>
-      ) : null}
+      {/* `appearance-none` strips the native arrow on every platform —
+          we render an explicit chevron so users always know this is a
+          dropdown, not a plain text input. The native `<select>` still
+          opens its OS picker on iOS/Android (best mobile UX), our SVG
+          just provides the visual affordance. */}
+      <div className="relative">
+        <select
+          id={inputId}
+          className={cn(
+            inputClassName,
+            "appearance-none pr-9",
+            error ? "border-red focus:border-red focus:ring-red/20" : "",
+          )}
+          aria-invalid={Boolean(error) || undefined}
+          aria-describedby={hint || error ? descriptionId : undefined}
+          {...props}
+        >
+          {children}
+        </select>
+        <ChevronDownIcon className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink3" />
+      </div>
+      <FieldMessage id={descriptionId} error={error} hint={hint} reserveSpace={reserveMessageSpace} />
     </div>
+  );
+}
+
+function ChevronDownIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 20 20"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.8}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden="true"
+    >
+      <path d="M5.5 8L10 12.5L14.5 8" />
+    </svg>
   );
 }
 
@@ -216,21 +293,32 @@ export function CheckboxField({
   label,
   hint,
   className,
+  disabled,
   ...props
 }: Omit<InputHTMLAttributes<HTMLInputElement>, "type"> & {
   label: ReactNode;
   hint?: ReactNode;
 }) {
   return (
-    <label className={cn("flex min-h-10 items-start gap-2 rounded-lg px-2 py-1.5 text-sm text-ink3", className)}>
+    <label
+      className={cn(
+        // 44px tap target (WCAG 2.5.5). Hover/focus surface highlights
+        // the whole label so the user can tap anywhere on the row.
+        "flex min-h-11 cursor-pointer items-start gap-2.5 rounded-lg px-2 py-2 text-sm text-ink3",
+        "transition-colors duration-150 hover:bg-line2 has-[input:focus-visible]:bg-line2",
+        disabled ? "cursor-not-allowed opacity-60" : undefined,
+        className,
+      )}
+    >
       <input
         type="checkbox"
-        className="mt-0.5 h-4 w-4 rounded border-line text-blue focus:ring-2 focus:ring-blue/20 disabled:cursor-not-allowed"
+        disabled={disabled}
+        className="mt-0.5 h-4 w-4 shrink-0 rounded border-line text-blue focus:ring-2 focus:ring-blue/20 disabled:cursor-not-allowed"
         {...props}
       />
       <span className="min-w-0">
         <span className="font-semibold text-ink">{label}</span>
-        {hint ? <span className="block text-xs text-ink3">{hint}</span> : null}
+        {hint ? <span className="mt-0.5 block text-xs text-ink3">{hint}</span> : null}
       </span>
     </label>
   );
@@ -260,10 +348,77 @@ const alertTone: Record<Tone, string> = {
   danger: "border-red/20 bg-red/5 text-red",
 };
 
-export function Alert({ children, tone = "neutral", className }: { children: ReactNode; tone?: Tone; className?: string }) {
+function AlertIcon({ tone }: { tone: Tone }) {
+  const common = "h-4 w-4 shrink-0";
+  if (tone === "danger" || tone === "warning") {
+    return (
+      <svg viewBox="0 0 20 20" fill="currentColor" className={common} aria-hidden="true">
+        <path d="M10 1.667c-4.602 0-8.333 3.731-8.333 8.333S5.398 18.333 10 18.333 18.333 14.602 18.333 10 14.602 1.667 10 1.667zm0 5a.833.833 0 0 1 .833.833v3.333a.833.833 0 0 1-1.666 0V7.5A.833.833 0 0 1 10 6.667zm0 7.5a1 1 0 1 1 0-2 1 1 0 0 1 0 2z" />
+      </svg>
+    );
+  }
+  if (tone === "success") {
+    return (
+      <svg viewBox="0 0 20 20" fill="currentColor" className={common} aria-hidden="true">
+        <path d="M10 1.667A8.333 8.333 0 1 0 18.333 10 8.343 8.343 0 0 0 10 1.667zm4.107 6.59-4.792 4.792a.833.833 0 0 1-1.178 0L5.893 10.804a.833.833 0 1 1 1.179-1.179l2.064 2.065 4.203-4.204a.833.833 0 1 1 1.178 1.179z" />
+      </svg>
+    );
+  }
   return (
-    <div className={cn("rounded-lg border px-3 py-2 text-sm font-medium", alertTone[tone], className)} role={tone === "danger" ? "alert" : "status"}>
-      {children}
+    <svg viewBox="0 0 20 20" fill="currentColor" className={common} aria-hidden="true">
+      <path d="M10 1.667A8.333 8.333 0 1 0 18.333 10 8.343 8.343 0 0 0 10 1.667zM10 5a1 1 0 1 1 0 2 1 1 0 0 1 0-2zm.833 9.167a.833.833 0 0 1-1.666 0V9.167a.833.833 0 0 1 1.666 0z" />
+    </svg>
+  );
+}
+
+export function Alert({
+  children,
+  tone = "neutral",
+  className,
+  title,
+  onDismiss,
+  icon = true,
+}: {
+  children: ReactNode;
+  tone?: Tone;
+  className?: string;
+  title?: ReactNode;
+  /** When provided, renders an X close button on the right. */
+  onDismiss?: () => void;
+  /** Set to `false` to hide the leading tone icon (for compact contexts). */
+  icon?: boolean;
+}) {
+  // role="alert" / aria-live="assertive" only for actionable errors so
+  // screen-readers don't shout decorative status messages. Polite
+  // updates are still surfaced via aria-live="polite".
+  const isAssertive = tone === "danger";
+  return (
+    <div
+      className={cn(
+        "flex items-start gap-2 rounded-lg border px-3 py-2 text-sm font-medium",
+        alertTone[tone],
+        className,
+      )}
+      role={isAssertive ? "alert" : "status"}
+      aria-live={isAssertive ? "assertive" : "polite"}
+    >
+      {icon ? <span className="mt-0.5"><AlertIcon tone={tone} /></span> : null}
+      <div className="min-w-0 flex-1">
+        {title ? <p className="mb-0.5 font-bold">{title}</p> : null}
+        <div className="leading-snug">{children}</div>
+      </div>
+      {onDismiss ? (
+        <button
+          type="button"
+          onClick={onDismiss}
+          aria-label="Закрыть"
+          className="-mr-1 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-current opacity-60 transition-opacity hover:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-current/30 active:scale-95"
+        >
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" className="h-3.5 w-3.5" aria-hidden="true">
+            <path d="M4 4l8 8M12 4l-8 8" />
+          </svg>
+        </button>
+      ) : null}
     </div>
   );
 }
@@ -280,6 +435,81 @@ export function EmptyState({ title, description, action }: { title: string; desc
 
 export function Skeleton({ className = "h-24" }: { className?: string }) {
   return <div className={cn("rounded-lg border border-line bg-line2 animate-pulse", className)} />;
+}
+
+/**
+ * Single placeholder card — used as the building block of `ListSkeleton`.
+ * Renders an optional avatar circle and a stack of pulsing text lines whose
+ * widths alternate to mimic the rhythm of real list items.
+ */
+export function RowSkeleton({
+  lines = 2,
+  dense = false,
+  withAvatar = false,
+  className,
+}: {
+  lines?: number;
+  dense?: boolean;
+  withAvatar?: boolean;
+  className?: string;
+}) {
+  const safeLines = Math.max(1, Math.min(lines, 4));
+  const lineWidths = ["w-3/4", "w-1/2", "w-2/3", "w-1/3"];
+  return (
+    <div
+      role="presentation"
+      aria-hidden="true"
+      className={cn(
+        "flex items-center gap-3 rounded-lg border border-line bg-surface",
+        dense ? "px-3 py-2" : "px-4 py-3",
+        className,
+      )}
+    >
+      {withAvatar ? (
+        <span className="h-8 w-8 shrink-0 animate-pulse rounded-full bg-line2" />
+      ) : null}
+      <div className="flex-1 space-y-2">
+        {Array.from({ length: safeLines }).map((_, idx) => (
+          <span
+            key={idx}
+            className={cn(
+              "block h-2.5 animate-pulse rounded bg-line2",
+              lineWidths[idx % lineWidths.length],
+            )}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Vertical stack of `RowSkeleton`s — primary placeholder for any list while
+ * the first page is loading. Keep `rows` in proportion to the expected page
+ * size so the layout doesn't jump when real data arrives.
+ */
+export function ListSkeleton({
+  rows = 6,
+  lines = 2,
+  dense = false,
+  withAvatar = false,
+  className,
+}: {
+  rows?: number;
+  lines?: number;
+  dense?: boolean;
+  withAvatar?: boolean;
+  className?: string;
+}) {
+  const safeRows = Math.max(1, Math.min(rows, 24));
+  return (
+    <div className={cn("space-y-2", className)} role="status" aria-busy="true" aria-live="polite">
+      <span className="sr-only">Загрузка списка</span>
+      {Array.from({ length: safeRows }).map((_, idx) => (
+        <RowSkeleton key={idx} lines={lines} dense={dense} withAvatar={withAvatar} />
+      ))}
+    </div>
+  );
 }
 
 export function ProgressBar({ value, label }: { value: number; label?: string }) {
@@ -316,15 +546,19 @@ export function ConfirmDialog({
   confirmLabel = "Confirm",
   cancelLabel = "Cancel",
   tone = "danger",
+  busy = false,
   onConfirm,
   onCancel,
 }: {
   open: boolean;
   title: string;
-  description: string;
+  description: ReactNode;
   confirmLabel?: string;
   cancelLabel?: string;
   tone?: "danger" | "primary";
+  /** Disable both actions and show a spinner on the primary CTA while
+   *  an async confirmation is in flight (e.g. delete network call). */
+  busy?: boolean;
   onConfirm: () => void;
   onCancel: () => void;
 }) {
@@ -372,10 +606,23 @@ export function ConfirmDialog({
         first.focus();
       }
     };
+    // Lock the underlying scroll so the page behind the dialog doesn't
+    // shift on iOS when the user drags inside the bottom sheet. The
+    // padding compensation keeps the layout stable when the scrollbar
+    // disappears on desktop browsers that show one.
+    const previousOverflow = document.body.style.overflow;
+    const previousPaddingRight = document.body.style.paddingRight;
+    const scrollbarWidth = window.innerWidth - document.documentElement.clientWidth;
+    document.body.style.overflow = "hidden";
+    if (scrollbarWidth > 0) {
+      document.body.style.paddingRight = `${scrollbarWidth}px`;
+    }
     document.addEventListener("keydown", handleKeyDown);
     return () => {
       window.cancelAnimationFrame(frame);
       document.removeEventListener("keydown", handleKeyDown);
+      document.body.style.overflow = previousOverflow;
+      document.body.style.paddingRight = previousPaddingRight;
       previousFocusRef.current?.focus();
     };
   }, [open]);
@@ -383,9 +630,17 @@ export function ConfirmDialog({
   if (!open) return null;
   return (
     <div
-      className="fixed inset-0 z-50 flex items-end justify-center bg-ink/30 px-4 py-4 sm:items-center"
+      // Bottom-sheet on mobile (items-end + pb-safe-4 keeps it above the
+      // iOS home indicator), centered on sm+. Backdrop catches both
+      // mouse and touch so taps outside the sheet always close it.
+      className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 px-4 pb-safe-4 pt-safe backdrop-blur-sm motion-safe:animate-fade-up sm:items-center sm:py-6"
       role="presentation"
       onMouseDown={(event) => {
+        if (busy) return;
+        if (event.target === event.currentTarget) onCancel();
+      }}
+      onTouchEnd={(event) => {
+        if (busy) return;
         if (event.target === event.currentTarget) onCancel();
       }}
     >
@@ -396,14 +651,31 @@ export function ConfirmDialog({
         aria-labelledby={titleId}
         aria-describedby={descriptionId}
         tabIndex={-1}
-        className="w-full max-w-sm"
+        className={cn(
+          "w-full max-w-sm outline-none",
+          // Subtle scale-in keeps the dialog from popping. Backdrop
+          // fades alongside via animate-fade-up on the parent overlay.
+          "motion-safe:animate-scale-in",
+        )}
       >
-        <Surface className="p-4">
+        <Surface className="p-5">
           <h2 id={titleId} className="text-base font-bold text-ink">{title}</h2>
-          <p id={descriptionId} className="mt-2 text-sm text-ink3">{description}</p>
-          <div className="mt-4 flex justify-end gap-2">
-            <Button variant="ghost" onClick={onCancel}>{cancelLabel}</Button>
-            <Button variant={tone === "danger" ? "danger" : "primary"} onClick={onConfirm}>{confirmLabel}</Button>
+          <div id={descriptionId} className="mt-2 text-sm leading-snug text-ink3">{description}</div>
+          {/* Stack buttons full-width on the smallest viewports so labels
+              never wrap or overflow; switch to inline on sm+ where the
+              dialog is centered and there's enough horizontal room. */}
+          <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+            <Button variant="ghost" onClick={onCancel} disabled={busy} className="sm:w-auto">
+              {cancelLabel}
+            </Button>
+            <Button
+              variant={tone === "danger" ? "danger" : "primary"}
+              onClick={onConfirm}
+              loading={busy}
+              className="sm:w-auto"
+            >
+              {confirmLabel}
+            </Button>
           </div>
         </Surface>
       </div>

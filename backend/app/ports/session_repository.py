@@ -9,6 +9,14 @@ from app.domain.session import Session
 MutationResult = TypeVar("MutationResult")
 
 
+class SessionMutationConflictError(RuntimeError):
+    """Raised when a session mutation cannot be applied atomically.
+
+    Transport adapters should translate this into HTTP 409 so clients can
+    retry against a fresh state instead of seeing an opaque 500.
+    """
+
+
 class SessionRepository(ABC):
     """Interface for session persistence."""
 

@@ -81,13 +81,19 @@ class JiraServiceHttpClient(JiraClient):
         return f"{jira_base}/browse/{issue_key}"
 
     async def update_story_points(self, issue_key: str, story_points: int) -> bool:
-        """Update story points via Jira Service."""
-        url = f"{self.base_url}/api/v1/issue/{issue_key}/story-points"
+        """Update story points via Jira Service.
 
-        try:
-            session = await self._get_session()
-            transient_statuses = {429, 500, 502, 503, 504}
-            for attempt in range(1, self._retry_attempts + 1):
+        Retries are applied for both transient HTTP statuses (429/5xx) and
+        transport-level network errors so a flaky connection does not surface
+        as a failed Story Points write on the first hiccup.
+        """
+        url = f"{self.base_url}/api/v1/issue/{issue_key}/story-points"
+        session = await self._get_session()
+        transient_statuses = {429, 500, 502, 503, 504}
+        last_error: Optional[BaseException] = None
+
+        for attempt in range(1, self._retry_attempts + 1):
+            try:
                 async with session.put(
                     url,
                     json={"issue_key": issue_key, "story_points": story_points},
@@ -97,12 +103,23 @@ class JiraServiceHttpClient(JiraClient):
                     if resp.status in transient_statuses and attempt < self._retry_attempts:
                         await asyncio.sleep(0.2 * attempt)
                         continue
-                    raise RuntimeError(f"Jira Service returned status {resp.status}")
-            return False
-        except aiohttp.ClientError as e:
-            raise RuntimeError(f"Jira Service unavailable: {e}") from e
-        except Exception as e:
-            raise RuntimeError(f"Failed to update story points via Jira Service: {e}") from e
+                    body = (await resp.text())[:500]
+                    raise RuntimeError(
+                        f"Jira Service returned status {resp.status}: {body}"
+                    )
+            except aiohttp.ClientError as exc:
+                last_error = exc
+                if attempt >= self._retry_attempts:
+                    break
+                logger.warning(
+                    "Jira Service update_story_points retrying: key=%s attempt=%s err=%r",
+                    issue_key,
+                    attempt,
+                    exc,
+                )
+                await asyncio.sleep(0.2 * attempt)
+
+        raise RuntimeError(f"Jira Service unavailable: {last_error}") from last_error
 
     async def parse_jira_request(self, text: str, max_results: int = 500) -> Optional[List[Dict[str, Any]]]:
         """Parse Jira request via Jira Service."""

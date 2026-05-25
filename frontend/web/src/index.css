@@ -3,7 +3,33 @@
 @tailwind utilities;
 
 @layer base {
-  :root {
+  :root,
+  :root[data-theme="light"] {
+    /* Apple-like light surfaces. Values are R G B triplets so Tailwind opacity
+       modifiers (`bg-blue/20`) keep working through <alpha-value>. */
+    --c-canvas:   247 248 250;
+    --c-surface:  255 255 255;
+    --c-elevated: 255 255 255;
+    --c-ink:       10  10  15;
+    --c-ink2:      60  60  67;
+    --c-ink3:     110 110 115;
+    --c-ink4:     174 174 178;
+    --c-line:     229 229 234;
+    --c-line2:    242 242 247;
+    --c-blue:       0 113 227;
+    --c-blue2:      0 119 237;
+    --c-green:     48 209  88;
+    --c-red:      255  59  48;
+    --c-amber:    255 159  10;
+    --c-purple:   191  90 242;
+
+    --shadow-card:  0 1px 3px rgba(0, 0, 0, .06), 0 4px 16px rgba(0, 0, 0, .06);
+    --shadow-hover: 0 2px 8px rgba(0, 0, 0, .08), 0 8px 24px rgba(0, 0, 0, .08);
+    --shadow-pop:   0 4px 12px rgba(0, 113, 227, .25);
+    --shadow-inset: inset 0 0 0 1.5px rgba(0, 0, 0, .08);
+
+    color-scheme: light;
+
     --radius: 8px;
     --radius-sm: 6px;
     --radius-lg: 8px;
@@ -11,6 +37,46 @@
     --motion-fast: 120ms;
     --motion-base: 180ms;
     --motion-slow: 240ms;
+    /* Native-feeling easing curves. `ease-out-soft` is close to iOS spring
+       without bounce; `ease-emphasized` mirrors Material 3 emphasized motion
+       for state changes (sheets, content swaps). */
+    --ease-out-soft: cubic-bezier(0.2, 0, 0, 1);
+    --ease-emphasized: cubic-bezier(0.2, 0.8, 0.2, 1);
+    /* Mobile safe-area insets — these resolve to 0 on devices/browsers
+       without insets, so it's always safe to add them. The custom property
+       lets us combine paddings inside calc(): pb-safe + nav height etc. */
+    --safe-top: env(safe-area-inset-top, 0px);
+    --safe-bottom: env(safe-area-inset-bottom, 0px);
+    --safe-left: env(safe-area-inset-left, 0px);
+    --safe-right: env(safe-area-inset-right, 0px);
+  }
+
+  :root[data-theme="dark"] {
+    /* Deep, considered dark palette. Not pure-black so cards still feel
+       layered, with accent blues slightly brighter to keep contrast on the
+       darker canvas. */
+    --c-canvas:    18  18  22;
+    --c-surface:   28  28  33;
+    --c-elevated:  40  40  48;
+    --c-ink:      245 245 247;
+    --c-ink2:     209 209 214;
+    --c-ink3:     152 152 158;
+    --c-ink4:      99  99 106;
+    --c-line:      58  58  65;
+    --c-line2:     44  44  50;
+    --c-blue:      10 132 255;
+    --c-blue2:     64 156 255;
+    --c-green:     48 209  88;
+    --c-red:      255  69  58;
+    --c-amber:    255 159  10;
+    --c-purple:   191  90 242;
+
+    --shadow-card:  0 1px 2px rgba(0, 0, 0, .4), 0 8px 24px rgba(0, 0, 0, .45);
+    --shadow-hover: 0 2px 6px rgba(0, 0, 0, .5),  0 14px 32px rgba(0, 0, 0, .55);
+    --shadow-pop:   0 4px 18px rgba(10, 132, 255, .35);
+    --shadow-inset: inset 0 0 0 1.5px rgba(255, 255, 255, .06);
+
+    color-scheme: dark;
   }
 
   * {
@@ -22,15 +88,46 @@
     text-rendering: optimizeLegibility;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    background-color: rgb(var(--c-canvas));
+  }
+
+  /* Defensive: any stray oversized element should be clipped at the
+     viewport, not produce a horizontal scrollbar. `overflow-x: clip` is
+     preferred over `hidden` because it does NOT create a new scroll
+     container, so `position: sticky` etc. keep working as expected.
+     Browsers without clip support fall back to hidden. */
+  html,
+  body {
+    max-width: 100%;
+    overflow-x: hidden;
+    overflow-x: clip;
+  }
+
+  /* Hide browser scrollbars everywhere while keeping native scroll, wheel,
+     touch and keyboard navigation intact. Firefox uses `scrollbar-width`;
+     old Edge/IE use `-ms-overflow-style`; WebKit browsers need the
+     pseudo-element. */
+  *,
+  *::before,
+  *::after {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+
+  *::-webkit-scrollbar {
+    width: 0;
+    height: 0;
+    display: none;
   }
 
   body {
     @apply bg-canvas text-ink font-sans;
     min-height: 100dvh;
+    transition: background-color 200ms ease, color 200ms ease;
   }
 
   :focus-visible {
-    outline: 2px solid rgb(0 113 227 / 0.45);
+    outline: 2px solid rgb(var(--c-blue) / 0.45);
     outline-offset: 2px;
   }
 
@@ -86,10 +183,71 @@
   .progress-fill {
     @apply h-full rounded-full bg-blue transition-all duration-500;
   }
+
+  @keyframes scroll-hint-bob {
+    0%, 100% { transform: translateY(0); opacity: 0.7; }
+    50% { transform: translateY(5px); opacity: 1; }
+  }
 }
 
 @layer utilities {
   .text-balance { text-wrap: balance; }
   .no-scrollbar::-webkit-scrollbar { display: none; }
   .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+  /* === Safe-area helpers ===
+     Use on sticky/fixed CTAs and full-bleed mobile containers so iPhone
+     notches and home-indicator do not eat the active control. All resolve to
+     0 on devices without insets, so they are free to add unconditionally. */
+  .pt-safe { padding-top: var(--safe-top); }
+  .pb-safe { padding-bottom: var(--safe-bottom); }
+  .pl-safe { padding-left: var(--safe-left); }
+  .pr-safe { padding-right: var(--safe-right); }
+  .px-safe { padding-left: var(--safe-left); padding-right: var(--safe-right); }
+  .py-safe { padding-top: var(--safe-top); padding-bottom: var(--safe-bottom); }
+  /* Compose with a fixed gutter, e.g. `.pb-safe-4` = 1rem + safe inset. */
+  .pb-safe-4 { padding-bottom: calc(var(--safe-bottom) + 1rem); }
+  .pb-safe-6 { padding-bottom: calc(var(--safe-bottom) + 1.5rem); }
+  .pt-safe-4 { padding-top: calc(var(--safe-top) + 1rem); }
+  .mb-safe-cta { margin-bottom: calc(var(--safe-bottom) + 0.5rem); }
+  /* Reserves bottom space inside a scroll container so sticky CTAs never
+     overlap the last item. */
+  .scroll-pb-cta { padding-bottom: calc(var(--safe-bottom) + 5rem); }
+
+  /* Mobile viewport helpers. `dvh`/`svh` are already in Tailwind 3.4, this
+     just gives a stable alias and a min-h-dvh-safe variant that reserves
+     bottom inset on iOS Safari. */
+  .min-h-screen-mobile { min-height: 100svh; min-height: 100dvh; }
+  .h-screen-mobile { height: 100svh; height: 100dvh; }
+
+  /* Shared blue glow from the landing page. Use only on page-level shells:
+     cards and controls stay plain so the product keeps a calm, laconic look. */
+  .app-gradient-bg {
+    background-color: rgb(var(--c-canvas));
+    background-image:
+      radial-gradient(46rem 34rem at 14% -6rem, rgb(var(--c-blue2) / 0.16), transparent 72%),
+      radial-gradient(42rem 30rem at 52% 4rem, rgb(var(--c-blue) / 0.10), transparent 74%),
+      radial-gradient(44rem 32rem at 92% 92%, rgb(var(--c-blue) / 0.12), transparent 78%),
+      radial-gradient(32rem 24rem at -8% 100%, rgb(var(--c-blue2) / 0.10), transparent 76%);
+    background-attachment: fixed;
+    background-repeat: no-repeat;
+    background-size: 100% 100%;
+  }
+
+  /* Native-feeling transitions for general state changes. Apply to elements
+     that grow/shrink/swap inline content — kept under 250ms per spec. */
+  .transition-soft { transition: all var(--motion-base) var(--ease-out-soft); }
+  .transition-emphasized { transition: all var(--motion-slow) var(--ease-emphasized); }
+
+  /* Mobile-friendly tap targets. Pair with role="button" / <button> wrappers
+     where the visible glyph is smaller than 44px (icons, chips, close-X). */
+  .tap-target { min-width: 44px; min-height: 44px; }
+
+  .scroll-hint-bob { animation: scroll-hint-bob 1.35s var(--ease-out-soft) infinite; }
+}
+
+/* Defer fontstack swap so we don't get a layout reflow between fallback and
+   the loaded Inter font; CLS budget stays small. */
+@supports (font-display: swap) {
+  body { font-display: swap; }
 }

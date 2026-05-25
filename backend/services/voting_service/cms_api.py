@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import secrets
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Optional
 
 import aiohttp
@@ -25,10 +27,11 @@ from app.usecases.manage_tasks import (
     TaskQueueError,
     UpdateTaskUseCase,
 )
-from services.voting_service.cms_store import DEFAULT_LIMIT, MAX_LIMIT
+from services.voting_service.cms_store import DEFAULT_LIMIT, MAX_LIMIT, token_hash as compute_token_hash
 from services.voting_service.cms_rbac import (
     PERM_ACCESS_MANAGE,
     PERM_ACCESS_VIEW,
+    PERM_APP_SESSIONS_MANAGE,
     PERM_EVENTS_VIEW,
     PERM_OVERVIEW_VIEW,
     PERM_SESSIONS_VIEW,
@@ -38,6 +41,8 @@ from services.voting_service.cms_rbac import (
     PERM_VOTES_VIEW,
     PERM_WEB_VIEW,
 )
+
+logger = logging.getLogger(__name__)
 
 cms_router = APIRouter()
 
@@ -121,6 +126,18 @@ class JiraImportRequest(JiraPreviewRequest):
     expected_version: Optional[int] = Field(default=None, ge=0)
 
 
+class SessionRenameRequest(BaseModel):
+    """Rename a CMS session. Empty string clears the custom title and
+    callers fall back to the technical identifier."""
+
+    title: Optional[str] = Field(default=None, max_length=200)
+
+
+ThemePreference = str  # one of: "dark", "light", "system"
+ALLOWED_THEME_PREFERENCES: frozenset[str] = frozenset({"dark", "light", "system"})
+DEFAULT_THEME_PREFERENCE: ThemePreference = "system"
+
+
 @dataclass(frozen=True)
 class CmsPrincipal:
     id: int
@@ -130,6 +147,7 @@ class CmsPrincipal:
     permissions: frozenset[str]
     roles: tuple[dict, ...]
     pages: tuple[dict, ...]
+    theme_preference: ThemePreference = DEFAULT_THEME_PREFERENCE
 
     def can(self, permission: str) -> bool:
         return self.is_superuser or permission in self.permissions
@@ -304,6 +322,9 @@ async def _audit(request: Request, action: str, actor: Optional[str], status: st
 
 
 def _principal_from_record(record: dict) -> CmsPrincipal:
+    theme = record.get("theme_preference") or DEFAULT_THEME_PREFERENCE
+    if theme not in ALLOWED_THEME_PREFERENCES:
+        theme = DEFAULT_THEME_PREFERENCE
     return CmsPrincipal(
         id=int(record["id"]),
         username=record["username"],
@@ -312,6 +333,7 @@ def _principal_from_record(record: dict) -> CmsPrincipal:
         permissions=frozenset(record.get("permissions") or []),
         roles=tuple(record.get("roles") or []),
         pages=tuple(record.get("pages") or []),
+        theme_preference=theme,
     )
 
 
@@ -433,7 +455,41 @@ async def cms_me(actor: CmsPrincipal = AuthDep) -> dict:
         "permissions": sorted(actor.permissions),
         "roles": list(actor.roles),
         "pages": list(actor.pages),
+        "theme_preference": actor.theme_preference,
     }
+
+
+class PreferencesUpdateRequest(BaseModel):
+    theme_preference: str = Field(pattern=r"^(dark|light|system)$")
+
+
+@cms_router.patch("/cms/auth/me/preferences")
+async def cms_update_preferences(
+    body: PreferencesUpdateRequest,
+    request: Request,
+    actor: CmsPrincipal = AuthDep,
+) -> dict:
+    """Persist UI preferences (currently: theme) for the authenticated CMS user."""
+    theme = body.theme_preference
+    if theme not in ALLOWED_THEME_PREFERENCES:
+        raise HTTPException(status_code=400, detail="Invalid theme_preference")
+    store = _get_cms_store(request)
+    try:
+        ok = await store.update_admin_theme_preference(actor.id, theme)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not ok:
+        # Account is missing or deactivated — treat as unauthorized rather than 404
+        # to avoid leaking account state.
+        raise HTTPException(status_code=401, detail="Account is no longer active")
+    await _audit(
+        request,
+        "cms.preferences.update",
+        actor.username,
+        "ok",
+        {"theme_preference": theme},
+    )
+    return {"ok": True, "theme_preference": theme}
 
 
 @cms_router.get("/cms/overview")
@@ -475,6 +531,35 @@ async def cms_session_detail(
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     return session
+
+
+@cms_router.patch("/cms/sessions/{session_id}")
+async def cms_rename_session(
+    session_id: int,
+    body: SessionRenameRequest,
+    request: Request,
+    actor: CmsPrincipal = Depends(require_permission(PERM_APP_SESSIONS_MANAGE)),
+) -> dict:
+    """Rename a CMS session. Title is optional human-readable name shown in
+    place of the technical ``chat_id:topic_id`` key. Sending ``null`` or an
+    empty string clears the custom title."""
+    store = _get_cms_store(request)
+    result = await store.rename_session(session_id, body.title)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Session not found or already deleted")
+    _, _, new_title = result
+    await _audit(
+        request,
+        "cms.session.rename",
+        actor.username,
+        "ok",
+        {"session_id": session_id, "title": new_title},
+    )
+    return {
+        "ok": True,
+        "session_id": session_id,
+        "title": new_title,
+    }
 
 
 @cms_router.get("/cms/sessions/{session_id}/participants")
@@ -729,6 +814,198 @@ async def cms_import_jira_tasks(
     return _mutation_payload(result, session_id)
 
 
+# ---------------------------------------------------------------------------
+# Session lifecycle: close (force-finish) and soft-delete
+# ---------------------------------------------------------------------------
+
+
+def _close_session_mutator() -> "callable":
+    """Build the mutator used to force-finalize a session from the CMS.
+
+    Mirrors ``app_finish_session`` in app_api.py — kept in sync deliberately,
+    because cms_api cannot import from app_api without circular imports.
+    """
+
+    def mutate(session: Session) -> list[Task]:
+        finished_at = datetime.utcnow().isoformat()
+        pending = list(session.tasks_queue)
+        if pending:
+            for task in pending:
+                if not task.completed_at:
+                    task.completed_at = finished_at
+            session.last_batch = pending
+            session.history.extend(pending)
+            session.tasks_queue.clear()
+        session.current_task_index = 0
+        session.batch_completed = True
+        session.active_vote_message_id = None
+        session.current_batch_started_at = None
+        session.revealed_task_id = None
+        session.bump_tasks_version()
+        return list(session.last_batch)
+
+    return mutate
+
+
+async def _broadcast_session_state(request: Request, session: Session) -> None:
+    """Publish a fresh state snapshot so participants see CMS-driven changes."""
+    try:
+        from services.voting_service.app_api import _publish_state  # local import: avoid circular import
+    except Exception:
+        return
+    try:
+        await _publish_state(request, session)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("CMS broadcast failed: %s", exc)
+
+
+async def _purge_redis_tokens_for_session(request: Request, chat_id: int, topic_id: Optional[int]) -> None:
+    """Best-effort: drop live ``web:<token>`` keys belonging to the session.
+
+    Database expiry is updated by ``cms_store.revoke_web_token`` per token, but
+    that only flips the read-model. The actual short-lived Redis entries
+    (which authorize ``GET /web/state/...``) are wiped here so participants
+    lose access immediately when an admin removes the session.
+    """
+    redis_client = getattr(request.app.state, "web_redis", None)
+    if not redis_client:
+        return
+    try:
+        async for key in redis_client.scan_iter(match="web:*", count=200):
+            raw = await redis_client.get(key)
+            if not raw:
+                continue
+            try:
+                info = json.loads(raw)
+            except json.JSONDecodeError:
+                continue
+            if int(info.get("chat_id", -1)) != chat_id:
+                continue
+            stored_topic = info.get("topic_id")
+            if (stored_topic is None) != (topic_id is None):
+                continue
+            if stored_topic is not None and int(stored_topic) != int(topic_id or 0):
+                continue
+            await redis_client.delete(key)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Redis web-token purge failed: %s", exc)
+
+
+@cms_router.post("/cms/sessions/{session_id}/close")
+async def cms_close_session(
+    session_id: int,
+    request: Request,
+    actor: CmsPrincipal = Depends(require_permission(PERM_APP_SESSIONS_MANAGE)),
+) -> dict:
+    """Force-finish a session from the CMS. Idempotent — safe to call twice."""
+    chat_id, topic_id = await _session_ref(request, session_id)
+    completed = await _mutate_repo_session(
+        request.app.state.repository,
+        chat_id,
+        topic_id,
+        _close_session_mutator(),
+    )
+    refreshed_session = await _get_repo_session(request.app.state.repository, chat_id, topic_id)
+    await _broadcast_session_state(request, refreshed_session)
+    await _audit(
+        request,
+        "cms.session.close",
+        actor.username,
+        "ok",
+        {"session_id": session_id, "completed_count": len(completed)},
+    )
+    return {
+        "ok": True,
+        "session_id": session_id,
+        "chat_id": chat_id,
+        "topic_id": topic_id,
+        "completed_count": len(completed),
+        "batch_completed": True,
+    }
+
+
+@cms_router.delete("/cms/sessions/{session_id}")
+async def cms_delete_session(
+    session_id: int,
+    request: Request,
+    actor: CmsPrincipal = Depends(require_permission(PERM_APP_SESSIONS_MANAGE)),
+) -> dict:
+    """Soft-delete a session.
+
+    The CMS read-model row is flagged ``deleted_at`` so it disappears from all
+    listings together with its tasks/votes/participants/tokens. The live
+    Redis state and any pending invite tokens are also dropped so the deleted
+    session cannot be reopened by a stale browser tab.
+    """
+    chat_id, topic_id = await _session_ref(request, session_id)
+    store = _get_cms_store(request)
+    deleted_ref = await store.soft_delete_session(session_id)
+    if deleted_ref is None:
+        raise HTTPException(status_code=404, detail="Session not found or already deleted")
+
+    repo = request.app.state.repository
+    try:
+        if hasattr(repo, "delete_session_async"):
+            await repo.delete_session_async(chat_id, topic_id)
+        elif hasattr(repo, "delete_session"):
+            await repo.delete_session(chat_id, topic_id)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Live session delete failed (id=%s): %s", session_id, exc)
+
+    await _purge_redis_tokens_for_session(request, chat_id, topic_id)
+
+    await _audit(
+        request,
+        "cms.session.delete",
+        actor.username,
+        "ok",
+        {"session_id": session_id, "chat_id": chat_id, "topic_id": topic_id},
+    )
+    return {
+        "ok": True,
+        "session_id": session_id,
+        "deleted": True,
+    }
+
+
+@cms_router.delete("/cms/tokens/{token_id}")
+async def cms_revoke_token(
+    token_id: int,
+    request: Request,
+    actor: CmsPrincipal = Depends(require_permission(PERM_APP_SESSIONS_MANAGE)),
+) -> dict:
+    """Revoke a single invite token immediately.
+
+    Only the read-model token_hash is recorded in Postgres, so we can't
+    construct the original ``web:<token>`` Redis key from the hash. Instead we
+    scan Redis once and drop the matching ``web:`` key by comparing hashes.
+    """
+    store = _get_cms_store(request)
+    revoked_hash = await store.revoke_web_token(token_id)
+    if not revoked_hash:
+        raise HTTPException(status_code=404, detail="Token not found or already expired")
+
+    redis_client = getattr(request.app.state, "web_redis", None)
+    if redis_client:
+        try:
+            async for key in redis_client.scan_iter(match="web:*", count=200):
+                token = key.removeprefix("web:")
+                if compute_token_hash(token) == revoked_hash:
+                    await redis_client.delete(key)
+                    break
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Redis revoke for token id=%s failed: %s", token_id, exc)
+
+    await _audit(
+        request,
+        "cms.token.revoke",
+        actor.username,
+        "ok",
+        {"token_id": token_id},
+    )
+    return {"ok": True, "token_id": token_id, "revoked": True}
+
+
 @cms_router.get("/cms/users")
 async def cms_users(
     request: Request,
@@ -795,13 +1072,17 @@ async def cms_events(
     cursor: Optional[str] = None,
     action: Optional[str] = None,
     status: Optional[str] = None,
+    actor: Optional[str] = Query(default=None, max_length=120),
     _: CmsPrincipal = Depends(require_permission(PERM_EVENTS_VIEW)),
 ) -> dict:
+    """Paged audit-events feed. ``actor`` filters by exact username (case
+    sensitive) — used by the per-user mini-journal in the Access UI."""
     return await _get_cms_store(request).list_audit_events(
         limit=limit,
         cursor=cursor,
         action=action,
         status=status,
+        actor=actor,
     )
 
 

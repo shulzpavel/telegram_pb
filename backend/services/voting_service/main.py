@@ -1,15 +1,18 @@
 #!/usr/bin/env python3
 """Voting Service - FastAPI microservice for session and voting management."""
 
+import logging
 import os
 from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 load_dotenv()
 
+from app.ports.session_repository import SessionMutationConflictError
 from services.voting_service.api import router
 from services.voting_service.app_api import app_router
 from services.voting_service.health import health_router
@@ -17,8 +20,28 @@ from services.voting_service.metrics import metrics_router
 from services.voting_service.cms_api import cms_router
 from services.voting_service.web_api import web_router, REDIS_URL
 
+logger = logging.getLogger(__name__)
+
 ALLOWED_CORS_METHODS = ["GET", "POST", "PATCH", "DELETE", "OPTIONS"]
 ALLOWED_CORS_HEADERS = ["Authorization", "Content-Type", "X-Requested-With"]
+
+
+def _maybe_close(obj):
+    """Return an awaitable that calls obj.close() if available, else None."""
+    if obj is None or not hasattr(obj, "close"):
+        return None
+    return obj.close()
+
+
+def _maybe_aclose(obj):
+    """Return an awaitable for obj.aclose() / obj.close(), preferring aclose."""
+    if obj is None:
+        return None
+    if hasattr(obj, "aclose"):
+        return obj.aclose()
+    if hasattr(obj, "close"):
+        return obj.close()
+    return None
 
 
 @asynccontextmanager
@@ -67,12 +90,20 @@ async def lifespan(app: FastAPI):
             await app.state.cms_backfill_task
         except asyncio.CancelledError:
             pass
-    if hasattr(app.state, "repository"):
-        await app.state.repository.close()
-    if getattr(app.state, "cms_store", None):
-        await app.state.cms_store.close()
-    if hasattr(app.state, "web_redis"):
-        await app.state.web_redis.aclose()
+    # Each shutdown step is guarded individually so a broken adapter cannot
+    # prevent the rest from cleaning up (and so adapters without close() like
+    # FileSessionRepository do not crash the lifespan).
+    for label, closer in (
+        ("repository", _maybe_close(getattr(app.state, "repository", None))),
+        ("cms_store", _maybe_close(getattr(app.state, "cms_store", None))),
+        ("web_redis", _maybe_aclose(getattr(app.state, "web_redis", None))),
+    ):
+        if closer is None:
+            continue
+        try:
+            await closer
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Shutdown step %s failed: %r", label, exc)
 
 
 app = FastAPI(
@@ -103,6 +134,18 @@ app.add_middleware(
     allow_methods=ALLOWED_CORS_METHODS,
     allow_headers=ALLOWED_CORS_HEADERS,
 )
+
+
+@app.exception_handler(SessionMutationConflictError)
+async def _on_session_mutation_conflict(
+    request: Request, exc: SessionMutationConflictError
+) -> JSONResponse:
+    """Convert atomic-mutation conflicts into a retriable 409 instead of 500."""
+    logger.warning("Session mutation conflict on %s %s: %s", request.method, request.url.path, exc)
+    return JSONResponse(
+        status_code=409,
+        content={"detail": "Session is busy, please retry."},
+    )
 
 # Include routers
 app.include_router(health_router, prefix="/health", tags=["health"])

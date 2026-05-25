@@ -1,6 +1,8 @@
 """Health check endpoints for Jira Service."""
 
-from fastapi import APIRouter
+import os
+
+from fastapi import APIRouter, Response
 from pydantic import BaseModel
 
 from services.jira_service.client import JiraServiceClient
@@ -21,15 +23,42 @@ async def health_check() -> HealthResponse:
     return HealthResponse(status="healthy", service="jira-service", version="1.0.0")
 
 
+def _env_present(name: str) -> bool:
+    return bool(os.getenv(name, "").strip())
+
+
+def _demo_fallback_enabled() -> bool:
+    return os.getenv("JIRA_DEMO_FALLBACK", "true").strip().lower() in {"1", "true", "yes", "on"}
+
+
 @router.get("/ready")
-async def readiness_check() -> dict:
-    """Readiness: попытка создать/закрыть клиент."""
+async def readiness_check(response: Response) -> dict:
+    """Readiness without leaking Jira credentials."""
+    jira_configured = _env_present("JIRA_URL") and _env_present("JIRA_USERNAME") and _env_present("JIRA_API_TOKEN")
+    story_points_field = os.getenv("STORY_POINTS_FIELD", "").strip()
+    demo_fallback = _demo_fallback_enabled()
+
     try:
         client = JiraServiceClient()
         await client.close()
-        return {"status": "ready"}
+        status = "ready" if jira_configured or demo_fallback else "not_ready"
+        if status != "ready":
+            response.status_code = 503
+        return {
+            "status": status,
+            "jira_configured": jira_configured,
+            "demo_fallback_enabled": demo_fallback,
+            "story_points_field": story_points_field or None,
+        }
     except Exception as exc:  # noqa: BLE001
-        return {"status": "not_ready", "error": str(exc)}
+        response.status_code = 503
+        return {
+            "status": "not_ready",
+            "jira_configured": jira_configured,
+            "demo_fallback_enabled": demo_fallback,
+            "story_points_field": story_points_field or None,
+            "error": str(exc),
+        }
 
 
 @router.get("/live")

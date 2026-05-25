@@ -105,6 +105,7 @@ def _build_web_session_state(session) -> dict:
             "text": task.text,
             "jira_key": task.jira_key,
             "story_points": task.story_points,
+            "ai_summary": task.ai_summary,
             "index": session.current_task_index + 1,
             "total": len(session.tasks_queue),
         }
@@ -311,31 +312,32 @@ async def web_vote(body: WebVoteRequest, request: Request) -> dict:
             for uid, val in task.votes.items()
             if uid in session.participants
         ]
-        await redis_client.publish(
-            channel,
-            json.dumps({
-                "type": "results",
-                "votes": results,
-                "task": {
-                    "task_id": task.task_id,
-                    "text": task.text,
-                    "jira_key": task.jira_key,
-                    "story_points": task.story_points,
-                    "index": session.current_task_index + 1,
-                    "total": len(session.tasks_queue),
-                },
-            }),
-        )
+        payload = json.dumps({
+            "type": "results",
+            "votes": results,
+            "task": {
+                "task_id": task.task_id,
+                "text": task.text,
+                "jira_key": task.jira_key,
+                "story_points": task.story_points,
+                "ai_summary": task.ai_summary,
+                "index": session.current_task_index + 1,
+                "total": len(session.tasks_queue),
+            },
+        })
     else:
-        await redis_client.publish(
-            channel,
-            json.dumps({
-                "type": "vote_cast",
-                "voter_name": voter_name,
-                "voted_count": voted_count,
-                "total_voters": total_voters,
-            }),
-        )
+        payload = json.dumps({
+            "type": "vote_cast",
+            "voter_name": voter_name,
+            "voted_count": voted_count,
+            "total_voters": total_voters,
+        })
+
+    # Best-effort: vote was already persisted; do not surface pub/sub errors.
+    try:
+        await redis_client.publish(channel, payload)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("web_vote publish failed chat=%s topic=%s err=%r", chat_id, topic_id, exc)
 
     return {"success": True}
 

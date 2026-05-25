@@ -34,6 +34,7 @@ class Task:
     completed_at: Optional[str] = None
     jql: Optional[str] = None
     source: str = "manual"
+    ai_summary: Optional[Dict[str, Any]] = None
     created_at: str = field(default_factory=_utc_now)
     updated_at: str = field(default_factory=_utc_now)
 
@@ -49,6 +50,7 @@ class Task:
             "completed_at": self.completed_at,
             "jql": self.jql,
             "source": self.source,
+            "ai_summary": self.ai_summary,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }
@@ -76,6 +78,7 @@ class Task:
             completed_at=data.get("completed_at"),
             jql=data.get("jql"),
             source=source,
+            ai_summary=data.get("ai_summary") if isinstance(data.get("ai_summary"), dict) else None,
             created_at=data.get("created_at") or _utc_now(),
             updated_at=data.get("updated_at") or _utc_now(),
         )

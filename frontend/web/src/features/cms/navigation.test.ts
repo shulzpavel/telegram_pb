@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { CmsPrincipal } from "./api/cmsTypes";
-import { CMS_PERMISSIONS, hasPermission, visibleCmsTabs } from "./navigation";
+import {
+  CMS_PERMISSIONS,
+  cmsTabs,
+  groupVisibleTabs,
+  hasPermission,
+  visibleCmsTabs,
+} from "./navigation";
 
 function principal(overrides: Partial<CmsPrincipal>): CmsPrincipal {
   return {
@@ -24,9 +30,7 @@ describe("CMS navigation", () => {
       "overview",
       "sessions",
       "users",
-      "votes",
       "tokens",
-      "web",
       "events",
       "access",
     ]);
@@ -65,9 +69,64 @@ describe("CMS navigation", () => {
 
   it("falls back to static order when pages are not present in auth payload", () => {
     const admin = principal({
-      permissions: [CMS_PERMISSIONS.votes, CMS_PERMISSIONS.sessions],
+      permissions: [CMS_PERMISSIONS.users, CMS_PERMISSIONS.sessions],
     });
 
-    expect(visibleCmsTabs(admin).map((tab) => tab.key)).toEqual(["sessions", "votes"]);
+    expect(visibleCmsTabs(admin).map((tab) => tab.key)).toEqual(["sessions", "users"]);
+  });
+
+  it("hides legacy votes/web pages even if backend still grants the permission", () => {
+    const admin = principal({
+      permissions: ["cms.votes.view", "cms.web.view", CMS_PERMISSIONS.sessions],
+    });
+
+    expect(visibleCmsTabs(admin).map((tab) => tab.key)).toEqual(["sessions"]);
+  });
+
+  it("keeps the canonical tab count stable", () => {
+    expect(cmsTabs).toHaveLength(6);
+  });
+});
+
+describe("groupVisibleTabs", () => {
+  it("returns an empty list when the principal has no permissions", () => {
+    expect(groupVisibleTabs(principal({}))).toEqual([]);
+  });
+
+  it("groups permitted tabs in the declared group order", () => {
+    const admin = principal({
+      is_superuser: true,
+    });
+
+    const grouped = groupVisibleTabs(admin);
+    expect(grouped.map((g) => g.group.key)).toEqual(["core", "operations", "security"]);
+    expect(grouped.find((g) => g.group.key === "operations")?.items.map((t) => t.key)).toEqual([
+      "sessions",
+      "users",
+      "tokens",
+    ]);
+  });
+
+  it("returns one item per group when only two tabs across two groups are visible", () => {
+    const admin = principal({
+      permissions: [CMS_PERMISSIONS.sessions, CMS_PERMISSIONS.access],
+    });
+
+    const grouped = groupVisibleTabs(admin);
+    expect(grouped).toHaveLength(2);
+    expect(grouped[0].group.key).toBe("operations");
+    expect(grouped[0].items.map((t) => t.key)).toEqual(["sessions"]);
+    expect(grouped[1].group.key).toBe("security");
+    expect(grouped[1].items.map((t) => t.key)).toEqual(["access"]);
+  });
+
+  it("drops empty groups entirely", () => {
+    const admin = principal({
+      permissions: [CMS_PERMISSIONS.overview],
+    });
+
+    const grouped = groupVisibleTabs(admin);
+    expect(grouped).toHaveLength(1);
+    expect(grouped[0].group.key).toBe("core");
   });
 });

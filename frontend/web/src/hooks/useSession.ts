@@ -6,8 +6,17 @@ export interface TaskInfo {
   text: string;
   jira_key?: string;
   story_points?: number | null;
+  ai_summary?: AiTaskSummary | null;
   index: number;
   total: number;
+}
+
+export interface AiTaskSummary {
+  description: string;
+  methods: string[];
+  complexity: string;
+  generated_at: string;
+  source: string;
 }
 
 export type ParticipantRole = "backend" | "frontend" | "qa" | "product" | "design";
@@ -37,7 +46,8 @@ interface UseSessionReturn {
   phase: Phase;
   participantId: string | null;
   join: (name: string, role: ParticipantRole) => Promise<void>;
-  vote: (value: string) => Promise<void>;
+  /** Returns true on a successful vote, false on server-side rejection. */
+  vote: (value: string) => Promise<boolean>;
   error: string | null;
 }
 
@@ -60,6 +70,12 @@ export function useSession(token: string): UseSessionReturn {
 
     const ws = new WebSocket(wsUrl(token));
     wsRef.current = ws;
+
+    ws.onopen = () => {
+      // Reset backoff when we successfully establish a fresh connection,
+      // even if no session_state message arrives immediately afterwards.
+      reconnectDelay.current = 1000;
+    };
 
     ws.onmessage = (ev) => {
       try {
@@ -105,8 +121,22 @@ export function useSession(token: string): UseSessionReturn {
       }
     };
 
-    ws.onclose = () => {
+    ws.onclose = (ev) => {
       if (unmounted.current) return;
+      // 4004 = invalid/expired session token (see backend websocket_endpoint).
+      // Stop reconnecting and surface a clear "join again" state instead of an
+      // infinite backoff loop against a token that will never be valid.
+      if (ev.code === 4004) {
+        try {
+          localStorage.removeItem(pidKey);
+        } catch {
+          // ignore storage errors
+        }
+        setParticipantId(null);
+        setState(null);
+        setError("Сессия истекла. Откройте ссылку заново.");
+        return;
+      }
       const delay = reconnectDelay.current;
       reconnectDelay.current = Math.min(delay * 2, 30000);
       reconnectTimer.current = setTimeout(connect, delay);
@@ -115,7 +145,7 @@ export function useSession(token: string): UseSessionReturn {
     ws.onerror = () => {
       ws.close();
     };
-  }, [token, participantId]);
+  }, [token, participantId, pidKey]);
 
   useEffect(() => {
     unmounted.current = false;
@@ -130,17 +160,30 @@ export function useSession(token: string): UseSessionReturn {
   const join = useCallback(
     async (name: string, role: ParticipantRole) => {
       setError(null);
-      const resp = await fetch(apiUrl("/web/join"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token, name, role }),
-      });
+      let resp: Response;
+      try {
+        resp = await fetch(apiUrl("/web/join"), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ token, name, role }),
+        });
+      } catch (e) {
+        const message = e instanceof Error ? e.message : "Network error";
+        setError(message);
+        throw new Error(message);
+      }
       if (!resp.ok) {
         const data = await resp.json().catch(() => ({}));
-        throw new Error((data as { detail?: string }).detail ?? "Failed to join");
+        const message = (data as { detail?: string }).detail ?? "Failed to join";
+        setError(message);
+        throw new Error(message);
       }
       const data = (await resp.json()) as { participant_id: string; session: WebSessionState };
-      localStorage.setItem(pidKey, data.participant_id);
+      try {
+        localStorage.setItem(pidKey, data.participant_id);
+      } catch {
+        // ignore storage errors
+      }
       setParticipantId(data.participant_id);
       setState(data.session);
     },
@@ -148,20 +191,40 @@ export function useSession(token: string): UseSessionReturn {
   );
 
   const vote = useCallback(
-    async (value: string) => {
-      if (!participantId) return;
+    async (value: string): Promise<boolean> => {
+      if (!participantId) return false;
       setError(null);
-      const resp = await fetch(apiUrl("/web/vote"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token, participant_id: participantId, value }),
-      });
+      let resp: Response;
+      try {
+        resp = await fetch(apiUrl("/web/vote"), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ token, participant_id: participantId, value }),
+        });
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Network error");
+        return false;
+      }
       if (!resp.ok) {
         const data = await resp.json().catch(() => ({}));
         setError((data as { detail?: string }).detail ?? "Vote failed");
+        // Participant token expired or was invalidated — clear local state so
+        // the user can rejoin instead of being stuck in a phantom "voted"
+        // state from a stale localStorage participant_id.
+        if (resp.status === 403 || resp.status === 404) {
+          try {
+            localStorage.removeItem(pidKey);
+          } catch {
+            // ignore storage errors (private mode, etc.)
+          }
+          setParticipantId(null);
+          setState(null);
+        }
+        return false;
       }
+      return true;
     },
-    [token, participantId]
+    [token, participantId, pidKey]
   );
 
   return { state, phase, participantId, join, vote, error };

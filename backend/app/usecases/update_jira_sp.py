@@ -5,6 +5,7 @@ import os
 from typing import List, Optional, Tuple
 
 from app.domain.session import Session
+from app.domain.task import Task
 from app.ports.jira_client import JiraClient
 from app.ports.session_repository import SessionRepository
 from app.usecases.show_results import VotingPolicy
@@ -41,17 +42,22 @@ class UpdateJiraStoryPointsUseCase:
         
         for task in session.last_batch:
             if not task.jira_key:
-                skipped.append(f"{task.jira_key or 'Без ключа'}: нет ключа Jira")
+                label = task.summary or task.task_id or "Задача"
+                skipped.append(f"{label}: нет ключа Jira")
                 continue
-            
-            if not task.votes:
+
+            story_points = self._story_points_for_jira(task)
+            if story_points is None:
                 if skip_errors:
-                    skipped.append(f"{task.jira_key}: нет голосов")
+                    label = task.jira_key
+                    if not task.votes:
+                        skipped.append(f"{label}: нет голосов и нет финальной оценки")
+                    else:
+                        skipped.append(f"{label}: нет финальной оценки SP")
                     continue
                 failed.append(task.jira_key)
                 continue
-            
-            story_points = self.policy.get_max_vote(task.votes)
+
             if story_points == 0:
                 if skip_errors:
                     skipped.append(f"{task.jira_key}: нет валидных голосов")
@@ -90,5 +96,14 @@ class UpdateJiraStoryPointsUseCase:
 
         if updated:
             await self.session_repo.save_session(session)
-        
+
         return updated, failed, skipped
+
+    def _story_points_for_jira(self, task: Task) -> Optional[int]:
+        """Prefer manager final SP; fall back to max numeric vote when unset."""
+        if task.story_points is not None and task.story_points > 0:
+            return int(task.story_points)
+        if not task.votes:
+            return None
+        max_vote = self.policy.get_max_vote(task.votes)
+        return max_vote if max_vote > 0 else None

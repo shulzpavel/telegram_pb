@@ -5,6 +5,7 @@ metadata:
   namespace: planning-poker
 data:
   story-points-field: "customfield_10022"
+  jira-demo-fallback: "false"
 ---
 apiVersion: v1
 kind: ConfigMap

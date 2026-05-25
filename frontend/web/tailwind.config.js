@@ -1,24 +1,32 @@
 /** @type {import('tailwindcss').Config} */
+
+// Semantic colour tokens are wired to CSS variables so the entire app can
+// switch palettes via `data-theme="dark|light"` on the <html> element.
+// Values are stored as `R G B` triplets in :root/[data-theme="dark"] so
+// Tailwind opacity modifiers (e.g. `bg-blue/20`) keep working through the
+// `<alpha-value>` placeholder.
+const themeColor = (name) => `rgb(var(--c-${name}) / <alpha-value>)`;
+
 export default {
   content: ["./index.html", "./src/**/*.{ts,tsx}"],
   theme: {
     extend: {
       colors: {
-        canvas:  "#F7F8FA",
-        surface: "#FFFFFF",
-        elevated:"#FFFFFF",
-        ink:     "#0A0A0F",
-        ink2:    "#3C3C43",
-        ink3:    "#6E6E73",
-        ink4:    "#AEAEB2",
-        line:    "#E5E5EA",
-        line2:   "#F2F2F7",
-        blue:    "#0071E3",
-        blue2:   "#0077ED",
-        green:   "#30D158",
-        red:     "#FF3B30",
-        amber:   "#FF9F0A",
-        purple:  "#BF5AF2",
+        canvas:   themeColor("canvas"),
+        surface:  themeColor("surface"),
+        elevated: themeColor("elevated"),
+        ink:      themeColor("ink"),
+        ink2:     themeColor("ink2"),
+        ink3:     themeColor("ink3"),
+        ink4:     themeColor("ink4"),
+        line:     themeColor("line"),
+        line2:    themeColor("line2"),
+        blue:     themeColor("blue"),
+        blue2:    themeColor("blue2"),
+        green:    themeColor("green"),
+        red:      themeColor("red"),
+        amber:    themeColor("amber"),
+        purple:   themeColor("purple"),
       },
       fontFamily: {
         sans: [
@@ -34,10 +42,10 @@ export default {
         "2xs": ["0.625rem", { lineHeight: "0.875rem" }],
       },
       boxShadow: {
-        card:  "0 1px 3px rgba(0,0,0,.06), 0 4px 16px rgba(0,0,0,.06)",
-        hover: "0 2px 8px rgba(0,0,0,.08), 0 8px 24px rgba(0,0,0,.08)",
-        pop:   "0 4px 12px rgba(0,113,227,.25)",
-        inset: "inset 0 0 0 1.5px rgba(0,0,0,.08)",
+        card:  "var(--shadow-card)",
+        hover: "var(--shadow-hover)",
+        pop:   "var(--shadow-pop)",
+        inset: "var(--shadow-inset)",
       },
       borderRadius: {
         "4xl": "2rem",

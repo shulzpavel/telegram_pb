@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Navigate } from "react-router-dom";
-import { Alert, Spinner, Surface } from "../design-system";
+import { Alert, BrandMark, Spinner, Surface } from "../design-system";
 import { managerApi } from "../features/manager/api/managerClient";
 import type { ParticipantRole, ParticipantStatus, VoteResult } from "../hooks/useSession";
 import JoinPage from "./JoinPage";
@@ -105,10 +105,11 @@ export default function DemoPage() {
     setPhase("vote");
   }
 
-  async function voteDemo(value: string) {
+  async function voteDemo(value: string): Promise<boolean> {
     setOwnVote(value);
     await delay(850);
     setPhase("results");
+    return true;
   }
 
   function nextTask() {
@@ -129,15 +130,22 @@ export default function DemoPage() {
       return <Navigate to={`/s/${realToken}`} replace />;
     }
     return (
-      <main className="flex min-h-dvh items-center justify-center bg-canvas px-4">
-        <Surface className="w-full max-w-sm p-6 text-center">
-          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-lg bg-line2 text-blue">
-            <Spinner />
+      <main className="flex min-h-screen-mobile flex-col app-gradient-bg">
+        <header className="sticky top-0 z-10 border-b border-line/60 bg-surface/85 pt-safe backdrop-blur">
+          <div className="mx-auto flex min-h-14 max-w-3xl items-center px-3 sm:px-4">
+            <BrandMark size="sm" />
           </div>
-          <h1 className="mt-4 text-lg font-bold text-ink">Готовим real demo session</h1>
-          <p className="mt-2 text-sm text-ink3">Создаём живую сессию с тестовыми Jira-like задачами. Менеджер увидит её в `/manage?demo=1`.</p>
-          {realError ? <Alert className="mt-4 text-left" tone="danger">{realError}</Alert> : null}
-        </Surface>
+        </header>
+        <div className="flex flex-1 items-center justify-center px-4 py-10 pb-safe-6">
+          <Surface className="w-full max-w-sm p-6 text-center">
+            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-lg bg-line2 text-blue">
+              <Spinner />
+            </div>
+            <h1 className="mt-4 text-lg font-bold text-ink">Готовим real demo session</h1>
+            <p className="mt-2 text-sm text-ink3">Создаём живую сессию с тестовыми Jira-like задачами. Менеджер увидит её в `/manage?demo=1`.</p>
+            {realError ? <Alert className="mt-4 text-left" tone="danger">{realError}</Alert> : null}
+          </Surface>
+        </div>
       </main>
     );
   }
@@ -148,7 +156,7 @@ export default function DemoPage() {
         <VotePage
           task={MOCK_TASKS[0]}
           participants={MOCK_PARTICIPANTS}
-          onVote={async () => {}}
+          onVote={async () => true}
           error={null}
         />
       );

@@ -104,6 +104,20 @@ class JiraServiceClient:
 
         return result
 
+    async def fetch_issue_context(self, issue_key: str) -> Optional[Dict[str, Any]]:
+        """Fetch rich issue context for LLM summaries."""
+        cache_key = self._get_cache_key("context", issue_key)
+
+        cached = self._get_cached(cache_key)
+        if cached is not None:
+            return cached
+
+        result = await self._client.fetch_issue_context(issue_key)
+        if result:
+            self._set_cached(cache_key, result)
+
+        return result
+
     async def close(self) -> None:
         """Close client connections."""
         await self._client.close()

@@ -1,8 +1,12 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="ru" data-theme="dark">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content"
+    />
+    <meta name="color-scheme" content="dark light" />
     <title>Planning Poker</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -10,6 +14,29 @@
       href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
       rel="stylesheet"
     />
+    <script>
+      // Pre-paint theme bootstrap: resolves stored theme preference (or system)
+      // and writes data-theme onto <html> before React renders. This prevents a
+      // white flash when the user's preference is dark.
+      (function () {
+        try {
+          var KEY = "pp_theme";
+          var raw = null;
+          try { raw = window.localStorage.getItem(KEY); } catch (e) { /* private mode */ }
+          var mode = raw === "light" || raw === "dark" || raw === "system" ? raw : "dark";
+          var resolved = mode;
+          if (mode === "system") {
+            var mql = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)");
+            resolved = mql && mql.matches ? "dark" : "light";
+          }
+          var root = document.documentElement;
+          root.setAttribute("data-theme", resolved);
+          root.style.colorScheme = resolved;
+        } catch (e) {
+          document.documentElement.setAttribute("data-theme", "dark");
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

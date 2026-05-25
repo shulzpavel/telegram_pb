@@ -2,14 +2,21 @@
 
 from __future__ import annotations
 
+import csv
+import io
 import json
+import logging
 import os
 import secrets
 from datetime import datetime
 from typing import Optional
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
+
+logger = logging.getLogger(__name__)
 
 from app.domain.session import Session
 from app.domain.task import Task
@@ -35,6 +42,11 @@ from services.voting_service.cms_api import (
 )
 from services.voting_service.cms_store import DEFAULT_LIMIT, MAX_LIMIT
 from services.voting_service.cms_rbac import PERM_APP_SESSIONS_MANAGE
+from services.voting_service.ai_summary_llm import (
+    LlmSummaryError,
+    fetch_jira_issue_context,
+    generate_ai_summary_llm,
+)
 from services.voting_service.web_api import WEB_TOKEN_TTL, _build_web_session_state, _channel_name
 
 app_router = APIRouter()
@@ -67,6 +79,10 @@ DEMO_TASKS = [
 
 class AppSessionCreateRequest(BaseModel):
     title: str = Field(default="Planning Poker", min_length=1, max_length=120)
+
+
+class AppSessionRenameRequest(BaseModel):
+    title: str = Field(min_length=1, max_length=120)
 
 
 class TaskInput(BaseModel):
@@ -113,6 +129,14 @@ class FinalEstimateRequest(BaseModel):
     value: int = Field(ge=0, le=1000)
 
 
+class AiTaskSummary(BaseModel):
+    description: str
+    methods: list[str]
+    complexity: str
+    generated_at: str
+    source: str = "anthropic"
+
+
 def _manager_dep(actor: CmsPrincipal = Depends(require_permission(PERM_APP_SESSIONS_MANAGE))) -> CmsPrincipal:
     return actor
 
@@ -149,6 +173,52 @@ async def _mutate_repo_session(repo, chat_id: int, topic_id: Optional[int], muta
     return session, result
 
 
+async def _stored_session_title(
+    request: Request,
+    chat_id: int,
+    topic_id: Optional[int],
+) -> Optional[str]:
+    """Best-effort lookup of the human-readable session title from the CMS
+    read model. Returns ``None`` when the store is unavailable, the row
+    doesn't exist yet, or the stored title is empty."""
+    cms_store = getattr(request.app.state, "cms_store", None)
+    if cms_store is None:
+        return None
+    try:
+        row = await cms_store.get_session_by_chat(chat_id, topic_id)
+    except AttributeError:
+        return None
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "stored_session_title lookup failed chat_id=%s topic_id=%s err=%r",
+            chat_id,
+            topic_id,
+            exc,
+        )
+        return None
+    if not row:
+        return None
+    title = (row.get("title") or "").strip()
+    return title or None
+
+
+def _resolve_session_title(
+    requested_title: Optional[str],
+    stored_title: Optional[str],
+    *,
+    default: str = "Planning Poker",
+) -> str:
+    """Pick the best title to surface to the manager: an explicit query
+    parameter wins (unless it is the legacy default), otherwise we use the
+    stored title, finally falling back to the generic default."""
+    requested = (requested_title or "").strip()
+    if requested and requested != default:
+        return requested
+    if stored_title:
+        return stored_title
+    return requested or default
+
+
 async def _create_invite_token(
     request: Request,
     chat_id: int,
@@ -163,17 +233,159 @@ async def _create_invite_token(
     cms_store = getattr(request.app.state, "cms_store", None)
     if cms_store:
         await cms_store.record_web_token(token, chat_id, topic_id, WEB_TOKEN_TTL)
+        # Persist the manager-supplied title onto the read-model row so the
+        # CMS can show a friendly name instead of the technical chat key.
+        # We only overwrite empty titles, so manual renames in CMS survive
+        # invite regeneration.
+        try:
+            await cms_store.set_session_title_by_chat(chat_id, topic_id, title)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "set_session_title failed chat_id=%s topic_id=%s err=%r",
+                chat_id,
+                topic_id,
+                exc,
+            )
 
     path = f"/s/{token}"
     return token, _public_url(path)
 
 
 async def _publish_state(request: Request, session: Session) -> None:
+    """Broadcast new session state. Best-effort: never fail the caller.
+
+    Mutations are already committed when we get here. If pub/sub is briefly
+    unavailable, browser clients will catch up via the WebSocket initial state
+    on the next reconnect or the next state-changing event.
+    """
     redis_client = request.app.state.web_redis
-    await redis_client.publish(
-        _channel_name(session.chat_id, session.topic_id),
-        json.dumps({"type": "session_state", "state": _build_web_session_state(session)}),
-    )
+    try:
+        await redis_client.publish(
+            _channel_name(session.chat_id, session.topic_id),
+            json.dumps({"type": "session_state", "state": _build_web_session_state(session)}),
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "publish_state failed chat_id=%s topic_id=%s err=%r",
+            session.chat_id,
+            session.topic_id,
+            exc,
+        )
+
+
+def _serialize_completed_task(session: Session, task: Task, *, bucket_index: Optional[int] = None) -> dict:
+    """Render a played task with full vote breakdown for manager-facing views.
+
+    Used by manager state (HistoryStrip), Finish summary and CSV export. The
+    vote breakdown is *not* exposed to participants — see ``_build_web_session_state``.
+    """
+    votes: list[dict] = []
+    for uid, value in task.votes.items():
+        participant = session.participants.get(uid)
+        votes.append({"name": participant.name if participant else "—", "value": value})
+
+    distribution: dict[str, int] = {}
+    for value in task.votes.values():
+        distribution[value] = distribution.get(value, 0) + 1
+
+    unique_numeric: set[str] = {value for value in task.votes.values() if value not in {"?", "coffee"}}
+    consensus = len(unique_numeric) == 1 if unique_numeric else False
+
+    return {
+        "task_id": task.task_id,
+        "jira_key": task.jira_key,
+        "summary": task.summary,
+        "url": task.url,
+        "story_points": task.story_points,
+        "source": task.source,
+        "completed_at": task.completed_at,
+        "bucket_index": bucket_index,
+        "votes": votes,
+        "distribution": distribution,
+        "voter_count": len(task.votes),
+        "consensus": consensus,
+    }
+
+
+def _completed_tasks_in_batch(session: Session):
+    """Raw (un-serialized) sequence of tasks already played in the active batch.
+
+    Three layered cases:
+    1. Explicit Finish was called → ``last_batch`` is canonical.
+    2. The cursor was advanced past the last task by auto-next, but Finish
+       was not (yet) explicitly invoked. ``tasks_queue`` still holds the
+       played tasks with their votes intact.
+    3. Session is still in-flight → take ``tasks_queue[:current_task_index]``.
+    """
+    if session.batch_completed and session.last_batch:
+        return list(session.last_batch)
+    if session.batch_completed:
+        # Auto-next-on-last cleared the cursor but never moved tasks into
+        # last_batch — the played items are still inside tasks_queue.
+        return list(session.tasks_queue)
+    return list(session.tasks_queue[: session.current_task_index])
+
+
+def _completed_in_batch(session: Session) -> list[dict]:
+    """Serialised, full list — kept for callers that genuinely need everything
+    (e.g. CSV export). Prefer ``_paginate_completed_in_batch`` for UI traffic."""
+    return [
+        _serialize_completed_task(session, task, bucket_index=idx)
+        for idx, task in enumerate(_completed_tasks_in_batch(session))
+    ]
+
+
+COMPLETED_DEFAULT_LIMIT = 20
+COMPLETED_MAX_LIMIT = 200
+
+
+def _parse_int_cursor(cursor: Optional[str]) -> int:
+    if not cursor:
+        return 0
+    try:
+        value = int(cursor)
+    except (TypeError, ValueError):
+        return 0
+    return value if value >= 0 else 0
+
+
+def _paginate_completed_in_batch(
+    session: Session,
+    *,
+    limit: int,
+    cursor: Optional[str],
+) -> dict:
+    """Return a cursor-paginated slice of the already-played tasks in the
+    active batch. ``cursor`` is the integer offset from the start (oldest-first).
+    Newest tasks are at the end."""
+    limit = max(1, min(limit, COMPLETED_MAX_LIMIT))
+    offset = _parse_int_cursor(cursor)
+    all_tasks = _completed_tasks_in_batch(session)
+    total = len(all_tasks)
+    slice_ = all_tasks[offset: offset + limit]
+    next_offset = offset + len(slice_)
+    items = [
+        _serialize_completed_task(session, task, bucket_index=offset + idx)
+        for idx, task in enumerate(slice_)
+    ]
+    return {
+        "items": items,
+        "next_cursor": str(next_offset) if next_offset < total else None,
+        "limit": limit,
+        "total": total,
+    }
+
+
+def _current_task_votes(session: Session) -> list[dict]:
+    """Manager-only: real votes (with participant names) before reveal."""
+    task = session.current_task
+    if not task:
+        return []
+    votes: list[dict] = []
+    for uid, value in task.votes.items():
+        participant = session.participants.get(uid)
+        votes.append({"name": participant.name if participant else "—", "value": value})
+    return votes
 
 
 def _manager_session_payload(
@@ -182,7 +394,27 @@ def _manager_session_payload(
     title: str = "Planning Poker",
     invite_url: Optional[str] = None,
     token: Optional[str] = None,
+    completed_limit: Optional[int] = None,
 ) -> dict:
+    """Manager-facing snapshot of the session.
+
+    ``completed_limit`` is opt-in cursor pagination for ``completed_tasks``:
+    when set, only the OLDEST ``completed_limit`` played tasks are inlined,
+    plus a ``completed_next_cursor`` callers can pass to
+    ``/sessions/{chat_id}/completed`` to fetch the rest. When ``None``,
+    callers receive the full (legacy) list — kept for backward compatibility
+    with older clients that read ``completed_tasks`` directly.
+    """
+    if completed_limit is None:
+        completed = _completed_in_batch(session)
+        completed_total = len(completed)
+        completed_next_cursor: Optional[str] = None
+    else:
+        page = _paginate_completed_in_batch(session, limit=completed_limit, cursor=None)
+        completed = page["items"]
+        completed_total = page["total"]
+        completed_next_cursor = page["next_cursor"]
+
     return {
         "chat_id": session.chat_id,
         "topic_id": session.topic_id,
@@ -192,7 +424,13 @@ def _manager_session_payload(
         "tasks_version": session.tasks_version,
         "tasks_queue_count": len(session.tasks_queue),
         "current_task_id": session.current_task_id,
+        "current_batch_started_at": session.current_batch_started_at,
         "state": _build_web_session_state(session),
+        # Manager-only enrichment: votes & completed history.
+        "current_task_votes": _current_task_votes(session),
+        "completed_tasks": completed,
+        "completed_count": completed_total,
+        "completed_next_cursor": completed_next_cursor,
     }
 
 
@@ -313,11 +551,104 @@ async def app_session_state(
     chat_id: int,
     request: Request,
     topic_id: Optional[int] = None,
-    title: str = "Planning Poker",
+    title: Optional[str] = None,
+    completed_limit: Optional[int] = Query(default=None, ge=1, le=COMPLETED_MAX_LIMIT),
     _: CmsPrincipal = Depends(_manager_dep),
 ) -> dict:
     session = await _get_repo_session(request.app.state.repository, chat_id, topic_id)
-    return _manager_session_payload(session, title=title)
+    stored_title = await _stored_session_title(request, chat_id, topic_id)
+    resolved_title = _resolve_session_title(title, stored_title)
+    return _manager_session_payload(session, title=resolved_title, completed_limit=completed_limit)
+
+
+@app_router.get("/app/sessions/{chat_id}/completed")
+async def app_session_completed(
+    chat_id: int,
+    request: Request,
+    topic_id: Optional[int] = None,
+    limit: int = Query(default=COMPLETED_DEFAULT_LIMIT, ge=1, le=COMPLETED_MAX_LIMIT),
+    cursor: Optional[str] = None,
+    _: CmsPrincipal = Depends(_manager_dep),
+) -> dict:
+    """Paginated, oldest-first slice of tasks already played in the active
+    batch. Use it to lazy-load Manager's HistoryStrip and the Finished-session
+    report without pulling the entire batch in one payload."""
+    session = await _get_repo_session(request.app.state.repository, chat_id, topic_id)
+    return _paginate_completed_in_batch(session, limit=limit, cursor=cursor)
+
+
+@app_router.post("/app/sessions/{chat_id}/invite")
+async def app_regenerate_invite(
+    chat_id: int,
+    request: Request,
+    topic_id: Optional[int] = None,
+    title: Optional[str] = Query(default=None),
+    actor: CmsPrincipal = Depends(_manager_dep),
+) -> dict:
+    """Mint a fresh invite token for an existing manager session.
+
+    Web tokens live in Redis with an 8h TTL and may be evicted before the
+    session itself is finished (volume reset, manager comes back the next day,
+    etc.). Without this endpoint the manager would see a stale invite_url
+    cached in localStorage and participants would hit "Session token not found
+    or expired" on /s/<token>. The session itself stays the same chat_id.
+    """
+    # Touch the session so we know it exists in the repository before binding
+    # a new token to its identity (also normalizes lazily-created sessions).
+    await _get_repo_session(request.app.state.repository, chat_id, topic_id)
+    stored_title = await _stored_session_title(request, chat_id, topic_id)
+    resolved_title = _resolve_session_title(title, stored_title)
+    token, invite_url = await _create_invite_token(request, chat_id, topic_id, resolved_title)
+    await _audit(
+        request,
+        "app.session.invite_regenerate",
+        actor.username,
+        "ok",
+        {"chat_id": chat_id},
+    )
+    return {"token": token, "invite_url": invite_url}
+
+
+@app_router.patch("/app/sessions/{chat_id}/title")
+async def app_rename_session(
+    chat_id: int,
+    body: AppSessionRenameRequest,
+    request: Request,
+    topic_id: Optional[int] = None,
+    actor: CmsPrincipal = Depends(_manager_dep),
+) -> dict:
+    """Rename an active manager session.
+
+    The friendly title is stored on ``cms_sessions.title`` so the CMS surfaces
+    the same name. Unlike create/invite-regenerate this endpoint *always*
+    overwrites the stored title — the manager is the source of truth here.
+    """
+    await _get_repo_session(request.app.state.repository, chat_id, topic_id)
+    cms_store = getattr(request.app.state, "cms_store", None)
+    new_title = body.title.strip()
+    if not new_title:
+        raise HTTPException(status_code=400, detail="Title must not be empty")
+    if cms_store is not None:
+        try:
+            await cms_store.set_session_title_by_chat(
+                chat_id, topic_id, new_title, only_if_empty=False,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "rename_session failed chat_id=%s topic_id=%s err=%r",
+                chat_id,
+                topic_id,
+                exc,
+            )
+            raise HTTPException(status_code=503, detail="Title store unavailable") from exc
+    await _audit(
+        request,
+        "app.session.rename",
+        actor.username,
+        "ok",
+        {"chat_id": chat_id, "title": new_title},
+    )
+    return {"chat_id": chat_id, "topic_id": topic_id, "title": new_title}
 
 
 @app_router.get("/app/sessions/{chat_id}/tasks")
@@ -522,7 +853,7 @@ async def app_import_jira_tasks(
                 jira_key=key,
                 summary=issue.get("summary") or key,
                 url=issue.get("url"),
-                story_points=issue.get("story_points"),
+                story_points=issue.get("story_points") or None,
                 jql=body.jql,
                 source="jira",
             )
@@ -558,7 +889,9 @@ async def app_start_session(
             return "Add at least one task before starting."
         session.normalize_current_task_index()
         session.batch_completed = False
-        session.current_batch_started_at = datetime.utcnow().isoformat()
+        started = datetime.utcnow().isoformat()
+        session.current_batch_started_at = started
+        session.last_batch_started_at = started  # preserved through next/finish for summary
         session.revealed_task_id = None
         if session.current_task:
             session.current_task.votes.clear()
@@ -595,6 +928,71 @@ async def app_reveal_session(
     return _manager_session_payload(session)
 
 
+@app_router.post("/app/sessions/{chat_id}/ai-summary")
+async def app_generate_ai_summary(
+    chat_id: int,
+    request: Request,
+    topic_id: Optional[int] = None,
+    actor: CmsPrincipal = Depends(_manager_dep),
+) -> dict:
+    """Generate a facilitator-facing AI hint for the current voting task via Anthropic.
+
+    The summary is stored on the active ``Task`` and appears in manager state and
+    participant WebSocket payloads. Strict mode: no heuristic fallback when LLM fails.
+    """
+    session = await _get_repo_session(request.app.state.repository, chat_id, topic_id)
+    if not session.current_task or not session.current_batch_started_at:
+        raise HTTPException(status_code=400, detail="Start voting before generating an AI summary.")
+
+    task = session.current_task
+    jira_context = None
+    if task.jira_key:
+        try:
+            jira_context = await fetch_jira_issue_context(task.jira_key)
+        except LlmSummaryError as exc:
+            await _audit(
+                request,
+                "app.task.ai_summary.generate",
+                actor.username,
+                "failed",
+                {"chat_id": chat_id, "task_id": task.task_id, "error": exc.message},
+            )
+            raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+
+    try:
+        summary = await generate_ai_summary_llm(task, jira_context)
+    except LlmSummaryError as exc:
+        await _audit(
+            request,
+            "app.task.ai_summary.generate",
+            actor.username,
+            "failed",
+            {"chat_id": chat_id, "task_id": task.task_id, "error": exc.message},
+        )
+        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+
+    def mutate(active: Session) -> Optional[str]:
+        if not active.current_task or active.current_task.task_id != task.task_id:
+            return "Task changed before AI summary could be saved. Refresh and try again."
+        active.current_task.ai_summary = summary
+        active.current_task.touch()
+        active.bump_tasks_version()
+        return None
+
+    session, error = await _mutate_repo_session(request.app.state.repository, chat_id, topic_id, mutate)
+    if error:
+        raise HTTPException(status_code=400, detail=error)
+    await _publish_state(request, session)
+    await _audit(
+        request,
+        "app.task.ai_summary.generate",
+        actor.username,
+        "ok",
+        {"chat_id": chat_id, "task_id": session.current_task_id, "source": summary.get("source")},
+    )
+    return _manager_session_payload(session)
+
+
 @app_router.post("/app/sessions/{chat_id}/next")
 async def app_next_task(
     chat_id: int,
@@ -628,8 +1026,26 @@ async def app_skip_task(
     topic_id: Optional[int] = None,
     actor: CmsPrincipal = Depends(_manager_dep),
 ) -> dict:
+    # Skip == advance to next task. Run the same mutation as `next` but only
+    # record a single `skip` audit event so the audit log isn't polluted with
+    # a paired `skip` + `next` for every skip click.
+    def mutate(session: Session) -> None:
+        if session.current_task:
+            session.current_task_index += 1
+        session.revealed_task_id = None
+        if session.current_task:
+            session.current_task.votes.clear()
+            session.current_batch_started_at = datetime.utcnow().isoformat()
+            session.batch_completed = False
+        else:
+            session.current_batch_started_at = None
+            session.batch_completed = True
+        session.bump_tasks_version()
+
+    session, _ = await _mutate_repo_session(request.app.state.repository, chat_id, topic_id, mutate)
+    await _publish_state(request, session)
     await _audit(request, "app.session.skip", actor.username, "ok", {"chat_id": chat_id})
-    return await app_next_task(chat_id, request, topic_id=topic_id, actor=actor)
+    return _manager_session_payload(session)
 
 
 @app_router.post("/app/sessions/{chat_id}/final-estimate")
@@ -664,26 +1080,305 @@ async def app_finish_session(
     actor: CmsPrincipal = Depends(_manager_dep),
 ) -> dict:
     def mutate(session: Session) -> list[Task]:
-        if session.batch_completed:
-            return []
+        """Finalize the session. Idempotent: safe to call after auto-next-on-last.
+
+        After auto-next walks the cursor past the last task, the played items
+        are still inside ``tasks_queue`` and ``batch_completed`` is already
+        True. This handler must still migrate them to ``last_batch`` so the
+        summary screen and CSV export see the data.
+        """
         finished_at = datetime.utcnow().isoformat()
-        completed_tasks: list[Task] = []
-        for task in session.tasks_queue:
-            task.completed_at = finished_at
-            completed_tasks.append(task)
-        session.last_batch.clear()
-        session.last_batch = completed_tasks.copy()
-        session.history.extend(completed_tasks)
-        session.tasks_queue.clear()
+        pending = list(session.tasks_queue)
+        if pending:
+            for task in pending:
+                if not task.completed_at:
+                    task.completed_at = finished_at
+            session.last_batch = pending
+            session.history.extend(pending)
+            session.tasks_queue.clear()
         session.current_task_index = 0
         session.batch_completed = True
         session.active_vote_message_id = None
         session.current_batch_started_at = None
         session.revealed_task_id = None
         session.bump_tasks_version()
-        return completed_tasks
+        return list(session.last_batch)
 
     session, completed = await _mutate_repo_session(request.app.state.repository, chat_id, topic_id, mutate)
     await _publish_state(request, session)
     await _audit(request, "app.session.finish", actor.username, "ok", {"chat_id": chat_id, "count": len(completed)})
     return _manager_session_payload(session)
+
+
+class JiraStoryPointsSyncBody(BaseModel):
+    skip_errors: bool = True
+
+
+@app_router.post("/app/sessions/{chat_id}/jira-story-points/sync")
+async def app_sync_jira_story_points(
+    chat_id: int,
+    body: JiraStoryPointsSyncBody,
+    request: Request,
+    topic_id: Optional[int] = Query(None),
+    actor: CmsPrincipal = Depends(require_permission(PERM_APP_SESSIONS_MANAGE)),
+):
+    """Write final SP from the last finished batch into Jira (manager-initiated)."""
+    session = await request.app.state.repository.get_session(chat_id, topic_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if not session.last_batch:
+        raise HTTPException(status_code=400, detail="Нет завершённого батча для синхронизации")
+
+    from app.adapters.jira_service_client import JiraServiceHttpClient
+    from app.usecases.update_jira_sp import UpdateJiraStoryPointsUseCase
+
+    jira_client = JiraServiceHttpClient()
+    try:
+        use_case = UpdateJiraStoryPointsUseCase(
+            jira_client,
+            request.app.state.repository,
+        )
+        updated, failed, skipped = await use_case.execute(
+            chat_id,
+            topic_id,
+            skip_errors=body.skip_errors,
+        )
+    finally:
+        await jira_client.close()
+    await _audit(
+        request,
+        "app.session.jira_sp_sync",
+        actor.username,
+        "ok" if not failed else "partial",
+        {
+            "chat_id": chat_id,
+            "updated": updated,
+            "failed": failed,
+            "skipped_count": len(skipped),
+        },
+    )
+    return {
+        "updated": updated,
+        "failed": failed,
+        "skipped": skipped,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Session summary (used by the post-finish "results" page and CSV export)
+# ---------------------------------------------------------------------------
+
+
+def _summary_payload(
+    session: Session,
+    *,
+    title: str,
+    tasks_limit: Optional[int] = None,
+) -> dict:
+    """Build a detailed summary of the (current or just-finished) session.
+
+    Works in both states:
+    - phase == "complete": tasks read from ``session.last_batch``.
+    - in-progress: completed slice = tasks_queue[:current_task_index].
+
+    Aggregates (stats / participants) are ALWAYS computed across the full
+    batch. ``tasks_limit`` lets callers (e.g. the Finished-page UI) inline
+    only the first slice — they then page through the rest via
+    ``/sessions/{chat_id}/summary/tasks``. CSV export does not pass the limit.
+    """
+    full_completed = _completed_in_batch(session)
+
+    if tasks_limit is None:
+        completed = full_completed
+        completed_next_cursor: Optional[str] = None
+    else:
+        limit = max(1, min(tasks_limit, COMPLETED_MAX_LIMIT))
+        completed = full_completed[:limit]
+        completed_next_cursor = str(len(completed)) if len(completed) < len(full_completed) else None
+
+    with_estimate = sum(1 for entry in full_completed if entry["story_points"] is not None)
+    consensus_count = sum(1 for entry in full_completed if entry["consensus"])
+    total_voters = sum(entry["voter_count"] for entry in full_completed)
+
+    # We persist a snapshot of the batch start time so finish/auto-next-on-last
+    # don't erase it. Fall back to the current live timestamp for in-flight
+    # sessions; final fallback is the first task's created_at for very old
+    # sessions imported without timing data.
+    started_at = (
+        session.last_batch_started_at
+        or session.current_batch_started_at
+        or (session.last_batch[0].created_at if session.last_batch else None)
+        or (session.tasks_queue[0].created_at if session.tasks_queue else None)
+    )
+
+    finished_at: Optional[str] = None
+    if session.batch_completed and session.last_batch:
+        finished_at = session.last_batch[0].completed_at
+
+    # Stable participant roster across the session (manager + voters).
+    participant_names = sorted(
+        {participant.name for participant in session.participants.values() if participant.name},
+        key=str.casefold,
+    )
+
+    return {
+        "chat_id": session.chat_id,
+        "topic_id": session.topic_id,
+        "title": title,
+        "phase": "complete" if session.batch_completed else ("in_progress" if full_completed else "fresh"),
+        "started_at": started_at,
+        "finished_at": finished_at,
+        "tasks_queue_count": len(session.tasks_queue),
+        "completed_tasks": completed,
+        "completed_next_cursor": completed_next_cursor,
+        "participants": participant_names,
+        "stats": {
+            # Aggregates are always computed across the full batch so the UI
+            # can show truthful totals before pulling every task into memory.
+            "total_completed": len(full_completed),
+            "with_estimate": with_estimate,
+            "consensus_count": consensus_count,
+            "votes_cast": total_voters,
+        },
+    }
+
+
+@app_router.get("/app/sessions/{chat_id}/summary")
+async def app_session_summary(
+    chat_id: int,
+    request: Request,
+    topic_id: Optional[int] = None,
+    title: Optional[str] = Query(default=None),
+    tasks_limit: Optional[int] = Query(default=None, ge=1, le=COMPLETED_MAX_LIMIT),
+    _: CmsPrincipal = Depends(_manager_dep),
+) -> dict:
+    """JSON-summary for the Finished-session page. Pass ``tasks_limit`` to
+    inline only the first slice of completed tasks; remaining pages are
+    served by ``/summary/tasks``. Aggregate stats are always exact."""
+    session = await _get_repo_session(request.app.state.repository, chat_id, topic_id)
+    stored_title = await _stored_session_title(request, chat_id, topic_id)
+    resolved_title = _resolve_session_title(title, stored_title)
+    return _summary_payload(session, title=resolved_title, tasks_limit=tasks_limit)
+
+
+@app_router.get("/app/sessions/{chat_id}/summary/tasks")
+async def app_session_summary_tasks(
+    chat_id: int,
+    request: Request,
+    topic_id: Optional[int] = None,
+    limit: int = Query(default=COMPLETED_DEFAULT_LIMIT, ge=1, le=COMPLETED_MAX_LIMIT),
+    cursor: Optional[str] = None,
+    _: CmsPrincipal = Depends(_manager_dep),
+) -> dict:
+    """Page through the completed-tasks list for the Finished-session report.
+
+    Shape matches the existing CMS list contract (``items``,
+    ``next_cursor``, ``limit``, ``total``) so the frontend can drop it into
+    the shared ``useCmsList``-style hook."""
+    session = await _get_repo_session(request.app.state.repository, chat_id, topic_id)
+    return _paginate_completed_in_batch(session, limit=limit, cursor=cursor)
+
+
+def _format_distribution(distribution: dict[str, int]) -> str:
+    """Render `{5: 3, 8: 1}` as `5×3, 8×1` (sorted by descending count)."""
+    if not distribution:
+        return ""
+    pairs = sorted(distribution.items(), key=lambda kv: (-kv[1], kv[0]))
+    return ", ".join(f"{value}×{count}" for value, count in pairs)
+
+
+def _csv_download_filename(title: str, chat_id: int) -> str:
+    """ASCII fallback filename for Content-Disposition headers."""
+    safe_title = "".join(ch if ch.isascii() and (ch.isalnum() or ch in "-_") else "_" for ch in (title or "session"))
+    safe_title = "_".join(part for part in safe_title.split("_") if part) or "session"
+    return f"planning_poker_{safe_title}_{chat_id}.csv"
+
+
+@app_router.get("/app/sessions/{chat_id}/summary.csv")
+async def app_session_summary_csv(
+    chat_id: int,
+    request: Request,
+    topic_id: Optional[int] = None,
+    title: Optional[str] = Query(default=None),
+    actor: CmsPrincipal = Depends(_manager_dep),
+) -> StreamingResponse:
+    """Export the session summary as a structured, human-readable CSV.
+
+    Format:
+        - Header block with session metadata (commented with leading '#').
+        - Blank line separator.
+        - Tabular rows: index, jira_key, summary, url, source, final SP,
+          consensus, voter count, vote distribution, then a column per
+          participant with their individual vote.
+    """
+    session = await _get_repo_session(request.app.state.repository, chat_id, topic_id)
+    stored_title = await _stored_session_title(request, chat_id, topic_id)
+    resolved_title = _resolve_session_title(title, stored_title)
+    summary = _summary_payload(session, title=resolved_title)
+    participant_names: list[str] = summary["participants"]
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+
+    writer.writerow([f"# Planning Poker Session Summary"])
+    writer.writerow([f"# Title: {summary['title']}"])
+    writer.writerow([f"# Chat ID: {summary['chat_id']}"])
+    writer.writerow([f"# Topic ID: {summary['topic_id'] if summary['topic_id'] is not None else '—'}"])
+    writer.writerow([f"# Started at: {summary['started_at'] or '—'}"])
+    writer.writerow([f"# Finished at: {summary['finished_at'] or '—'}"])
+    writer.writerow([f"# Phase: {summary['phase']}"])
+    writer.writerow([f"# Completed tasks: {summary['stats']['total_completed']}"])
+    writer.writerow([f"# With final estimate: {summary['stats']['with_estimate']}"])
+    writer.writerow([f"# Consensus reached: {summary['stats']['consensus_count']}"])
+    writer.writerow([f"# Votes cast: {summary['stats']['votes_cast']}"])
+    writer.writerow([])
+
+    header = [
+        "Index",
+        "Jira Key",
+        "Summary",
+        "URL",
+        "Source",
+        "Final SP",
+        "Consensus",
+        "Voter Count",
+        "Vote Distribution",
+        "Completed At",
+    ] + participant_names
+    writer.writerow(header)
+
+    for idx, entry in enumerate(summary["completed_tasks"], start=1):
+        name_to_value = {vote["name"]: vote["value"] for vote in entry["votes"]}
+        row = [
+            idx,
+            entry["jira_key"] or "",
+            entry["summary"],
+            entry["url"] or "",
+            entry["source"],
+            entry["story_points"] if entry["story_points"] is not None else "",
+            "yes" if entry["consensus"] else "no",
+            entry["voter_count"],
+            _format_distribution(entry["distribution"]),
+            entry["completed_at"] or "",
+        ] + [name_to_value.get(name, "") for name in participant_names]
+        writer.writerow(row)
+
+    csv_bytes = buf.getvalue().encode("utf-8-sig")  # BOM so Excel detects UTF-8
+
+    filename = _csv_download_filename(summary["title"], chat_id)
+    utf8_filename = f"planning_poker_{summary['title'] or 'session'}_{chat_id}.csv"
+    content_disposition = f"attachment; filename=\"{filename}\"; filename*=UTF-8''{quote(utf8_filename)}"
+
+    await _audit(
+        request,
+        "app.session.summary_export",
+        actor.username,
+        "ok",
+        {"chat_id": chat_id, "format": "csv", "rows": len(summary["completed_tasks"])},
+    )
+
+    return StreamingResponse(
+        iter([csv_bytes]),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": content_disposition},
+    )

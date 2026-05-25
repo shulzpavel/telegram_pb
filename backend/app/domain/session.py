@@ -23,6 +23,10 @@ class Session:
     active_vote_message_id: Optional[int] = None
     current_batch_id: Optional[str] = None
     current_batch_started_at: Optional[str] = None
+    # Snapshot of when the most recent batch was started — preserved when the
+    # cursor moves past the last task or finish is called so the summary
+    # screen can still show the session duration.
+    last_batch_started_at: Optional[str] = None
     revealed_task_id: Optional[str] = None
     tasks_version: int = 0
 
@@ -93,6 +97,7 @@ class SessionFactory:
             "active_vote_message_id": session.active_vote_message_id,
             "current_batch_id": session.current_batch_id,
             "current_batch_started_at": session.current_batch_started_at,
+            "last_batch_started_at": session.last_batch_started_at,
             "revealed_task_id": session.revealed_task_id,
             "tasks_version": session.tasks_version,
         }
@@ -131,6 +136,7 @@ class SessionFactory:
             active_vote_message_id=data.get("active_vote_message_id"),
             current_batch_id=data.get("current_batch_id"),
             current_batch_started_at=data.get("current_batch_started_at"),
+            last_batch_started_at=data.get("last_batch_started_at"),
             revealed_task_id=data.get("revealed_task_id"),
             tasks_version=data.get("tasks_version", 0),
         )

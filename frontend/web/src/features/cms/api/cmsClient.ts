@@ -1,7 +1,7 @@
 import { CMS_PAGE_LIMIT, cmsUrl } from "../../../app/config";
 import { requestJson } from "../../../shared/api/http";
 import type { Page, ParamValue } from "../../../shared/types/pagination";
-import type { CmsAdmin, CmsPageAccess, CmsPermission, CmsPrincipal, CmsRole, JiraPreview, TaskItem } from "./cmsTypes";
+import type { AuditEvent, CmsAdmin, CmsPageAccess, CmsPermission, CmsPrincipal, CmsRole, JiraPreview, TaskItem, ThemeMode } from "./cmsTypes";
 
 export function buildQuery(
   params: Record<string, ParamValue>,
@@ -29,10 +29,11 @@ export async function cmsFetch<T>(path: string, init?: RequestInit): Promise<T> 
 export async function cmsList<T>(
   path: string,
   params: Record<string, ParamValue>,
-  cursor: string | null
+  cursor: string | null,
+  init?: { signal?: AbortSignal }
 ): Promise<Page<T>> {
   const query = buildQuery(params, cursor);
-  return cmsFetch<Page<T>>(`${path}?${query}`);
+  return cmsFetch<Page<T>>(`${path}?${query}`, init);
 }
 
 export const cmsAuthApi = {
@@ -43,6 +44,11 @@ export const cmsAuthApi = {
       body: JSON.stringify({ username, password }),
     }),
   logout: () => cmsFetch<{ ok: boolean }>("/auth/logout", { method: "POST" }),
+  updatePreferences: (payload: { theme_preference: ThemeMode }) =>
+    cmsFetch<{ ok: boolean }>("/auth/me/preferences", {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
 };
 
 export const cmsAccessApi = {
@@ -116,6 +122,58 @@ export interface CmsTaskBody {
   story_points?: number | null;
   expected_version?: number | null;
 }
+
+export const cmsSessionsApi = {
+  close: (sessionId: number) =>
+    cmsFetch<{ ok: boolean; session_id: number; completed_count: number; batch_completed: boolean }>(
+      `/sessions/${sessionId}/close`,
+      { method: "POST" }
+    ),
+  delete: (sessionId: number) =>
+    cmsFetch<{ ok: boolean; session_id: number; deleted: boolean }>(`/sessions/${sessionId}`, {
+      method: "DELETE",
+    }),
+  rename: (sessionId: number, title: string | null) =>
+    cmsFetch<{ ok: boolean; session_id: number; title: string | null }>(`/sessions/${sessionId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ title }),
+    }),
+};
+
+export interface CmsEventsListParams {
+  /** Exact-match actor username; used by per-user mini-journal. */
+  actor?: string | null;
+  action?: string | null;
+  status?: string | null;
+  limit?: number;
+}
+
+export const cmsEventsApi = {
+  /**
+   * Paged audit-events feed. Mirrors the shape used by `useCmsList` so the
+   * audit page can keep its progressive-list wiring, while a one-shot call
+   * is cheap to make from the Access UI for the per-user mini-journal.
+   */
+  list: (params: CmsEventsListParams = {}, cursor: string | null = null) => {
+    const apiParams: Record<string, ParamValue> = {
+      actor: params.actor ?? undefined,
+      action: params.action ?? undefined,
+      status: params.status ?? undefined,
+      // `buildQuery` initializes `limit` from its own arg, but any key on
+      // params overrides it. Pass through so the mini-journal can request
+      // a smaller page than the default 50.
+      limit: params.limit ?? undefined,
+    };
+    return cmsList<AuditEvent>("/events", apiParams, cursor);
+  },
+};
+
+export const cmsTokensApi = {
+  revoke: (tokenId: number) =>
+    cmsFetch<{ ok: boolean; token_id: number; revoked: boolean }>(`/tokens/${tokenId}`, {
+      method: "DELETE",
+    }),
+};
 
 export const cmsTasksApi = {
   create: (sessionId: number, body: CmsTaskBody) =>

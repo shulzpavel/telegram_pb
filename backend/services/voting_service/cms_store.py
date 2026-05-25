@@ -23,6 +23,7 @@ from services.voting_service.cms_rbac import (
     ALL_PERMISSION_KEYS,
     CMS_PAGE_DEFINITIONS,
     CMS_PERMISSION_DEFINITIONS,
+    DEPRECATED_CMS_PAGE_KEYS,
     OPERATIONAL_VIEW_PERMISSIONS,
     PERM_ACCESS_MANAGE,
     PERM_ACCESS_VIEW,
@@ -59,6 +60,25 @@ def decode_cursor(cursor: Optional[str]) -> dict[str, Any]:
         return data if isinstance(data, dict) else {}
     except Exception:
         return {}
+
+
+def _decode_cursor_timestamp(value: Any) -> Optional[datetime]:
+    """Cursors are serialised as JSON with ``default=str``, so timestamps
+    arrive as ISO-8601 strings. asyncpg, however, binds ``timestamptz``
+    parameters as ``datetime`` instances. Convert here so every paginated
+    list endpoint can pass cursor TS straight through to the SQL query."""
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, str):
+        try:
+            # ``datetime.fromisoformat`` handles the ``YYYY-MM-DDTHH:MM:SS[.ffffff][+HH:MM]``
+            # shape produced by ``str(datetime)`` since Python 3.11.
+            return datetime.fromisoformat(value)
+        except ValueError:
+            return None
+    return None
 
 
 def session_key(chat_id: int, topic_id: Optional[int]) -> str:
@@ -216,6 +236,13 @@ class PostgresCmsStore:
                     ADD COLUMN IF NOT EXISTS current_task_id TEXT;
                 ALTER TABLE cms_sessions
                     ADD COLUMN IF NOT EXISTS tasks_version INTEGER NOT NULL DEFAULT 0;
+                ALTER TABLE cms_sessions
+                    ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
+                ALTER TABLE cms_sessions
+                    ADD COLUMN IF NOT EXISTS title TEXT;
+                CREATE INDEX IF NOT EXISTS idx_cms_sessions_title_trgm
+                    ON cms_sessions USING GIN ((lower(title)) gin_trgm_ops)
+                    WHERE title IS NOT NULL;
                 CREATE INDEX IF NOT EXISTS idx_cms_sessions_updated
                     ON cms_sessions(updated_at DESC, id DESC);
                 CREATE INDEX IF NOT EXISTS idx_cms_sessions_active_updated
@@ -227,6 +254,9 @@ class PostgresCmsStore:
                 CREATE INDEX IF NOT EXISTS idx_cms_sessions_batch_id_trgm
                     ON cms_sessions USING GIN (current_batch_id gin_trgm_ops)
                     WHERE current_batch_id IS NOT NULL;
+                CREATE INDEX IF NOT EXISTS idx_cms_sessions_alive_updated
+                    ON cms_sessions(updated_at DESC, id DESC)
+                    WHERE deleted_at IS NULL;
 
                 CREATE TABLE IF NOT EXISTS cms_users (
                     user_id BIGINT PRIMARY KEY,
@@ -419,6 +449,13 @@ class PostgresCmsStore:
                     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                     last_login_at TIMESTAMPTZ
                 );
+                ALTER TABLE cms_admin_accounts
+                    ADD COLUMN IF NOT EXISTS theme_preference TEXT NOT NULL DEFAULT 'system';
+                ALTER TABLE cms_admin_accounts
+                    DROP CONSTRAINT IF EXISTS cms_admin_accounts_theme_preference_check;
+                ALTER TABLE cms_admin_accounts
+                    ADD CONSTRAINT cms_admin_accounts_theme_preference_check
+                    CHECK (theme_preference IN ('dark', 'light', 'system'));
                 CREATE INDEX IF NOT EXISTS idx_cms_admin_accounts_active
                     ON cms_admin_accounts(is_active, username);
                 CREATE INDEX IF NOT EXISTS idx_cms_admin_accounts_username_lower
@@ -471,6 +508,16 @@ class PostgresCmsStore:
                         page["path"],
                         page["permission_key"],
                         page["sort_order"],
+                    )
+
+                if DEPRECATED_CMS_PAGE_KEYS:
+                    await conn.execute(
+                        """
+                        UPDATE cms_pages
+                        SET is_enabled = FALSE, updated_at = NOW()
+                        WHERE key = ANY($1::text[]) AND is_enabled = TRUE
+                        """,
+                        list(DEPRECATED_CMS_PAGE_KEYS),
                     )
 
                 superadmin_role_id = await self._upsert_system_role(
@@ -614,6 +661,7 @@ class PostgresCmsStore:
                             tasks_version = EXCLUDED.tasks_version,
                             updated_at = NOW(),
                             raw = EXCLUDED.raw
+                        WHERE cms_sessions.deleted_at IS NULL
                         RETURNING id
                         """,
                         key,
@@ -634,6 +682,11 @@ class PostgresCmsStore:
                         session.tasks_version,
                         json.dumps(data),
                     )
+
+                    if session_id is None:
+                        # Session is soft-deleted in the CMS read model;
+                        # skip downstream writes so deleted state is preserved.
+                        return
 
                     user_ids: list[int] = []
                     for raw_uid, participant in participants.items():
@@ -908,7 +961,8 @@ class PostgresCmsStore:
             row = await conn.fetchrow(
                 """
                 SELECT id, username, display_name,
-                       is_active, is_superuser, created_at, updated_at, last_login_at
+                       is_active, is_superuser, created_at, updated_at, last_login_at,
+                       COALESCE(theme_preference, 'system') AS theme_preference
                 FROM cms_admin_accounts
                 WHERE ($1::bigint IS NOT NULL AND id = $1)
                    OR ($2::text IS NOT NULL AND username = $2)
@@ -963,6 +1017,27 @@ class PostgresCmsStore:
         data["permissions"] = permission_keys
         data["pages"] = [_row_to_dict(page) for page in page_rows]
         return data
+
+    async def update_admin_theme_preference(self, admin_id: int, theme_preference: str) -> bool:
+        """Persist the admin's theme choice. Returns True if the account exists and is active."""
+        if theme_preference not in ("dark", "light", "system"):
+            raise ValueError(f"invalid theme_preference: {theme_preference!r}")
+        async with self.pool.acquire() as conn:
+            result = await conn.execute(
+                """
+                UPDATE cms_admin_accounts
+                SET theme_preference = $2,
+                    updated_at = NOW()
+                WHERE id = $1 AND is_active
+                """,
+                admin_id,
+                theme_preference,
+            )
+        try:
+            affected = int(result.split()[-1])
+        except (ValueError, IndexError):
+            affected = 0
+        return affected > 0
 
     async def list_cms_permissions(self) -> list[dict[str, Any]]:
         async with self.pool.acquire() as conn:
@@ -1372,6 +1447,7 @@ class PostgresCmsStore:
                     COALESCE(SUM(total_votes), 0)::bigint AS total_votes,
                     COALESCE(SUM(total_tasks), 0)::bigint AS total_tasks
                 FROM cms_sessions
+                WHERE deleted_at IS NULL
                 """
             )
             users = await conn.fetchrow(
@@ -1382,15 +1458,26 @@ class PostgresCmsStore:
                 FROM cms_users
                 """
             )
+            # Tokens tied to deleted sessions are excluded so the overview
+            # stays consistent with the visible session list.
             tokens = await conn.fetchrow(
                 """
                 SELECT
-                    COUNT(*) FILTER (WHERE expires_at > NOW())::bigint AS active_web_tokens,
+                    COUNT(*) FILTER (WHERE wt.expires_at > NOW())::bigint AS active_web_tokens,
                     COUNT(*)::bigint AS total_web_tokens
-                FROM cms_web_tokens
+                FROM cms_web_tokens wt
+                LEFT JOIN cms_sessions s ON s.session_key = wt.session_key
+                WHERE s.id IS NULL OR s.deleted_at IS NULL
                 """
             )
-            votes = await conn.fetchval("SELECT COUNT(*)::bigint FROM cms_votes")
+            votes = await conn.fetchval(
+                """
+                SELECT COUNT(*)::bigint
+                FROM cms_votes v
+                JOIN cms_sessions s ON s.id = v.session_id
+                WHERE s.deleted_at IS NULL
+                """
+            )
             return {
                 **_row_to_dict(sessions),
                 **_row_to_dict(users),
@@ -1409,19 +1496,25 @@ class PostgresCmsStore:
     ) -> dict[str, Any]:
         limit = clamp_limit(limit)
         cur = decode_cursor(cursor)
-        cursor_ts = cur.get("updated_at")
+        cursor_ts = _decode_cursor_timestamp(cur.get("updated_at"))
         cursor_id = cur.get("id")
         pattern = f"%{q.strip()}%" if q and q.strip() else None
         async with self.pool.acquire() as conn:
             rows = await conn.fetch(
                 """
-                SELECT id, session_key, chat_id, topic_id, current_task_index,
+                SELECT id, session_key, chat_id, topic_id, title, current_task_index,
                        participants_count, tasks_queue_count, history_count,
                        last_batch_count, total_tasks, total_votes, batch_completed,
                        is_active, current_batch_id, current_batch_started_at,
                        current_task_id, tasks_version, updated_at
                 FROM cms_sessions
-                WHERE ($1::text IS NULL OR session_key ILIKE $1 OR current_batch_id ILIKE $1)
+                WHERE deleted_at IS NULL
+                  AND (
+                      $1::text IS NULL
+                      OR session_key ILIKE $1
+                      OR current_batch_id ILIKE $1
+                      OR title ILIKE $1
+                  )
                   AND ($2::boolean IS NULL OR is_active = $2)
                   AND ($3::bigint IS NULL OR chat_id = $3)
                   AND ($4::bigint IS NULL OR topic_id IS NOT DISTINCT FROM $4)
@@ -1442,21 +1535,163 @@ class PostgresCmsStore:
             )
         return self._paged_rows(rows, limit, "updated_at")
 
-    async def get_session(self, session_id: int) -> Optional[dict[str, Any]]:
+    async def get_session(
+        self,
+        session_id: int,
+        *,
+        include_deleted: bool = False,
+    ) -> Optional[dict[str, Any]]:
         async with self.pool.acquire() as conn:
             row = await conn.fetchrow(
                 """
-                SELECT id, session_key, chat_id, topic_id, current_task_index,
+                SELECT id, session_key, chat_id, topic_id, title, current_task_index,
                        participants_count, tasks_queue_count, history_count,
                        last_batch_count, total_tasks, total_votes, batch_completed,
                        is_active, current_batch_id, current_batch_started_at,
-                       current_task_id, tasks_version, updated_at, raw
+                       current_task_id, tasks_version, updated_at, deleted_at, raw
                 FROM cms_sessions
                 WHERE id = $1
+                  AND ($2::boolean OR deleted_at IS NULL)
+                """,
+                session_id,
+                include_deleted,
+            )
+        return _row_to_dict(row) if row else None
+
+    async def soft_delete_session(self, session_id: int) -> Optional[tuple[int, Optional[int]]]:
+        """Mark a session as deleted. Returns (chat_id, topic_id) for callers
+        that need to clean up live Redis state, or None if the row was already
+        missing/deleted.
+
+        Children (tasks, votes, participants, web tokens, web participants)
+        remain in their tables. They naturally disappear from CMS listings via
+        the same ``deleted_at`` filter on the session join.
+        """
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                UPDATE cms_sessions
+                SET deleted_at = NOW(), is_active = FALSE, updated_at = NOW()
+                WHERE id = $1 AND deleted_at IS NULL
+                RETURNING chat_id, topic_id
                 """,
                 session_id,
             )
+        if not row:
+            return None
+        return int(row["chat_id"]), (int(row["topic_id"]) if row["topic_id"] is not None else None)
+
+    async def get_session_by_chat(
+        self,
+        chat_id: int,
+        topic_id: Optional[int],
+    ) -> Optional[dict[str, Any]]:
+        """Lookup a CMS session row by its live identity (chat+topic). Used
+        by the app API when serving manager state to attach the stored title.
+        Returns ``None`` for missing or soft-deleted sessions."""
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT id, session_key, chat_id, topic_id, title, is_active,
+                       batch_completed, updated_at
+                FROM cms_sessions
+                WHERE chat_id = $1
+                  AND topic_id IS NOT DISTINCT FROM $2
+                  AND deleted_at IS NULL
+                """,
+                chat_id,
+                topic_id,
+            )
         return _row_to_dict(row) if row else None
+
+    async def set_session_title_by_chat(
+        self,
+        chat_id: int,
+        topic_id: Optional[int],
+        title: Optional[str],
+        *,
+        only_if_empty: bool = True,
+    ) -> bool:
+        """Write a human-readable title onto the cms_sessions row for the given
+        chat+topic. Idempotent — safe to call from session-create paths even
+        before the background ``sync_session`` job has materialized the row.
+
+        When ``only_if_empty`` is set (default), an existing title is
+        preserved so re-running the create flow never clobbers a manually
+        renamed session. Returns True when the title is now stored as
+        requested.
+        """
+        normalized = (title or "").strip()
+        if not normalized:
+            return False
+        key = session_key(chat_id, topic_id)
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                INSERT INTO cms_sessions (session_key, chat_id, topic_id, title, raw)
+                VALUES ($1, $2, $3, $4, '{}'::jsonb)
+                ON CONFLICT (session_key) DO UPDATE SET
+                    title = CASE
+                        WHEN $5::boolean = FALSE THEN EXCLUDED.title
+                        WHEN cms_sessions.title IS NULL OR cms_sessions.title = ''
+                            THEN EXCLUDED.title
+                        ELSE cms_sessions.title
+                    END,
+                    updated_at = NOW()
+                WHERE cms_sessions.deleted_at IS NULL
+                RETURNING id
+                """,
+                key,
+                chat_id,
+                topic_id,
+                normalized,
+                only_if_empty,
+            )
+        return row is not None
+
+    async def rename_session(
+        self,
+        session_id: int,
+        title: Optional[str],
+    ) -> Optional[tuple[int, Optional[int], Optional[str]]]:
+        """Update or clear the title on a CMS session row. Returns
+        ``(chat_id, topic_id, new_title)`` for callers that audit the change,
+        or ``None`` if the row is missing/deleted."""
+        normalized = (title or "").strip() or None
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                UPDATE cms_sessions
+                SET title = $2, updated_at = NOW()
+                WHERE id = $1 AND deleted_at IS NULL
+                RETURNING chat_id, topic_id, title
+                """,
+                session_id,
+                normalized,
+            )
+        if not row:
+            return None
+        return (
+            int(row["chat_id"]),
+            (int(row["topic_id"]) if row["topic_id"] is not None else None),
+            row["title"],
+        )
+
+    async def revoke_web_token(self, token_id: int) -> Optional[str]:
+        """Force-expire a web invite token. Returns the token_hash so the
+        caller can also wipe the Redis ``web:<token>`` key when known."""
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                UPDATE cms_web_tokens
+                SET expires_at = NOW() - INTERVAL '1 second',
+                    last_seen_at = NOW()
+                WHERE id = $1 AND expires_at > NOW()
+                RETURNING token_hash
+                """,
+                token_id,
+            )
+        return row["token_hash"] if row else None
 
     async def list_session_participants(
         self,
@@ -1540,7 +1775,7 @@ class PostgresCmsStore:
     ) -> dict[str, Any]:
         limit = clamp_limit(limit)
         cur = decode_cursor(cursor)
-        cursor_ts = cur.get("last_seen_at")
+        cursor_ts = _decode_cursor_timestamp(cur.get("last_seen_at"))
         cursor_user_id = cur.get("user_id")
         pattern = f"%{q.strip()}%" if q and q.strip() else None
         async with self.pool.acquire() as conn:
@@ -1666,11 +1901,13 @@ class PostgresCmsStore:
         cursor: Optional[str] = None,
         action: Optional[str] = None,
         status: Optional[str] = None,
+        actor: Optional[str] = None,
     ) -> dict[str, Any]:
         limit = clamp_limit(limit)
         cur = decode_cursor(cursor)
-        cursor_ts = cur.get("ts")
+        cursor_ts = _decode_cursor_timestamp(cur.get("ts"))
         cursor_id = cur.get("id")
+        normalized_actor = actor.strip() if actor and actor.strip() else None
         async with self.pool.acquire() as conn:
             rows = await conn.fetch(
                 """
@@ -1678,6 +1915,7 @@ class PostgresCmsStore:
                 FROM cms_audit_events
                 WHERE ($1::text IS NULL OR action = $1)
                   AND ($2::text IS NULL OR status = $2)
+                  AND ($6::text IS NULL OR actor = $6)
                   AND (
                       $3::timestamptz IS NULL
                       OR (ts, id) < ($3::timestamptz, $4::bigint)
@@ -1690,6 +1928,7 @@ class PostgresCmsStore:
                 cursor_ts,
                 cursor_id,
                 limit + 1,
+                normalized_actor,
             )
         return self._paged_rows(rows, limit, "ts")
 

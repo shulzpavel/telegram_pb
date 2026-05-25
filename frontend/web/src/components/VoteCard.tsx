@@ -20,15 +20,19 @@ export default function VoteCard({ value, selected, disabled, onSelect }: VoteCa
       whileTap={disabled || reduceMotion ? {} : { scale: 0.98 }}
       transition={{ duration: 0.14, ease: [0.2, 0, 0, 1] }}
       className={[
-        "relative flex flex-col items-center justify-center select-none cursor-pointer",
-        "w-full min-h-[88px] aspect-[5/7] rounded-lg border transition-[background-color,border-color,box-shadow,color] duration-150",
+        "relative flex select-none flex-col items-center justify-center",
+        // Aspect lock keeps cards proportional from 320px up; min-h ensures
+        // the touch target stays above the WCAG 44px floor even when the
+        // grid is squeezed in a 320px viewport.
+        "w-full min-h-[64px] sm:min-h-[80px] md:min-h-[88px] aspect-[5/7] cursor-pointer rounded-lg border",
+        "transition-[background-color,border-color,box-shadow,color,transform] duration-150 ease-out",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue/30 focus-visible:ring-offset-2 focus-visible:ring-offset-canvas",
-        "text-xl md:text-2xl font-black tracking-tight",
+        "text-lg sm:text-xl md:text-2xl font-black tracking-tight tabular-nums",
         selected
           ? "border-blue bg-blue text-white shadow-pop"
           : disabled
-          ? "border-line/50 bg-line2 text-ink4 cursor-not-allowed"
-          : "border-line bg-surface text-ink shadow-card hover:border-blue/40 hover:shadow-hover",
+          ? "cursor-not-allowed border-line/50 bg-line2 text-ink4"
+          : "border-line bg-surface text-ink shadow-card hover:border-blue/40 hover:shadow-hover active:scale-[0.98]",
       ].join(" ")}
     >
       {/* Suit pip top-left (decorative) */}

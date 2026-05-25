@@ -31,6 +31,19 @@ spec:
             secretKeyRef:
               name: postgres-secrets
               key: dsn
+        - name: JIRA_SERVICE_URL
+          value: "http://jira-service:8001"
+        - name: ANTHROPIC_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: anthropic-secrets
+              key: api-key
+        - name: ANTHROPIC_MODEL
+          value: "claude-haiku-4-5-20251001"
+        - name: ANTHROPIC_TIMEOUT_SECONDS
+          value: "20"
+        - name: ANTHROPIC_MAX_CONTEXT_CHARS
+          value: "6000"
         livenessProbe:
           httpGet:
             path: /health/live
