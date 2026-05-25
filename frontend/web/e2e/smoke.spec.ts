@@ -13,11 +13,13 @@ import { expect, test } from "@playwright/test";
 // -----------------------------------------------------------------------------
 
 test.describe("public surfaces", () => {
-  test("landing page presents the product headline and CTAs", async ({ page }) => {
+  test("landing hub presents entry paths for manager and player", async ({ page }) => {
     await page.goto("/");
     await expect(
-      page.getByRole("heading", { name: /Planning Poker, который не мешает оценивать/ }),
+      page.getByRole("heading", { level: 1, name: /Выберите, что нужно сделать сейчас/ }),
     ).toBeVisible();
+    await expect(page.getByRole("link", { name: "Открыть менеджерский экран" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Открыть демо для игрока" })).toBeVisible();
   });
 
   test("unknown URL falls back to the 404 mascot", async ({ page }) => {
