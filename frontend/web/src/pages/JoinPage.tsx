@@ -133,7 +133,7 @@ export default function JoinPage({ task, onJoin, error }: JoinPageProps) {
                         disabled={loading}
                         aria-pressed={active}
                         className={cn(
-                          "flex min-h-12 items-center gap-2 rounded-lg border px-3 py-2.5 text-left text-sm font-semibold sm:gap-2.5 sm:px-4 sm:py-3",
+                          "relative grid min-h-12 grid-cols-[auto_minmax(0,1fr)] items-center gap-2 rounded-lg border px-3 py-2.5 pr-10 text-left text-sm font-semibold sm:gap-2 sm:px-3 sm:py-3 sm:pr-8",
                           "transition-[background-color,border-color,color] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue/30 active:scale-[0.98]",
                           active
                             ? "border-blue bg-blue/8 text-blue"
@@ -142,12 +142,12 @@ export default function JoinPage({ task, onJoin, error }: JoinPageProps) {
                         )}
                       >
                         <span className="text-base leading-none">{r.icon}</span>
-                        <span className="min-w-0 whitespace-normal break-words leading-snug">{r.label}</span>
+                        <span className="min-w-0 whitespace-normal break-words leading-tight sm:whitespace-nowrap">{r.label}</span>
                         {active && (
                           <motion.div
-                            className="ml-auto flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-blue"
-                            initial={{ scale: 0 }}
-                            animate={{ scale: 1 }}
+                            className="absolute right-3 top-1/2 flex h-4 w-4 -translate-y-1/2 items-center justify-center rounded-full bg-blue sm:right-2"
+                            initial={{ scale: 0, y: "-50%" }}
+                            animate={{ scale: 1, y: "-50%" }}
                             transition={{ duration: reduceMotion ? 0 : 0.14 }}
                           >
                             <svg width="8" height="6" viewBox="0 0 8 6" fill="none" aria-hidden="true">
