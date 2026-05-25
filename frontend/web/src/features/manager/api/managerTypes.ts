@@ -9,6 +9,14 @@ export interface NamedVote {
   value: string;
 }
 
+export interface AiTaskSummary {
+  description: string;
+  methods: string[];
+  complexity: string;
+  generated_at?: string;
+  source?: string;
+}
+
 /** A task that has already been played in the current batch. Used by the
  *  HistoryStrip under the central card, by Backlog SP chips, and by the
  *  finished-session summary page. */
@@ -25,6 +33,7 @@ export interface CompletedTask {
   distribution: Record<string, number>;
   voter_count: number;
   consensus: boolean;
+  ai_summary?: AiTaskSummary | null;
 }
 
 export interface ManagerSession {

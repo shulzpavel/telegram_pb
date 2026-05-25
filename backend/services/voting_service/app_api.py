@@ -300,6 +300,7 @@ def _serialize_completed_task(session: Session, task: Task, *, bucket_index: Opt
         "source": task.source,
         "completed_at": task.completed_at,
         "bucket_index": bucket_index,
+        "ai_summary": task.ai_summary,
         "votes": votes,
         "distribution": distribution,
         "voter_count": len(task.votes),
@@ -1287,6 +1288,22 @@ def _format_distribution(distribution: dict[str, int]) -> str:
     return ", ".join(f"{value}×{count}" for value, count in pairs)
 
 
+def _csv_ai_summary_fields(ai_summary: Optional[dict]) -> tuple[str, str, str]:
+    """Flatten AI summary for CSV cells (description, complexity, methods)."""
+    if not ai_summary or not isinstance(ai_summary, dict):
+        return "", "", ""
+
+    description = " ".join(str(ai_summary.get("description") or "").strip().split())
+    complexity = " ".join(str(ai_summary.get("complexity") or "").strip().split())
+    methods_raw = ai_summary.get("methods")
+    if isinstance(methods_raw, list):
+        methods = "; ".join(str(item).strip() for item in methods_raw if str(item).strip())
+    else:
+        methods = ""
+    methods = " ".join(methods.split())
+    return description, complexity, methods
+
+
 def _csv_download_filename(title: str, chat_id: int) -> str:
     """ASCII fallback filename for Content-Disposition headers."""
     safe_title = "".join(ch if ch.isascii() and (ch.isalnum() or ch in "-_") else "_" for ch in (title or "session"))
@@ -1307,9 +1324,9 @@ async def app_session_summary_csv(
     Format:
         - Header block with session metadata (commented with leading '#').
         - Blank line separator.
-        - Tabular rows: index, jira_key, summary, url, source, final SP,
-          consensus, voter count, vote distribution, then a column per
-          participant with their individual vote.
+        - Tabular rows: index, jira_key, summary, AI description/complexity/methods,
+          url, source, final SP, consensus, voter count, vote distribution,
+          then a column per participant with their individual vote.
     """
     session = await _get_repo_session(request.app.state.repository, chat_id, topic_id)
     stored_title = await _stored_session_title(request, chat_id, topic_id)
@@ -1337,6 +1354,9 @@ async def app_session_summary_csv(
         "Index",
         "Jira Key",
         "Summary",
+        "AI Description",
+        "AI Complexity",
+        "AI Methods",
         "URL",
         "Source",
         "Final SP",
@@ -1349,10 +1369,14 @@ async def app_session_summary_csv(
 
     for idx, entry in enumerate(summary["completed_tasks"], start=1):
         name_to_value = {vote["name"]: vote["value"] for vote in entry["votes"]}
+        ai_description, ai_complexity, ai_methods = _csv_ai_summary_fields(entry.get("ai_summary"))
         row = [
             idx,
             entry["jira_key"] or "",
             entry["summary"],
+            ai_description,
+            ai_complexity,
+            ai_methods,
             entry["url"] or "",
             entry["source"],
             entry["story_points"] if entry["story_points"] is not None else "",
