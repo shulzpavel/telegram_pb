@@ -47,6 +47,7 @@ def _maybe_aclose(obj):
 async def lifespan(app: FastAPI):
     """Lifespan context manager for startup/shutdown."""
     import asyncio
+    import aiohttp
     import redis.asyncio as aioredis
 
     print("🚀 Voting Service starting...")
@@ -73,6 +74,13 @@ async def lifespan(app: FastAPI):
     web_redis = await aioredis.from_url(REDIS_URL, decode_responses=True)
     app.state.web_redis = web_redis
 
+    # Long-lived HTTP session for outbound calls to the jira-service container
+    # and to the Anthropic API. Re-used across requests so the connection pool
+    # and TLS handshakes survive — without it the per-request
+    # ``aiohttp.ClientSession()`` defeated the in-memory Jira cache by
+    # tearing the pool down on every call.
+    app.state.http_session = aiohttp.ClientSession()
+
     app.state.cms_backfill_task = None
     if cms_store:
         from services.voting_service.cms_store import backfill_cms_from_redis
@@ -96,6 +104,7 @@ async def lifespan(app: FastAPI):
         ("repository", _maybe_close(getattr(app.state, "repository", None))),
         ("cms_store", _maybe_close(getattr(app.state, "cms_store", None))),
         ("web_redis", _maybe_aclose(getattr(app.state, "web_redis", None))),
+        ("http_session", _maybe_close(getattr(app.state, "http_session", None))),
     ):
         if closer is None:
             continue

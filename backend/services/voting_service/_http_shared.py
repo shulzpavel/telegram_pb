@@ -291,18 +291,30 @@ def _existing_jira_keys(session: Session) -> set[str]:
     return keys
 
 
-async def _jira_preview(jql: str, max_results: int) -> list[dict]:
+async def _jira_preview(
+    http_session: aiohttp.ClientSession,
+    jql: str,
+    max_results: int,
+) -> list[dict]:
+    """Call ``jira-service/api/v1/parse`` to translate a JQL query into a
+    list of issue dicts.
+
+    The HTTP session is the long-lived one created in the voting-service
+    lifespan and stored on ``app.state.http_session`` — re-using it across
+    requests keeps the TCP/TLS pool warm and lets jira-service's in-memory
+    cache actually do its job.
+    """
     base_url = os.getenv("JIRA_SERVICE_URL", "http://jira-service:8001").rstrip("/")
     timeout = aiohttp.ClientTimeout(total=int(os.getenv("JIRA_SERVICE_TIMEOUT_SECONDS", "30")))
-    async with aiohttp.ClientSession(timeout=timeout) as session:
-        async with session.post(
-            f"{base_url}/api/v1/parse",
-            json={"jql": jql, "max_results": max_results},
-        ) as response:
-            if response.status != 200:
-                body = await response.text()
-                raise HTTPException(status_code=502, detail=f"Jira preview failed: {body[:300]}")
-            data = await response.json()
+    async with http_session.post(
+        f"{base_url}/api/v1/parse",
+        json={"jql": jql, "max_results": max_results},
+        timeout=timeout,
+    ) as response:
+        if response.status != 200:
+            body = await response.text()
+            raise HTTPException(status_code=502, detail=f"Jira preview failed: {body[:300]}")
+        data = await response.json()
     issues = data.get("issues", [])
     return issues if isinstance(issues, list) else []
 

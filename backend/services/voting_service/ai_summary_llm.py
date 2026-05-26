@@ -190,7 +190,7 @@ def _user_prompt(task_context: str) -> str:
     return f"Generate a planning-poker hint for this task:\n\n{task_context}"
 
 
-async def _call_anthropic(task_context: str) -> str:
+async def _call_anthropic(http_session: aiohttp.ClientSession, task_context: str) -> str:
     api_key = _anthropic_api_key()
     if not api_key:
         raise LlmSummaryError("LLM is not configured", status_code=503)
@@ -208,32 +208,36 @@ async def _call_anthropic(task_context: str) -> str:
         "content-type": "application/json",
     }
 
-    async with aiohttp.ClientSession(timeout=_anthropic_timeout()) as session:
-        try:
-            async with session.post(ANTHROPIC_API_URL, json=payload, headers=headers) as response:
-                body_text = await response.text()
-                if response.status in {401, 403}:
-                    raise LlmSummaryError("LLM authentication failed", status_code=502)
-                if response.status == 429:
-                    raise LlmSummaryError("LLM rate limit exceeded, try again shortly", status_code=503)
-                if response.status >= 500:
-                    raise LlmSummaryError("LLM service is temporarily unavailable", status_code=503)
-                if response.status != 200:
-                    logger.warning("Anthropic API error status=%s body=%s", response.status, body_text[:300])
-                    try:
-                        error_payload = json.loads(body_text)
-                        error_message = str((error_payload.get("error") or {}).get("message") or "").strip()
-                    except json.JSONDecodeError:
-                        error_message = ""
-                    if response.status == 404 and error_message.startswith("model:"):
-                        raise LlmSummaryError(f"Anthropic model not found: {error_message.removeprefix('model:').strip()}", status_code=502)
-                    raise LlmSummaryError(error_message or "LLM request failed", status_code=502)
+    try:
+        async with http_session.post(
+            ANTHROPIC_API_URL,
+            json=payload,
+            headers=headers,
+            timeout=_anthropic_timeout(),
+        ) as response:
+            body_text = await response.text()
+            if response.status in {401, 403}:
+                raise LlmSummaryError("LLM authentication failed", status_code=502)
+            if response.status == 429:
+                raise LlmSummaryError("LLM rate limit exceeded, try again shortly", status_code=503)
+            if response.status >= 500:
+                raise LlmSummaryError("LLM service is temporarily unavailable", status_code=503)
+            if response.status != 200:
+                logger.warning("Anthropic API error status=%s body=%s", response.status, body_text[:300])
+                try:
+                    error_payload = json.loads(body_text)
+                    error_message = str((error_payload.get("error") or {}).get("message") or "").strip()
+                except json.JSONDecodeError:
+                    error_message = ""
+                if response.status == 404 and error_message.startswith("model:"):
+                    raise LlmSummaryError(f"Anthropic model not found: {error_message.removeprefix('model:').strip()}", status_code=502)
+                raise LlmSummaryError(error_message or "LLM request failed", status_code=502)
 
-                data = json.loads(body_text) if body_text else {}
-        except aiohttp.ClientError as exc:
-            raise LlmSummaryError("LLM service is unreachable", status_code=503) from exc
-        except json.JSONDecodeError as exc:
-            raise LlmSummaryError("LLM returned an unreadable response", status_code=502) from exc
+            data = json.loads(body_text) if body_text else {}
+    except aiohttp.ClientError as exc:
+        raise LlmSummaryError("LLM service is unreachable", status_code=503) from exc
+    except json.JSONDecodeError as exc:
+        raise LlmSummaryError("LLM returned an unreadable response", status_code=502) from exc
 
     blocks = data.get("content")
     if not isinstance(blocks, list):
@@ -246,15 +250,28 @@ async def _call_anthropic(task_context: str) -> str:
     return combined
 
 
-async def generate_ai_summary_llm(task: Task, jira_context: Optional[dict[str, Any]] = None) -> dict[str, Any]:
-    """Generate and validate AI summary via Anthropic (strict — no heuristic fallback)."""
+async def generate_ai_summary_llm(
+    http_session: aiohttp.ClientSession,
+    task: Task,
+    jira_context: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
+    """Generate and validate AI summary via Anthropic (strict — no heuristic fallback).
+
+    ``http_session`` is the long-lived ``aiohttp.ClientSession`` owned by the
+    voting-service lifespan. Re-using it avoids tearing down the connection
+    pool / TLS state between calls — the same fix that lets the jira-service
+    cache do its job.
+    """
     task_context = _build_task_context(task, jira_context)
-    raw = await _call_anthropic(task_context)
+    raw = await _call_anthropic(http_session, task_context)
     payload = _parse_llm_json_payload(raw)
     return _validate_summary_payload(payload)
 
 
-async def fetch_jira_issue_context(issue_key: str) -> Optional[dict[str, Any]]:
+async def fetch_jira_issue_context(
+    http_session: aiohttp.ClientSession,
+    issue_key: str,
+) -> Optional[dict[str, Any]]:
     """Fetch rich Jira issue context from jira-service for LLM prompts."""
     key = (issue_key or "").strip().upper()
     if not key:
@@ -264,17 +281,16 @@ async def fetch_jira_issue_context(issue_key: str) -> Optional[dict[str, Any]]:
     timeout = aiohttp.ClientTimeout(total=int(os.getenv("JIRA_SERVICE_TIMEOUT_SECONDS", "30")))
     url = f"{base_url}/api/v1/issue/{key}/context"
 
-    async with aiohttp.ClientSession(timeout=timeout) as session:
-        try:
-            async with session.get(url) as response:
-                if response.status == 404:
-                    return None
-                if response.status != 200:
-                    body = (await response.text())[:300]
-                    logger.warning("Jira context fetch failed key=%s status=%s body=%s", key, response.status, body)
-                    raise LlmSummaryError("Failed to load Jira issue context", status_code=502)
-                data = await response.json()
-        except aiohttp.ClientError as exc:
-            raise LlmSummaryError("Jira service is unreachable", status_code=503) from exc
+    try:
+        async with http_session.get(url, timeout=timeout) as response:
+            if response.status == 404:
+                return None
+            if response.status != 200:
+                body = (await response.text())[:300]
+                logger.warning("Jira context fetch failed key=%s status=%s body=%s", key, response.status, body)
+                raise LlmSummaryError("Failed to load Jira issue context", status_code=502)
+            data = await response.json()
+    except aiohttp.ClientError as exc:
+        raise LlmSummaryError("Jira service is unreachable", status_code=503) from exc
 
     return data if isinstance(data, dict) else None

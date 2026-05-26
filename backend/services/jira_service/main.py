@@ -11,6 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 load_dotenv()
 
 from services.jira_service.api import router
+from services.jira_service.client import JiraServiceClient
 from services.jira_service.health import health_router
 from services.jira_service.metrics import metrics_router
 
@@ -20,12 +21,21 @@ ALLOWED_CORS_HEADERS = ["Authorization", "Content-Type", "X-Requested-With"]
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Lifespan context manager for startup/shutdown."""
-    # Startup
+    """Lifespan context manager for startup/shutdown.
+
+    The Jira HTTP client used to be instantiated per request, which defeated
+    its in-memory issue cache (``OrderedDict``) and forced a brand-new
+    ``aiohttp.ClientSession`` for every Jira call. We now create a single
+    client on startup and tear it down on shutdown; ``api.get_jira_client``
+    yields this instance to every request handler.
+    """
     print("🚀 Jira Service starting...")
-    yield
-    # Shutdown
-    print("🛑 Jira Service shutting down...")
+    app.state.jira_client = JiraServiceClient()
+    try:
+        yield
+    finally:
+        print("🛑 Jira Service shutting down...")
+        await app.state.jira_client.close()
 
 
 app = FastAPI(

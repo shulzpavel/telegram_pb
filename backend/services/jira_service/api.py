@@ -1,14 +1,27 @@
-"""Jira API endpoints."""
+"""Jira API endpoints.
+
+The ``JiraServiceClient`` is created once at application startup and held on
+``app.state.jira_client`` for the lifetime of the process — see
+``services/jira_service/main.py``. Endpoints receive it via the
+``get_jira_client`` FastAPI dependency so the in-memory issue cache and the
+underlying ``aiohttp.ClientSession`` connection pool actually persist between
+requests, which they did not when the client was instantiated per-request.
+"""
 
 import os
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
 from services.jira_service.client import JiraServiceClient
 
 router = APIRouter()
+
+
+def get_jira_client(request: Request) -> JiraServiceClient:
+    """Yield the singleton Jira client owned by the application lifespan."""
+    return request.app.state.jira_client
 
 
 class SearchRequest(BaseModel):
@@ -127,27 +140,29 @@ def _issue_responses(issues: list[dict]) -> list[IssueResponse]:
 
 
 @router.post("/search", response_model=SearchResponse)
-async def search_issues(request: SearchRequest) -> SearchResponse:
+async def search_issues(
+    body: SearchRequest,
+    client: JiraServiceClient = Depends(get_jira_client),
+) -> SearchResponse:
     """Search issues by JQL."""
-    client = JiraServiceClient()
     try:
-        issues = await client.parse_jira_request(request.jql, max_results=request.max_results)
+        issues = await client.parse_jira_request(body.jql, max_results=body.max_results)
         if not issues:
-            issues = _demo_issues_for(request.jql, request.max_results)
+            issues = _demo_issues_for(body.jql, body.max_results)
         if not issues:
             return SearchResponse(issues=[])
 
         return SearchResponse(issues=_issue_responses(issues))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Jira search failed: {str(e)}")
-    finally:
-        await client.close()
 
 
 @router.get("/issue/{issue_key}/context", response_model=IssueContextResponse)
-async def get_issue_context(issue_key: str) -> IssueContextResponse:
+async def get_issue_context(
+    issue_key: str,
+    client: JiraServiceClient = Depends(get_jira_client),
+) -> IssueContextResponse:
     """Return Jira issue fields used for AI summary generation."""
-    client = JiraServiceClient()
     try:
         context = await client.fetch_issue_context(issue_key)
         if not context and _demo_fallback_enabled() and not _jira_configured():
@@ -180,14 +195,14 @@ async def get_issue_context(issue_key: str) -> IssueContextResponse:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch issue context: {str(e)}")
-    finally:
-        await client.close()
 
 
 @router.get("/issue/{issue_key}", response_model=IssueResponse)
-async def get_issue(issue_key: str) -> IssueResponse:
+async def get_issue(
+    issue_key: str,
+    client: JiraServiceClient = Depends(get_jira_client),
+) -> IssueResponse:
     """Get issue by key."""
-    client = JiraServiceClient()
     try:
         issue = await client._fetch_issue_by_key(issue_key)
         if not issue and _demo_fallback_enabled() and not _jira_configured():
@@ -205,45 +220,44 @@ async def get_issue(issue_key: str) -> IssueResponse:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch issue: {str(e)}")
-    finally:
-        await client.close()
 
 
 @router.put("/issue/{issue_key}/story-points", response_model=UpdateSPResponse)
-async def update_story_points(issue_key: str, request: UpdateSPRequest) -> UpdateSPResponse:
+async def update_story_points(
+    issue_key: str,
+    body: UpdateSPRequest,
+    client: JiraServiceClient = Depends(get_jira_client),
+) -> UpdateSPResponse:
     """Update story points for issue."""
-    client = JiraServiceClient()
     try:
-        success = await client.update_story_points(issue_key, request.story_points)
+        success = await client.update_story_points(issue_key, body.story_points)
         if not success:
             raise HTTPException(status_code=400, detail=f"Failed to update story points for {issue_key}")
 
         return UpdateSPResponse(
             success=True,
             issue_key=issue_key,
-            story_points=request.story_points,
+            story_points=body.story_points,
         )
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to update story points: {str(e)}")
-    finally:
-        await client.close()
 
 
 @router.post("/parse", response_model=SearchResponse)
-async def parse_jira_request(request: SearchRequest) -> SearchResponse:
+async def parse_jira_request(
+    body: SearchRequest,
+    client: JiraServiceClient = Depends(get_jira_client),
+) -> SearchResponse:
     """Parse JQL or issue keys and return issues."""
-    client = JiraServiceClient()
     try:
-        issues = await client.parse_jira_request(request.jql, max_results=request.max_results)
+        issues = await client.parse_jira_request(body.jql, max_results=body.max_results)
         if not issues:
-            issues = _demo_issues_for(request.jql, request.max_results)
+            issues = _demo_issues_for(body.jql, body.max_results)
         if not issues:
             return SearchResponse(issues=[])
 
         return SearchResponse(issues=_issue_responses(issues))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Jira parse failed: {str(e)}")
-    finally:
-        await client.close()

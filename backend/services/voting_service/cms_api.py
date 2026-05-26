@@ -538,7 +538,7 @@ async def cms_preview_jira_tasks(
 ) -> dict:
     chat_id, topic_id = await _session_ref(request, session_id)
     session = await _get_repo_session(request.app.state.repository, chat_id, topic_id)
-    issues = await _jira_preview(body.jql, body.max_results)
+    issues = await _jira_preview(request.app.state.http_session, body.jql, body.max_results)
     return _jira_preview_payload(issues, _existing_jira_keys(session))
 
 
@@ -552,7 +552,7 @@ async def cms_import_jira_tasks(
     chat_id, topic_id = await _session_ref(request, session_id)
     try:
         selected = {key.strip().upper() for key in body.selected_keys if key.strip()}
-        issues = await _jira_preview(body.jql, body.max_results)
+        issues = await _jira_preview(request.app.state.http_session, body.jql, body.max_results)
 
         def mutate(session: Session) -> TaskMutationResult:
             if body.expected_version is not None and body.expected_version != session.tasks_version:

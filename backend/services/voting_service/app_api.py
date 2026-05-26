@@ -770,7 +770,7 @@ async def app_preview_jira_tasks(
     _: CmsPrincipal = Depends(_manager_dep),
 ) -> dict:
     session = await _get_repo_session(request.app.state.repository, chat_id, topic_id)
-    issues = await _jira_preview(body.jql, body.max_results)
+    issues = await _jira_preview(request.app.state.http_session, body.jql, body.max_results)
     return _jira_preview_payload(issues, _existing_jira_keys(session))
 
 
@@ -783,7 +783,7 @@ async def app_import_jira_tasks(
     actor: CmsPrincipal = Depends(_manager_dep),
 ) -> dict:
     selected = {key.strip().upper() for key in body.selected_keys if key.strip()}
-    issues = await _jira_preview(body.jql, body.max_results)
+    issues = await _jira_preview(request.app.state.http_session, body.jql, body.max_results)
 
     def mutate(session: Session) -> TaskMutationResult:
         if body.expected_version is not None and body.expected_version != session.tasks_version:
@@ -893,10 +893,11 @@ async def app_generate_ai_summary(
         raise HTTPException(status_code=400, detail="Start voting before generating an AI summary.")
 
     task = session.current_task
+    http_session = request.app.state.http_session
     jira_context = None
     if task.jira_key:
         try:
-            jira_context = await fetch_jira_issue_context(task.jira_key)
+            jira_context = await fetch_jira_issue_context(http_session, task.jira_key)
         except LlmSummaryError as exc:
             await _audit(
                 request,
@@ -908,7 +909,7 @@ async def app_generate_ai_summary(
             raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
 
     try:
-        summary = await generate_ai_summary_llm(task, jira_context)
+        summary = await generate_ai_summary_llm(http_session, task, jira_context)
     except LlmSummaryError as exc:
         await _audit(
             request,
