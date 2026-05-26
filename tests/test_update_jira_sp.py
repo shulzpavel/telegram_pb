@@ -1,80 +1,22 @@
-"""Tests for update Jira SP handler with busy flag and error handling."""
+"""Tests for update Jira SP handler with busy flag and error handling.
+
+The Telegram-era ``DIContainer.busy_ops`` flag (which guarded duplicate
+button clicks) was removed together with the legacy router and the
+``VotingServiceHttpClient`` adapter. The remaining tests here exercise the
+``UpdateJiraStoryPointsUseCase`` and ``VotingPolicy.get_max_vote``
+directly — those are still the live code paths for the web-only manager
+app.
+"""
+
+from pathlib import Path
+from unittest.mock import AsyncMock
 
 import pytest
-from unittest.mock import AsyncMock, patch
-from pathlib import Path
 
-from app.domain.participant import Participant
+from app.adapters.session_file import FileSessionRepository
 from app.domain.session import Session
 from app.domain.task import Task
-from app.adapters.session_file import FileSessionRepository
-from app.providers import DIContainer
 from app.usecases.update_jira_sp import UpdateJiraStoryPointsUseCase
-from config import UserRole
-
-
-class TestUpdateJiraSPBusyFlag:
-    """Tests for busy flag handling in update_jira_sp."""
-
-    def setup_method(self):
-        """Setup test fixtures."""
-        self.temp_file = Path("/tmp/test_update_sp_state.json")
-        if self.temp_file.exists():
-            self.temp_file.unlink()
-        self.repo = FileSessionRepository(self.temp_file)
-
-        self.container = DIContainer(session_repo=self.repo)
-
-    def teardown_method(self):
-        """Cleanup test fixtures."""
-        if self.temp_file.exists():
-            self.temp_file.unlink()
-
-    def test_busy_flag_prevents_duplicate_requests(self):
-        """Test that busy flag prevents duplicate update requests."""
-        chat_id, topic_id = 123, 456
-        busy_key = (chat_id, topic_id, "update_sp")
-
-        # Добавляем флаг
-        self.container.busy_ops.add(busy_key)
-
-        # Проверяем, что флаг установлен
-        assert busy_key in self.container.busy_ops
-
-        # Снимаем флаг
-        self.container.busy_ops.discard(busy_key)
-        assert busy_key not in self.container.busy_ops
-
-    def test_busy_flag_cleared_on_exception(self):
-        """Test that busy flag is cleared even when exception occurs."""
-        chat_id, topic_id = 123, 456
-        busy_key = (chat_id, topic_id, "update_sp")
-
-        self.container.busy_ops.add(busy_key)
-
-        try:
-            # Симулируем исключение
-            raise Exception("Test error")
-        except Exception:
-            pass
-        finally:
-            # Флаг должен быть снят в finally
-            self.container.busy_ops.discard(busy_key)
-
-        assert busy_key not in self.container.busy_ops
-
-    def test_busy_flag_cleared_on_success(self):
-        """Test that busy flag is cleared on successful completion."""
-        chat_id, topic_id = 123, 456
-        busy_key = (chat_id, topic_id, "update_sp")
-
-        self.container.busy_ops.add(busy_key)
-
-        # Симулируем успешное выполнение
-        # В реальном коде флаг снимается в finally
-        self.container.busy_ops.discard(busy_key)
-
-        assert busy_key not in self.container.busy_ops
 
 
 class TestShowBatchResultsSP:
@@ -86,7 +28,6 @@ class TestShowBatchResultsSP:
         if self.temp_file.exists():
             self.temp_file.unlink()
         self.repo = FileSessionRepository(self.temp_file)
-        self.container = DIContainer(session_repo=self.repo)
 
     def teardown_method(self):
         """Cleanup test fixtures."""

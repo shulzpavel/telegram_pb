@@ -13,7 +13,6 @@ from fastapi.responses import JSONResponse
 load_dotenv()
 
 from app.ports.session_repository import SessionMutationConflictError
-from services.voting_service.api import router
 from services.voting_service.app_api import app_router
 from services.voting_service.health import health_router
 from services.voting_service.metrics import metrics_router
@@ -150,7 +149,6 @@ async def _on_session_mutation_conflict(
 # Include routers
 app.include_router(health_router, prefix="/health", tags=["health"])
 app.include_router(metrics_router, prefix="/metrics", tags=["metrics"])
-app.include_router(router, prefix="/api/v1", tags=["voting"])
 app.include_router(app_router, prefix="/api/v1", tags=["app"])
 app.include_router(web_router, prefix="/api/v1", tags=["web"])
 app.include_router(cms_router, prefix="/api/v1", tags=["cms"])
