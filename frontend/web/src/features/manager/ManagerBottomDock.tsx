@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { BottomSheet, Button, SheetItem, useTheme } from "../../design-system";
+import { BottomSheet, Button, SheetItem, ThemeToggle } from "../../design-system";
 import type { CmsPrincipal } from "../cms/api/cmsTypes";
 
 /**
@@ -162,41 +162,16 @@ export function ManagerBottomDock({
                 onClick={() => setSheetMode("rename")}
               />
             ) : null}
-            <ThemeChooser />
+            <div className="rounded-lg border border-line bg-canvas/40 px-3 py-2">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-ink3">Тема интерфейса</p>
+              <div className="mt-1">
+                <ThemeToggle size="sm" tone="ghost" showTooltips={false} />
+              </div>
+            </div>
           </div>
         )}
       </BottomSheet>
     </>
-  );
-}
-
-/**
- * Inline theme picker rendered as three radio-style rows in the
- * sheet. Reads/writes via `useTheme`, so dark/light/system stays in
- * sync with the rest of the app and the persisted CMS preference.
- */
-function ThemeChooser() {
-  const { mode, setMode } = useTheme();
-  const options: Array<{ value: "light" | "dark" | "system"; label: string; icon: JSX.Element }> = [
-    { value: "light", label: "Светлая", icon: <SunIcon /> },
-    { value: "dark", label: "Тёмная", icon: <MoonIcon /> },
-    { value: "system", label: "Системная", icon: <DeviceIcon /> },
-  ];
-  return (
-    <div className="rounded-lg border border-line bg-canvas/40 px-1 py-1">
-      <p className="px-3 pt-2 text-xs font-semibold uppercase tracking-wide text-ink3">Тема интерфейса</p>
-      <div className="mt-1 space-y-0.5">
-        {options.map((option) => (
-          <SheetItem
-            key={option.value}
-            icon={option.icon}
-            label={option.label}
-            trailing={mode === option.value ? <CheckIcon /> : undefined}
-            onClick={() => setMode(option.value)}
-          />
-        ))}
-      </div>
-    </div>
   );
 }
 
@@ -232,32 +207,6 @@ function PencilIcon() {
     <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4" aria-hidden="true">
       <path d="M3 14.25V17h2.75L14.81 7.94l-2.75-2.75L3 14.25z" />
       <path d="M14.06 4.94l1.41-1.41a1.5 1.5 0 0 1 2.12 0l.88.88a1.5 1.5 0 0 1 0 2.12L17.06 7.94" />
-    </svg>
-  );
-}
-
-function SunIcon() {
-  return (
-    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4" aria-hidden="true">
-      <circle cx="10" cy="10" r="3" />
-      <path d="M10 2v2M10 16v2M2 10h2M16 10h2M4.2 4.2l1.4 1.4M14.4 14.4l1.4 1.4M4.2 15.8l1.4-1.4M14.4 5.6l1.4-1.4" />
-    </svg>
-  );
-}
-
-function MoonIcon() {
-  return (
-    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4" aria-hidden="true">
-      <path d="M16 11.5a6.5 6.5 0 1 1-7.5-7.5 5 5 0 0 0 7.5 7.5z" />
-    </svg>
-  );
-}
-
-function DeviceIcon() {
-  return (
-    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4" aria-hidden="true">
-      <rect x="3" y="4" width="14" height="9" rx="1.5" />
-      <path d="M7 17h6M10 13v4" />
     </svg>
   );
 }

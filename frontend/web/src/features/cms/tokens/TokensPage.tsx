@@ -76,7 +76,7 @@ export default function TokensPage({ canManageSessions }: TokensPageProps) {
           <option value="true">Активные</option>
           <option value="false">Истёкшие</option>
         </SelectField>
-        <Button variant="ghost" onClick={list.reload}>Обновить</Button>
+        <Button variant="ghost" size="sm" className="md:self-end whitespace-nowrap" onClick={list.reload}>Обновить</Button>
       </Toolbar>
       <DataTable
         error={list.error}

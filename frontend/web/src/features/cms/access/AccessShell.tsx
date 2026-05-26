@@ -3,7 +3,7 @@ import { Navigate, NavLink, Outlet, Route, Routes, useLocation } from "react-rou
 import { cmsAccessApi } from "../api/cmsClient";
 import type { CmsAdmin, CmsPageAccess, CmsPermission, CmsRole } from "../api/cmsTypes";
 import { HelpCallout, InlineError, SectionHeader, Skeleton } from "../components/CmsPrimitives";
-import { cn } from "../../../design-system";
+import { cn, DeferredFallback, RouteTransition } from "../../../design-system";
 
 const RolesListPage = lazy(() => import("./RolesListPage"));
 const RoleDetailPage = lazy(() => import("./RoleDetailPage"));
@@ -176,6 +176,7 @@ export default function AccessShell({ canManage, currentAdminId }: AccessShellPr
 
 function AccessLayout() {
   const { canManage, loading, error } = useAccessContext();
+  const { pathname } = useLocation();
   return (
     <section className="space-y-5">
       <SectionHeader
@@ -189,8 +190,17 @@ function AccessLayout() {
       ) : null}
       {error ? <InlineError text={error} /> : null}
       <AccessSubTabs />
-      <Suspense fallback={<Skeleton height="h-48" />}>
-        {loading ? <Skeleton height="h-48" /> : <Outlet />}
+      <Suspense fallback={(
+        <DeferredFallback>
+          <Skeleton height="h-48" />
+        </DeferredFallback>
+      )}
+      >
+        {loading ? <Skeleton height="h-48" /> : (
+          <RouteTransition transitionKey={pathname}>
+            <Outlet />
+          </RouteTransition>
+        )}
       </Suspense>
     </section>
   );

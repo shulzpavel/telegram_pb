@@ -40,7 +40,7 @@ export default function OverviewPage() {
             <Button variant="primary" size="sm" onClick={() => navigate("/manage")}>
               Открыть cockpit
             </Button>
-            <Button variant="ghost" size="sm" onClick={loadOverview}>Обновить</Button>
+            <Button variant="ghost" size="sm" className="whitespace-nowrap" onClick={loadOverview}>Обновить</Button>
           </>
         }
       />

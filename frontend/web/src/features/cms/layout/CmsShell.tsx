@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { Navigate, NavLink, Route, Routes, useLocation, useNavigate } from "react-router-dom";
-import { BottomSheet, BrandHomeLink, Button, SheetItem, ThemeToggle, useTheme, type ThemeMode } from "../../../design-system";
+import { BottomSheet, BrandHomeLink, Button, DeferredFallback, RouteTransition, SheetItem, ThemeToggle, useTheme, type ThemeMode } from "../../../design-system";
 import { cmsAuthApi } from "../api/cmsClient";
 import type { CmsPrincipal } from "../api/cmsTypes";
 import { InlineError, Skeleton } from "../components/CmsPrimitives";
@@ -189,7 +189,7 @@ export default function CmsShell({
       >
         <div className="space-y-3 px-1 pb-2">
           <div className="flex justify-center px-3 py-2">
-            <ThemeToggle size="md" tone="plain" showTooltips={false} />
+            <ThemeToggle size="sm" tone="ghost" showTooltips={false} />
           </div>
           {groupedTabs.map((section) => (
             <div key={section.group.key}>
@@ -220,37 +220,44 @@ export default function CmsShell({
           <InlineError text="Для этой учётной записи не настроено ни одного раздела CMS." />
         ) : null}
 
-        <Suspense fallback={<Skeleton height="h-48" />}>
-          <Routes>
-            <Route index element={<CmsIndexRedirect firstPath={visibleTabs[0]?.path} />} />
-            {hasPermission(principal, CMS_PERMISSIONS.overview) ? (
-              <Route path="overview" element={<Navigate to="/cms" replace />} />
-            ) : null}
-            {hasPermission(principal, CMS_PERMISSIONS.sessions) ? (
-              <Route
-                path="sessions"
-                element={
-                  <SessionsPage canManageTasks={canManageTasks} canManageSessions={canManageSessions} />
-                }
-              />
-            ) : null}
-            {hasPermission(principal, CMS_PERMISSIONS.users) ? <Route path="users" element={<UsersPage principal={principal} />} /> : null}
-            {hasPermission(principal, CMS_PERMISSIONS.tokens) ? (
-              <Route path="tokens" element={<TokensPage canManageSessions={canManageSessions} />} />
-            ) : null}
-            {hasPermission(principal, CMS_PERMISSIONS.events) ? <Route path="events" element={<AuditEventsPage />} /> : null}
-            {hasPermission(principal, CMS_PERMISSIONS.access) ? (
-              <Route
-                path="access/*"
-                element={<AccessShell canManage={canManageAccess} currentAdminId={principal.id} />}
-              />
-            ) : null}
-            {/* Deprecated routes from the Telegram-era console: route any
-                lingering bookmarks back to the active landing page. */}
-            <Route path="votes" element={<Navigate to="/cms/sessions" replace />} />
-            <Route path="web" element={<Navigate to="/cms/sessions" replace />} />
-            <Route path="*" element={<CmsIndexRedirect firstPath={visibleTabs[0]?.path} />} />
-          </Routes>
+        <Suspense fallback={(
+          <DeferredFallback>
+            <Skeleton height="h-48" />
+          </DeferredFallback>
+        )}
+        >
+          <RouteTransition transitionKey={location.pathname}>
+            <Routes>
+              <Route index element={<CmsIndexRedirect firstPath={visibleTabs[0]?.path} />} />
+              {hasPermission(principal, CMS_PERMISSIONS.overview) ? (
+                <Route path="overview" element={<Navigate to="/cms" replace />} />
+              ) : null}
+              {hasPermission(principal, CMS_PERMISSIONS.sessions) ? (
+                <Route
+                  path="sessions"
+                  element={
+                    <SessionsPage canManageTasks={canManageTasks} canManageSessions={canManageSessions} />
+                  }
+                />
+              ) : null}
+              {hasPermission(principal, CMS_PERMISSIONS.users) ? <Route path="users" element={<UsersPage principal={principal} />} /> : null}
+              {hasPermission(principal, CMS_PERMISSIONS.tokens) ? (
+                <Route path="tokens" element={<TokensPage canManageSessions={canManageSessions} />} />
+              ) : null}
+              {hasPermission(principal, CMS_PERMISSIONS.events) ? <Route path="events" element={<AuditEventsPage />} /> : null}
+              {hasPermission(principal, CMS_PERMISSIONS.access) ? (
+                <Route
+                  path="access/*"
+                  element={<AccessShell canManage={canManageAccess} currentAdminId={principal.id} />}
+                />
+              ) : null}
+              {/* Deprecated routes from the Telegram-era console: route any
+                  lingering bookmarks back to the active landing page. */}
+              <Route path="votes" element={<Navigate to="/cms/sessions" replace />} />
+              <Route path="web" element={<Navigate to="/cms/sessions" replace />} />
+              <Route path="*" element={<CmsIndexRedirect firstPath={visibleTabs[0]?.path} />} />
+            </Routes>
+          </RouteTransition>
         </Suspense>
       </div>
     </main>

@@ -151,7 +151,7 @@ export default function UsersListPage() {
             Сбросить фильтры
           </Button>
         ) : null}
-        <Button variant="ghost" onClick={list.reload} disabled={list.loading}>
+        <Button variant="ghost" size="sm" className="md:self-end whitespace-nowrap" onClick={list.reload} disabled={list.loading}>
           Обновить
         </Button>
       </Toolbar>
