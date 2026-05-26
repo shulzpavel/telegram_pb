@@ -24,18 +24,15 @@ jobs:
             exit 0
           fi
 
-          TEXT="$(cat <<EOF
-          🚀 <b>Деплой pipeline запущен</b>
-
-          <b>Проект:</b> Planning Poker
-          <b>Окружение:</b> <code>production</code>
-          <b>Домен:</b> <a href="https://${DOMAIN}">${DOMAIN}</a>
-          <b>Ветка:</b> <code>${GITHUB_REF_NAME}</code>
-          <b>Коммит:</b> <code>${GITHUB_SHA::7}</code>
-          <b>Автор:</b> ${GITHUB_ACTOR}
-
-          <a href="${RUN_URL}">Открыть GitHub Actions</a>
-          EOF
+          TEXT="$(printf '%s\n\n%s\n%s\n%s\n%s\n%s\n%s\n\n%s' \
+            '🚀 <b>Деплой pipeline запущен</b>' \
+            '<b>Проект:</b> Planning Poker' \
+            '<b>Окружение:</b> <code>production</code>' \
+            "<b>Домен:</b> <a href=\"https://${DOMAIN}\">${DOMAIN}</a>" \
+            "<b>Ветка:</b> <code>${GITHUB_REF_NAME}</code>" \
+            "<b>Коммит:</b> <code>${GITHUB_SHA::7}</code>" \
+            "<b>Автор:</b> ${GITHUB_ACTOR}" \
+            "<a href=\"${RUN_URL}\">Открыть GitHub Actions</a>"
           )"
 
           curl -fsS -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
@@ -154,24 +151,19 @@ jobs:
             DETAILS="Деплой до сервера мог не дойти. Проверь GitHub Actions run."
           fi
 
-          TEXT="$(cat <<EOF
-          ${ICON} <b>${TITLE}</b>
-
-          <b>Проект:</b> Planning Poker
-          <b>Окружение:</b> <code>production</code>
-          <b>Домен:</b> <a href="https://${DOMAIN}">${DOMAIN}</a>
-          <b>Ветка:</b> <code>${GITHUB_REF_NAME}</code>
-          <b>Коммит:</b> <code>${GITHUB_SHA::7}</code>
-
-          <b>backend:</b> <code>${BACKEND_RESULT}</code>
-          <b>frontend:</b> <code>${FRONTEND_RESULT}</code>
-          <b>compose:</b> <code>${COMPOSE_RESULT}</code>
-          <b>deploy-web:</b> <code>${DEPLOY_RESULT}</code>
-
-          ${DETAILS}
-
-          <a href="${RUN_URL}">Открыть GitHub Actions</a>
-          EOF
+          TEXT="$(printf '%s\n\n%s\n%s\n%s\n%s\n%s\n\n%s\n%s\n%s\n%s\n\n%s\n\n%s' \
+            "${ICON} <b>${TITLE}</b>" \
+            '<b>Проект:</b> Planning Poker' \
+            '<b>Окружение:</b> <code>production</code>' \
+            "<b>Домен:</b> <a href=\"https://${DOMAIN}\">${DOMAIN}</a>" \
+            "<b>Ветка:</b> <code>${GITHUB_REF_NAME}</code>" \
+            "<b>Коммит:</b> <code>${GITHUB_SHA::7}</code>" \
+            "<b>backend:</b> <code>${BACKEND_RESULT}</code>" \
+            "<b>frontend:</b> <code>${FRONTEND_RESULT}</code>" \
+            "<b>compose:</b> <code>${COMPOSE_RESULT}</code>" \
+            "<b>deploy-web:</b> <code>${DEPLOY_RESULT}</code>" \
+            "${DETAILS}" \
+            "<a href=\"${RUN_URL}\">Открыть GitHub Actions</a>"
           )"
 
           curl -fsS -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
