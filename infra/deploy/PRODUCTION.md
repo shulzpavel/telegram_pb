@@ -73,6 +73,23 @@ This script performs the exact web rollout sequence:
 3. `docker compose ... up -d web`
 4. `docker compose ... ps web`
 
+## Telegram deploy alerts
+
+`deploy-web-prod.sh` can send Telegram notifications on deploy start, success,
+and failure. Keep the bot token on the server only; do not commit it to git.
+
+Create `/opt/planning-poker/.deploy.env`:
+
+```bash
+cat >/opt/planning-poker/.deploy.env <<'EOF'
+TELEGRAM_CHAT_ID=-1003923094895
+TELEGRAM_BOT_TOKEN=<telegram-bot-token>
+EOF
+chmod 600 /opt/planning-poker/.deploy.env
+```
+
+The deploy script automatically loads `.deploy.env` when it exists.
+
 ## Auto Deploy on push to main
 
 The repo deploys from the existing `.github/workflows/ci.yml` workflow.
