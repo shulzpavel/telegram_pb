@@ -75,7 +75,7 @@ This script performs the exact web rollout sequence:
 
 ## Auto Deploy on push to main
 
-The repo includes workflow `.github/workflows/deploy-web-prod.yml`.
+The repo includes workflow `.github/workflows/deploy-prod-web.yml`.
 On every push to `main`, GitHub Actions connects to the server over SSH
 and runs:
 
