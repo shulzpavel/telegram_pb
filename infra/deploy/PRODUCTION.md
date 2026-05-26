@@ -75,9 +75,9 @@ This script performs the exact web rollout sequence:
 
 ## Auto Deploy on push to main
 
-The repo includes workflow `.github/workflows/prod-web-deploy.yml`.
-On every push to `main`, GitHub Actions connects to the server over SSH
-and runs:
+The repo deploys from the existing `.github/workflows/ci.yml` workflow.
+On every push to `main`, CI runs tests and compose validation first. If they
+pass, the `deploy-web` job connects to the server over SSH and runs:
 
 ```bash
 cd /opt/planning-poker
@@ -107,7 +107,7 @@ chmod 600 ~/.ssh/authorized_keys
 - `DEPLOY_USER` — SSH user on server
 - `DEPLOY_SSH_KEY` — private key from `~/.ssh/planning_poker_deploy`
 
-4. Push to `main` and verify workflow run in Actions tab.
+4. Push to `main` and verify the `deploy-web` job in the `CI` workflow.
 
 ## Logs
 
