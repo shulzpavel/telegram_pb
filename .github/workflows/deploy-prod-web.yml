@@ -24,4 +24,4 @@ jobs:
             # Bootstrap on servers that don't yet have the deploy script:
             # pull first, then run the script from the fresh checkout.
             git pull --ff-only origin main
-            ./infra/deploy/deploy-web-prod.sh
+            ./infra/deploy/deploy-web-prod.sh 
