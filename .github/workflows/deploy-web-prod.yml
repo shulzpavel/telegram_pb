@@ -25,4 +25,7 @@ jobs:
           script: |
             set -euo pipefail
             cd /opt/planning-poker
+            # Bootstrap on servers that don't yet have the deploy script:
+            # pull first, then run the script from the fresh checkout.
+            git pull --ff-only origin main
             ./infra/deploy/deploy-web-prod.sh
