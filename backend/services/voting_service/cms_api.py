@@ -22,6 +22,7 @@ from pydantic import BaseModel, Field
 
 from app.domain.session import Session
 from app.domain.task import Task
+from app.usecases.close_session import CloseSessionUseCase
 from app.usecases.manage_tasks import (
     AddManualTaskUseCase,
     AddManualTasksUseCase,
@@ -600,34 +601,6 @@ async def cms_import_jira_tasks(
 # ---------------------------------------------------------------------------
 
 
-def _close_session_mutator() -> "callable":
-    """Build the mutator used to force-finalize a session from the CMS.
-
-    Mirrors ``app_finish_session`` in app_api.py — kept in sync deliberately,
-    because cms_api cannot import from app_api without circular imports.
-    """
-
-    def mutate(session: Session) -> list[Task]:
-        finished_at = datetime.utcnow().isoformat()
-        pending = list(session.tasks_queue)
-        if pending:
-            for task in pending:
-                if not task.completed_at:
-                    task.completed_at = finished_at
-            session.last_batch = pending
-            session.history.extend(pending)
-            session.tasks_queue.clear()
-        session.current_task_index = 0
-        session.batch_completed = True
-        session.active_vote_message_id = None
-        session.current_batch_started_at = None
-        session.revealed_task_id = None
-        session.bump_tasks_version()
-        return list(session.last_batch)
-
-    return mutate
-
-
 async def _broadcast_session_state(request: Request, session: Session) -> None:
     """Publish a fresh state snapshot so participants see CMS-driven changes.
 
@@ -679,15 +652,14 @@ async def cms_close_session(
     request: Request,
     actor: CmsPrincipal = Depends(require_permission(PERM_APP_SESSIONS_MANAGE)),
 ) -> dict:
-    """Force-finish a session from the CMS. Idempotent — safe to call twice."""
+    """Force-finish a session from the CMS. Idempotent — safe to call twice.
+
+    Behaves identically to the manager-driven ``POST /app/sessions/{chat_id}/finish``
+    — both delegate to ``CloseSessionUseCase``.
+    """
     chat_id, topic_id = await _session_ref(request, session_id)
-    _, completed = await _mutate_repo_session(
-        request.app.state.repository,
-        chat_id,
-        topic_id,
-        _close_session_mutator(),
-    )
-    refreshed_session = await _get_repo_session(request.app.state.repository, chat_id, topic_id)
+    use_case = CloseSessionUseCase(request.app.state.repository)
+    refreshed_session, completed = await use_case.execute(chat_id, topic_id)
     await _broadcast_session_state(request, refreshed_session)
     await _audit(
         request,

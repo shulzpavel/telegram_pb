@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 
 from app.domain.session import Session
 from app.domain.task import Task
+from app.usecases.close_session import CloseSessionUseCase
 from app.usecases.manage_tasks import (
     AddManualTaskUseCase,
     AddManualTasksUseCase,
@@ -1026,32 +1027,14 @@ async def app_finish_session(
     topic_id: Optional[int] = None,
     actor: CmsPrincipal = Depends(_manager_dep),
 ) -> dict:
-    def mutate(session: Session) -> list[Task]:
-        """Finalize the session. Idempotent: safe to call after auto-next-on-last.
+    """Finalize the session. Idempotent: safe to call after auto-next-on-last.
 
-        After auto-next walks the cursor past the last task, the played items
-        are still inside ``tasks_queue`` and ``batch_completed`` is already
-        True. This handler must still migrate them to ``last_batch`` so the
-        summary screen and CSV export see the data.
-        """
-        finished_at = datetime.utcnow().isoformat()
-        pending = list(session.tasks_queue)
-        if pending:
-            for task in pending:
-                if not task.completed_at:
-                    task.completed_at = finished_at
-            session.last_batch.extend(pending)
-            session.history.extend(pending)
-            session.tasks_queue.clear()
-        session.current_task_index = 0
-        session.batch_completed = True
-        session.active_vote_message_id = None
-        session.current_batch_started_at = None
-        session.revealed_task_id = None
-        session.bump_tasks_version()
-        return list(session.last_batch)
-
-    session, completed = await _mutate_repo_session(request.app.state.repository, chat_id, topic_id, mutate)
+    Delegates to ``CloseSessionUseCase`` so the manager-driven finish and the
+    CMS-driven force-close stay strictly in sync (they used to be two copies
+    of the same mutator).
+    """
+    use_case = CloseSessionUseCase(request.app.state.repository)
+    session, completed = await use_case.execute(chat_id, topic_id)
     await _publish_state(request, session)
     await _audit(request, "app.session.finish", actor.username, "ok", {"chat_id": chat_id, "count": len(completed)})
     return _manager_session_payload(session)
