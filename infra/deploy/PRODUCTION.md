@@ -61,11 +61,53 @@ Open:
 
 ```bash
 cd /opt/planning-poker
-git pull
-docker compose -f docker-compose.prod.yml --env-file .env build
-docker compose -f docker-compose.prod.yml --env-file .env up -d
-docker compose -f docker-compose.prod.yml --env-file .env ps
+./infra/deploy/deploy-web-prod.sh
+# or:
+make deploy-web-prod
 ```
+
+This script performs the exact web rollout sequence:
+
+1. `git pull --ff-only origin main`
+2. `docker compose ... build web`
+3. `docker compose ... up -d web`
+4. `docker compose ... ps web`
+
+## Auto Deploy on push to main
+
+The repo includes workflow `.github/workflows/deploy-web-prod.yml`.
+On every push to `main`, GitHub Actions connects to the server over SSH
+and runs:
+
+```bash
+cd /opt/planning-poker
+./infra/deploy/deploy-web-prod.sh
+```
+
+### One-time setup
+
+1. Generate a dedicated deploy key on your local machine:
+
+```bash
+ssh-keygen -t ed25519 -C "github-actions-deploy" -f ~/.ssh/planning_poker_deploy
+```
+
+2. Add public key to server:
+
+```bash
+ssh <user>@<server-ip>
+mkdir -p ~/.ssh && chmod 700 ~/.ssh
+echo "<contents-of-planning_poker_deploy.pub>" >> ~/.ssh/authorized_keys
+chmod 600 ~/.ssh/authorized_keys
+```
+
+3. In GitHub repository settings, add secrets:
+
+- `DEPLOY_HOST` — server IP or DNS
+- `DEPLOY_USER` — SSH user on server
+- `DEPLOY_SSH_KEY` — private key from `~/.ssh/planning_poker_deploy`
+
+4. Push to `main` and verify workflow run in Actions tab.
 
 ## Logs
 

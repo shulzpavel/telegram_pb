@@ -110,3 +110,4 @@ SUMMARY.md
 # Shell scripts
 *.sh
 !backend/scripts/*.sh
+!infra/deploy/*.sh

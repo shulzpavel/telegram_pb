@@ -1,4 +1,4 @@
-.PHONY: test backend-test frontend-test frontend-e2e frontend-build check install clean
+.PHONY: test backend-test frontend-test frontend-e2e frontend-build check install clean deploy-web-prod
 
 install:
 	pip3 install -r backend/requirements.txt
@@ -28,3 +28,6 @@ clean:
 	find . -type f -name "*.pyo" -delete
 	find . -type f -name ".pytest_cache" -delete
 	rm -rf .coverage htmlcov/ .pytest_cache/
+
+deploy-web-prod:
+	./infra/deploy/deploy-web-prod.sh
