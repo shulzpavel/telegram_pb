@@ -34,6 +34,7 @@ from app.usecases.manage_tasks import (
     UpdateTaskUseCase,
 )
 from services.voting_service.cms_store import DEFAULT_LIMIT, MAX_LIMIT, token_hash as compute_token_hash
+from services.voting_service.rate_limit import enforce_rate_limit
 from services.voting_service.cms_rbac import (
     PERM_ACCESS_MANAGE,
     PERM_ACCESS_VIEW,
@@ -53,6 +54,8 @@ from services.voting_service._http_shared import (
     AuthDep,
     CMS_COOKIE_NAME,
     CMS_COOKIE_SECURE,
+    CMS_LOGIN_IP_MAX_ATTEMPTS,
+    CMS_LOGIN_IP_WINDOW_SECONDS,
     CMS_LOGIN_MAX_ATTEMPTS,
     CMS_LOGIN_WINDOW_SECONDS,
     CMS_TOKEN_TTL,
@@ -182,6 +185,16 @@ async def _record_login_failure(redis_client: aioredis.Redis, key: str) -> None:
 async def cms_login(body: LoginRequest, request: Request, response: Response) -> dict:
     redis_client = await _get_redis(request)
     ip = _client_ip(request)
+    # Defence-in-depth: cap total login attempts from a single IP
+    # regardless of username, so username enumeration from one source
+    # cannot stay under the per-username quota indefinitely.
+    await enforce_rate_limit(
+        redis_client,
+        key=f"rl:login:ip:{ip}",
+        limit=CMS_LOGIN_IP_MAX_ATTEMPTS,
+        window_seconds=CMS_LOGIN_IP_WINDOW_SECONDS,
+        error_detail="Too many login attempts",
+    )
     fail_key = await _ensure_login_not_limited(redis_client, body.username, ip)
 
     principal_record = await _get_cms_store(request).verify_admin_login(body.username, body.password)

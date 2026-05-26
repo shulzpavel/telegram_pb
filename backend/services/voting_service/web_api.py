@@ -19,6 +19,7 @@ from services.voting_service.participant_identity import (
     validate_participant_email,
     validate_participant_role,
 )
+from services.voting_service.rate_limit import client_ip, enforce_rate_limit
 from services.voting_service.ws_manager import redis_pubsub_listener
 
 logger = logging.getLogger(__name__)
@@ -27,6 +28,16 @@ web_router = APIRouter()
 
 WEB_TOKEN_TTL = 8 * 3600  # 8 hours in seconds
 REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
+
+# Public-facing rate limits. Defaults chosen so a real user with a slightly
+# trigger-happy client never hits them, while bulk replay / abuse is shut
+# off well before it can shape Redis or downstream pub/sub.
+WEB_TOKEN_RATE_LIMIT_MAX = int(os.getenv("WEB_TOKEN_RATE_LIMIT_MAX", "10"))
+WEB_TOKEN_RATE_LIMIT_WINDOW_SECONDS = int(os.getenv("WEB_TOKEN_RATE_LIMIT_WINDOW_SECONDS", "60"))
+WEB_JOIN_RATE_LIMIT_MAX = int(os.getenv("WEB_JOIN_RATE_LIMIT_MAX", "30"))
+WEB_JOIN_RATE_LIMIT_WINDOW_SECONDS = int(os.getenv("WEB_JOIN_RATE_LIMIT_WINDOW_SECONDS", "60"))
+WEB_VOTE_RATE_LIMIT_MAX = int(os.getenv("WEB_VOTE_RATE_LIMIT_MAX", "30"))
+WEB_VOTE_RATE_LIMIT_WINDOW_SECONDS = int(os.getenv("WEB_VOTE_RATE_LIMIT_WINDOW_SECONDS", "60"))
 
 
 # ---------------------------------------------------------------------------
@@ -167,8 +178,20 @@ def _build_web_session_state(session) -> dict:
 
 @web_router.post("/web/token", response_model=WebTokenResponse)
 async def create_web_token(body: WebTokenRequest, request: Request) -> WebTokenResponse:
-    """Generate a short-lived web token for a session."""
+    """Generate a short-lived web token for a session.
+
+    Anyone with the chat_id of an existing session can mint an invite URL,
+    so rate-limiting by source IP keeps a casual attacker from filling
+    Redis with throwaway ``web:<token>`` keys.
+    """
     redis_client = await _get_redis(request)
+    await enforce_rate_limit(
+        redis_client,
+        key=f"rl:web_token:ip:{client_ip(request)}",
+        limit=WEB_TOKEN_RATE_LIMIT_MAX,
+        window_seconds=WEB_TOKEN_RATE_LIMIT_WINDOW_SECONDS,
+        error_detail="Too many web token requests",
+    )
     token = str(uuid.uuid4())
     payload = json.dumps({"chat_id": body.chat_id, "topic_id": body.topic_id})
     await redis_client.setex(f"web:{token}", WEB_TOKEN_TTL, payload)
@@ -190,6 +213,13 @@ async def web_join(body: WebJoinRequest, request: Request) -> dict:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     redis_client = await _get_redis(request)
+    await enforce_rate_limit(
+        redis_client,
+        key=f"rl:web_join:ip:{client_ip(request)}",
+        limit=WEB_JOIN_RATE_LIMIT_MAX,
+        window_seconds=WEB_JOIN_RATE_LIMIT_WINDOW_SECONDS,
+        error_detail="Too many join attempts",
+    )
     info = await _resolve_token(redis_client, body.token)
     chat_id: int = info["chat_id"]
     topic_id: Optional[int] = info["topic_id"]
@@ -252,6 +282,13 @@ async def web_vote(body: WebVoteRequest, request: Request) -> dict:
         raise HTTPException(status_code=400, detail="Invalid vote value")
 
     redis_client = await _get_redis(request)
+    await enforce_rate_limit(
+        redis_client,
+        key=f"rl:web_vote:participant:{body.participant_id}",
+        limit=WEB_VOTE_RATE_LIMIT_MAX,
+        window_seconds=WEB_VOTE_RATE_LIMIT_WINDOW_SECONDS,
+        error_detail="Too many vote attempts",
+    )
     info = await _resolve_token(redis_client, body.token)
     chat_id: int = info["chat_id"]
     topic_id: Optional[int] = info["topic_id"]

@@ -47,6 +47,11 @@ logger = logging.getLogger(__name__)
 CMS_TOKEN_TTL = int(os.getenv("CMS_TOKEN_TTL_SECONDS", str(24 * 3600)))
 CMS_LOGIN_MAX_ATTEMPTS = int(os.getenv("CMS_LOGIN_MAX_ATTEMPTS", "5"))
 CMS_LOGIN_WINDOW_SECONDS = int(os.getenv("CMS_LOGIN_WINDOW_SECONDS", "900"))
+# IP-wide login attempt cap (counts every attempt — success or failure).
+# Defence against the per-username cap above being trivially bypassed by
+# rotating usernames from the same source.
+CMS_LOGIN_IP_MAX_ATTEMPTS = int(os.getenv("CMS_LOGIN_IP_MAX_ATTEMPTS", "20"))
+CMS_LOGIN_IP_WINDOW_SECONDS = int(os.getenv("CMS_LOGIN_IP_WINDOW_SECONDS", "900"))
 CMS_COOKIE_NAME = "cms_token"
 CMS_COOKIE_SECURE = os.getenv("CMS_COOKIE_SECURE", "false").lower() == "true"
 

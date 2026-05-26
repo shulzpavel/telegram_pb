@@ -59,7 +59,18 @@ from services.voting_service.ai_summary_llm import (
     fetch_jira_issue_context,
     generate_ai_summary_llm,
 )
+from services.voting_service.rate_limit import enforce_rate_limit
 from services.voting_service.web_api import WEB_TOKEN_TTL, _build_web_session_state
+
+
+# Per-actor (authenticated CMS user) quotas for the manager surface.
+# Both invite refresh and AI summary generation are cheap-ish for one user
+# but expensive at fleet scale (Anthropic billing for the second), so we
+# cap them by username rather than IP.
+APP_INVITE_RATE_LIMIT_MAX = int(os.getenv("APP_INVITE_RATE_LIMIT_MAX", "30"))
+APP_INVITE_RATE_LIMIT_WINDOW_SECONDS = int(os.getenv("APP_INVITE_RATE_LIMIT_WINDOW_SECONDS", "60"))
+AI_SUMMARY_RATE_LIMIT_MAX = int(os.getenv("AI_SUMMARY_RATE_LIMIT_MAX", "20"))
+AI_SUMMARY_RATE_LIMIT_WINDOW_SECONDS = int(os.getenv("AI_SUMMARY_RATE_LIMIT_WINDOW_SECONDS", "3600"))
 
 app_router = APIRouter()
 
@@ -535,12 +546,24 @@ async def app_regenerate_invite(
 ) -> dict:
     """Mint a fresh invite token for an existing manager session.
 
+    Each refresh writes a new ``web:<token>`` key into Redis, so this is the
+    public-token equivalent of /web/token but for the authenticated manager
+    surface. Rate-limit by actor so a stuck UI loop can't fill Redis even
+    behind an authenticated session.
+
     Web tokens live in Redis with an 8h TTL and may be evicted before the
     session itself is finished (volume reset, manager comes back the next day,
     etc.). Without this endpoint the manager would see a stale invite_url
     cached in localStorage and participants would hit "Session token not found
     or expired" on /s/<token>. The session itself stays the same chat_id.
     """
+    await enforce_rate_limit(
+        request.app.state.web_redis,
+        key=f"rl:app_invite:actor:{actor.username}",
+        limit=APP_INVITE_RATE_LIMIT_MAX,
+        window_seconds=APP_INVITE_RATE_LIMIT_WINDOW_SECONDS,
+        error_detail="Too many invite refresh requests",
+    )
     # Touch the session so we know it exists in the repository before binding
     # a new token to its identity (also normalizes lazily-created sessions).
     await _get_repo_session(request.app.state.repository, chat_id, topic_id)
@@ -887,7 +910,17 @@ async def app_generate_ai_summary(
 
     The summary is stored on the active ``Task`` and appears in manager state and
     participant WebSocket payloads. Strict mode: no heuristic fallback when LLM fails.
+
+    Each call costs an Anthropic completion, so we cap them per CMS actor — a
+    stuck UI loop must never burn the LLM budget unbounded.
     """
+    await enforce_rate_limit(
+        request.app.state.web_redis,
+        key=f"rl:ai_summary:actor:{actor.username}",
+        limit=AI_SUMMARY_RATE_LIMIT_MAX,
+        window_seconds=AI_SUMMARY_RATE_LIMIT_WINDOW_SECONDS,
+        error_detail="Too many AI summary requests",
+    )
     session = await _get_repo_session(request.app.state.repository, chat_id, topic_id)
     if not session.current_task or not session.current_batch_started_at:
         raise HTTPException(status_code=400, detail="Start voting before generating an AI summary.")
