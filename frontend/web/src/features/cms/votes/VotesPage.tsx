@@ -29,7 +29,7 @@ export default function VotesPage() {
         <TextField className="md:max-w-[160px]" aria-label="Session id" placeholder="session_id" value={sessionId} onChange={(event) => setSessionId(event.target.value)} />
         <TextField className="md:max-w-[160px]" aria-label="Task id" placeholder="task_id" value={taskId} onChange={(event) => setTaskId(event.target.value)} />
         <TextField className="md:max-w-[160px]" aria-label="User id" placeholder="user_id" value={userId} onChange={(event) => setUserId(event.target.value)} />
-        <Button variant="ghost" size="sm" className="md:self-end whitespace-nowrap" onClick={list.reload}>Обновить</Button>
+        <Button variant="ghost" size="sm" className="whitespace-nowrap" onClick={list.reload}>Обновить</Button>
       </Toolbar>
       <DataTable
         error={list.error}

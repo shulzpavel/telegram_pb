@@ -282,7 +282,6 @@ export default function AuditEventsPage() {
         />
         <Button
           variant="ghost"
-          className="xl:self-end"
           onClick={() => {
             setActionFilter("");
             setActorFilter("");
@@ -293,7 +292,7 @@ export default function AuditEventsPage() {
         >
           Сбросить
         </Button>
-        <Button variant="ghost" size="sm" className="xl:self-end whitespace-nowrap" onClick={list.reload}>Обновить</Button>
+        <Button variant="ghost" size="sm" className="whitespace-nowrap" onClick={list.reload}>Обновить</Button>
       </div>
       <DataTable
         error={list.error}

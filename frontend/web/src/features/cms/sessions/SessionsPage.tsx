@@ -192,7 +192,7 @@ export default function SessionsPage({ canManageTasks, canManageSessions }: Sess
           <option value="true">Идут сейчас</option>
           <option value="false">Завершены / не запущены</option>
         </SelectField>
-        <Button variant="ghost" size="sm" className="md:self-end whitespace-nowrap" onClick={list.reload}>Обновить</Button>
+        <Button variant="ghost" size="sm" className="whitespace-nowrap" onClick={list.reload}>Обновить</Button>
       </Toolbar>
 
       <DataTable

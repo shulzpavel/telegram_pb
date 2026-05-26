@@ -18,7 +18,7 @@ export default function WebParticipantsPage() {
           <option value="true">Active</option>
           <option value="false">Expired</option>
         </SelectField>
-        <Button variant="ghost" size="sm" className="md:self-end whitespace-nowrap" onClick={list.reload}>Обновить</Button>
+        <Button variant="ghost" size="sm" className="whitespace-nowrap" onClick={list.reload}>Обновить</Button>
       </Toolbar>
       <DataTable
         error={list.error}

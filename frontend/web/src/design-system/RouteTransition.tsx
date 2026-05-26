@@ -1,4 +1,4 @@
-import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
+import { motion, useReducedMotion } from "framer-motion";
 import { useEffect, useState, type ReactNode } from "react";
 import { motionTokens } from "./motion";
 
@@ -29,19 +29,16 @@ export function RouteTransition({
   const reduceMotion = useReducedMotion();
 
   return (
-    <AnimatePresence mode="wait" initial={false}>
-      <motion.div
-        key={transitionKey}
-        initial={reduceMotion ? false : { opacity: 0, y: 8 }}
-        animate={reduceMotion ? { opacity: 1 } : { opacity: 1, y: 0 }}
-        exit={reduceMotion ? { opacity: 1 } : { opacity: 0, y: -6 }}
-        transition={{
-          duration: reduceMotion ? 0 : motionTokens.base,
-          ease: motionTokens.ease,
-        }}
-      >
-        {children}
-      </motion.div>
-    </AnimatePresence>
+    <motion.div
+      key={transitionKey}
+      initial={reduceMotion ? false : { opacity: 0, y: 6 }}
+      animate={reduceMotion ? { opacity: 1 } : { opacity: 1, y: 0 }}
+      transition={{
+        duration: reduceMotion ? 0 : motionTokens.base,
+        ease: motionTokens.ease,
+      }}
+    >
+      {children}
+    </motion.div>
   );
 }
