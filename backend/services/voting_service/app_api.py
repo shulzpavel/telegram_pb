@@ -30,13 +30,24 @@ from app.usecases.manage_tasks import (
     TaskQueueError,
     UpdateTaskUseCase,
 )
-from services.voting_service.cms_api import (
+from services.voting_service._http_shared import (
     CmsPrincipal,
+    JiraImportRequest,
+    JiraPreviewRequest,
+    TaskBulkCreateRequest,
+    TaskCreateRequest,
+    TaskInput,
+    TaskMoveRequest,
+    TaskReorderRequest,
+    TaskUpdateRequest,
     _audit,
     _existing_jira_keys,
+    _get_repo_session,
     _jira_preview,
     _jira_preview_payload,
+    _mutate_repo_session,
     _mutation_payload,
+    _publish_state,
     _raise_task_error,
     require_permission,
 )
@@ -47,9 +58,15 @@ from services.voting_service.ai_summary_llm import (
     fetch_jira_issue_context,
     generate_ai_summary_llm,
 )
-from services.voting_service.web_api import WEB_TOKEN_TTL, _build_web_session_state, _channel_name
+from services.voting_service.web_api import WEB_TOKEN_TTL, _build_web_session_state
 
 app_router = APIRouter()
+
+
+# ``_publish_state`` historically lived in this module; tests import it from
+# here (see ``tests/test_review_hardening.py``). Keep the public name visible
+# via re-export so that import path keeps working.
+__all__ = ["app_router", "_publish_state"]
 
 DEMO_CHAT_ID = -42_424_242
 DEMO_TITLE = "Demo planning session"
@@ -83,46 +100,6 @@ class AppSessionCreateRequest(BaseModel):
 
 class AppSessionRenameRequest(BaseModel):
     title: str = Field(min_length=1, max_length=120)
-
-
-class TaskInput(BaseModel):
-    summary: str = Field(min_length=1, max_length=500)
-    jira_key: Optional[str] = Field(default=None, max_length=64)
-    url: Optional[str] = Field(default=None, max_length=1000)
-    story_points: Optional[int] = Field(default=None, ge=0, le=1000)
-
-
-class TaskCreateRequest(TaskInput):
-    expected_version: Optional[int] = Field(default=None, ge=0)
-
-
-class TaskBulkCreateRequest(BaseModel):
-    tasks: list[TaskInput] = Field(min_length=1, max_length=500)
-    expected_version: Optional[int] = Field(default=None, ge=0)
-
-
-class TaskUpdateRequest(TaskInput):
-    expected_version: Optional[int] = Field(default=None, ge=0)
-
-
-class TaskMoveRequest(BaseModel):
-    target_index: int = Field(ge=0)
-    expected_version: Optional[int] = Field(default=None, ge=0)
-
-
-class TaskReorderRequest(BaseModel):
-    ordered_task_ids: list[str] = Field(min_length=1, max_length=5000)
-    expected_version: Optional[int] = Field(default=None, ge=0)
-
-
-class JiraPreviewRequest(BaseModel):
-    jql: str = Field(min_length=1, max_length=5000)
-    max_results: int = Field(default=500, ge=1, le=1000)
-
-
-class JiraImportRequest(JiraPreviewRequest):
-    selected_keys: list[str] = Field(default_factory=list, max_length=1000)
-    expected_version: Optional[int] = Field(default=None, ge=0)
 
 
 class FinalEstimateRequest(BaseModel):
@@ -159,25 +136,6 @@ def _new_app_chat_id() -> int:
 
 def _demo_enabled() -> bool:
     return os.getenv("ENABLE_DEMO_SESSION", "true").lower() in {"1", "true", "yes", "on"}
-
-
-async def _get_repo_session(repo, chat_id: int, topic_id: Optional[int]) -> Session:
-    if hasattr(repo, "get_session_async"):
-        return await repo.get_session_async(chat_id, topic_id)
-    return await repo.get_session(chat_id, topic_id)
-
-
-async def _mutate_repo_session(repo, chat_id: int, topic_id: Optional[int], mutator):
-    if hasattr(repo, "mutate_session"):
-        session, result = await repo.mutate_session(chat_id, topic_id, mutator)
-        return session, result
-    session = await _get_repo_session(repo, chat_id, topic_id)
-    result = mutator(session)
-    if hasattr(repo, "save_session_async"):
-        await repo.save_session_async(session)
-    else:
-        await repo.save_session(session)
-    return session, result
 
 
 async def _stored_session_title(
@@ -256,28 +214,6 @@ async def _create_invite_token(
 
     path = f"/s/{token}"
     return token, _public_url(path)
-
-
-async def _publish_state(request: Request, session: Session) -> None:
-    """Broadcast new session state. Best-effort: never fail the caller.
-
-    Mutations are already committed when we get here. If pub/sub is briefly
-    unavailable, browser clients will catch up via the WebSocket initial state
-    on the next reconnect or the next state-changing event.
-    """
-    redis_client = request.app.state.web_redis
-    try:
-        await redis_client.publish(
-            _channel_name(session.chat_id, session.topic_id),
-            json.dumps({"type": "session_state", "state": _build_web_session_state(session)}),
-        )
-    except Exception as exc:  # noqa: BLE001
-        logger.warning(
-            "publish_state failed chat_id=%s topic_id=%s err=%r",
-            session.chat_id,
-            session.topic_id,
-            exc,
-        )
 
 
 def _serialize_completed_task(session: Session, task: Task, *, bucket_index: Optional[int] = None) -> dict:

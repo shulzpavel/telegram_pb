@@ -1,4 +1,11 @@
-"""CMS admin API for superuser dashboards."""
+"""CMS admin API for superuser dashboards.
+
+Cross-cutting HTTP helpers (auth principal, audit logging, common pydantic
+models, jira-preview proxy, broadcast publishing) used to live here and were
+imported by ``app_api`` — which also caused a circular import in the other
+direction. They now live in ``_http_shared`` and are re-exported below so
+existing imports keep working.
+"""
 
 from __future__ import annotations
 
@@ -6,11 +13,9 @@ import json
 import logging
 import os
 import secrets
-from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional
 
-import aiohttp
 import redis.asyncio as aioredis
 from fastapi import APIRouter, Cookie, Depends, Header, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field
@@ -42,16 +47,67 @@ from services.voting_service.cms_rbac import (
     PERM_WEB_PARTICIPANTS_DELETE,
     PERM_WEB_VIEW,
 )
+from services.voting_service._http_shared import (
+    ALLOWED_THEME_PREFERENCES,
+    AuthDep,
+    CMS_COOKIE_NAME,
+    CMS_COOKIE_SECURE,
+    CMS_LOGIN_MAX_ATTEMPTS,
+    CMS_LOGIN_WINDOW_SECONDS,
+    CMS_TOKEN_TTL,
+    CmsPrincipal,
+    DEFAULT_THEME_PREFERENCE,
+    JiraImportRequest,
+    JiraPreviewRequest,
+    TaskBulkCreateRequest,
+    TaskCreateRequest,
+    TaskInput,
+    TaskMoveRequest,
+    TaskReorderRequest,
+    TaskUpdateRequest,
+    ThemePreference,
+    _audit,
+    _client_ip,
+    _existing_jira_keys,
+    _extract_bearer,
+    _get_cms_store,
+    _get_redis,
+    _get_repo_session,
+    _jira_preview,
+    _jira_preview_payload,
+    _mutate_repo_session,
+    _mutation_payload,
+    _principal_from_record,
+    _publish_state,
+    _raise_task_error,
+    _require_auth,
+    _save_repo_session,
+    _task_payload,
+    require_permission,
+)
 
 logger = logging.getLogger(__name__)
 
 cms_router = APIRouter()
 
-CMS_TOKEN_TTL = int(os.getenv("CMS_TOKEN_TTL_SECONDS", str(24 * 3600)))
-CMS_LOGIN_MAX_ATTEMPTS = int(os.getenv("CMS_LOGIN_MAX_ATTEMPTS", "5"))
-CMS_LOGIN_WINDOW_SECONDS = int(os.getenv("CMS_LOGIN_WINDOW_SECONDS", "900"))
-CMS_COOKIE_NAME = "cms_token"
-CMS_COOKIE_SECURE = os.getenv("CMS_COOKIE_SECURE", "false").lower() == "true"
+
+# ---------------------------------------------------------------------------
+# Re-exports for backward compatibility (do NOT delete — external callers and
+# tests import these names from ``services.voting_service.cms_api``).
+# ---------------------------------------------------------------------------
+
+__all__ = [
+    "CmsPrincipal",
+    "_audit",
+    "_existing_jira_keys",
+    "_jira_preview",
+    "_jira_preview_payload",
+    "_mutation_payload",
+    "_raise_task_error",
+    "_publish_state",
+    "require_permission",
+    "cms_router",
+]
 
 
 class LoginRequest(BaseModel):
@@ -92,46 +148,6 @@ class AdminUpdateRequest(BaseModel):
     password: Optional[str] = Field(default=None, min_length=8, max_length=256)
 
 
-class TaskInput(BaseModel):
-    summary: str = Field(min_length=1, max_length=500)
-    jira_key: Optional[str] = Field(default=None, max_length=64)
-    url: Optional[str] = Field(default=None, max_length=1000)
-    story_points: Optional[int] = Field(default=None, ge=0, le=1000)
-
-
-class TaskCreateRequest(TaskInput):
-    expected_version: Optional[int] = Field(default=None, ge=0)
-
-
-class TaskBulkCreateRequest(BaseModel):
-    tasks: list[TaskInput] = Field(min_length=1, max_length=500)
-    expected_version: Optional[int] = Field(default=None, ge=0)
-
-
-class TaskUpdateRequest(TaskInput):
-    expected_version: Optional[int] = Field(default=None, ge=0)
-
-
-class TaskMoveRequest(BaseModel):
-    target_index: int = Field(ge=0)
-    expected_version: Optional[int] = Field(default=None, ge=0)
-
-
-class TaskReorderRequest(BaseModel):
-    ordered_task_ids: list[str] = Field(min_length=1, max_length=5000)
-    expected_version: Optional[int] = Field(default=None, ge=0)
-
-
-class JiraPreviewRequest(BaseModel):
-    jql: str = Field(min_length=1, max_length=5000)
-    max_results: int = Field(default=500, ge=1, le=1000)
-
-
-class JiraImportRequest(JiraPreviewRequest):
-    selected_keys: list[str] = Field(default_factory=list, max_length=1000)
-    expected_version: Optional[int] = Field(default=None, ge=0)
-
-
 class SessionRenameRequest(BaseModel):
     """Rename a CMS session. Empty string clears the custom title and
     callers fall back to the technical identifier."""
@@ -139,252 +155,11 @@ class SessionRenameRequest(BaseModel):
     title: Optional[str] = Field(default=None, max_length=200)
 
 
-ThemePreference = str  # one of: "dark", "light", "system"
-ALLOWED_THEME_PREFERENCES: frozenset[str] = frozenset({"dark", "light", "system"})
-DEFAULT_THEME_PREFERENCE: ThemePreference = "system"
-
-
-@dataclass(frozen=True)
-class CmsPrincipal:
-    id: int
-    username: str
-    display_name: Optional[str]
-    is_superuser: bool
-    permissions: frozenset[str]
-    roles: tuple[dict, ...]
-    pages: tuple[dict, ...]
-    theme_preference: ThemePreference = DEFAULT_THEME_PREFERENCE
-
-    def can(self, permission: str) -> bool:
-        return self.is_superuser or permission in self.permissions
-
-
-def _client_ip(request: Request) -> str:
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        return forwarded.split(",", 1)[0].strip()
-    real_ip = request.headers.get("x-real-ip")
-    if real_ip:
-        return real_ip.strip()
-    return request.client.host if request.client else "unknown"
-
-
-def _get_cms_store(request: Request):
-    store = getattr(request.app.state, "cms_store", None)
-    if not store:
-        raise HTTPException(status_code=503, detail="CMS storage is not configured")
-    return store
-
-
-async def _get_repo_session(repo, chat_id: int, topic_id: Optional[int]) -> Session:
-    if hasattr(repo, "get_session_async"):
-        return await repo.get_session_async(chat_id, topic_id)
-    return await repo.get_session(chat_id, topic_id)
-
-
-async def _save_repo_session(repo, session: Session) -> None:
-    if hasattr(repo, "save_session_async"):
-        await repo.save_session_async(session)
-        return
-    await repo.save_session(session)
-
-
-async def _mutate_repo_session(repo, chat_id: int, topic_id: Optional[int], mutator):
-    if hasattr(repo, "mutate_session"):
-        _, result = await repo.mutate_session(chat_id, topic_id, mutator)
-        return result
-    session = await _get_repo_session(repo, chat_id, topic_id)
-    result = mutator(session)
-    await _save_repo_session(repo, session)
-    return result
-
-
 async def _session_ref(request: Request, session_id: int) -> tuple[int, Optional[int]]:
     detail = await _get_cms_store(request).get_session(session_id)
     if not detail:
         raise HTTPException(status_code=404, detail="Session not found")
     return int(detail["chat_id"]), detail.get("topic_id")
-
-
-def _task_payload(session: Session, task: Task) -> dict:
-    index = next((idx for idx, item in enumerate(session.tasks_queue) if item.task_id == task.task_id), None)
-    votes = task.votes or {}
-    numeric_votes = [int(value) for value in votes.values() if str(value).lstrip("-").isdigit()]
-    numeric_avg = sum(numeric_votes) / len(numeric_votes) if numeric_votes else None
-    numeric_max = max(numeric_votes) if numeric_votes else None
-    return {
-        "id": -1,
-        "task_uid": task.task_id,
-        "session_id": None,
-        "bucket": "tasks_queue",
-        "bucket_index": index if index is not None else -1,
-        "jira_key": task.jira_key,
-        "summary": task.summary,
-        "url": task.url,
-        "story_points": task.story_points,
-        "source": task.source,
-        "votes_count": len(votes),
-        "numeric_avg": numeric_avg,
-        "numeric_max": numeric_max,
-        "completed_at": task.completed_at,
-        "jql": task.jql,
-        "created_at_text": task.created_at,
-        "domain_updated_at": task.updated_at,
-        "updated_at": task.updated_at,
-    }
-
-
-def _mutation_payload(result: TaskMutationResult, session_id: int) -> dict:
-    tasks = [_task_payload(result.session, task) | {"session_id": session_id} for task in result.tasks]
-    task = _task_payload(result.session, result.task) | {"session_id": session_id} if result.task else None
-    deleted_task_id = result.deleted_task.task_id if result.deleted_task else None
-    return {
-        "ok": True,
-        "tasks_version": result.session.tasks_version,
-        "current_task_id": result.session.current_task_id,
-        "tasks_queue_count": len(result.session.tasks_queue),
-        "task": task,
-        "tasks": tasks,
-        "deleted_task_id": deleted_task_id,
-    }
-
-
-def _raise_task_error(exc: TaskQueueError) -> None:
-    raise HTTPException(status_code=exc.status_code, detail=str(exc))
-
-
-def _existing_jira_keys(session: Session) -> set[str]:
-    keys: set[str] = set()
-    for collection in (session.tasks_queue, session.history, session.last_batch):
-        for task in collection:
-            if task.jira_key:
-                keys.add(task.jira_key)
-    return keys
-
-
-async def _jira_preview(jql: str, max_results: int) -> list[dict]:
-    base_url = os.getenv("JIRA_SERVICE_URL", "http://jira-service:8001").rstrip("/")
-    timeout = aiohttp.ClientTimeout(total=int(os.getenv("JIRA_SERVICE_TIMEOUT_SECONDS", "30")))
-    async with aiohttp.ClientSession(timeout=timeout) as session:
-        async with session.post(
-            f"{base_url}/api/v1/parse",
-            json={"jql": jql, "max_results": max_results},
-        ) as response:
-            if response.status != 200:
-                body = await response.text()
-                raise HTTPException(status_code=502, detail=f"Jira preview failed: {body[:300]}")
-            data = await response.json()
-    issues = data.get("issues", [])
-    return issues if isinstance(issues, list) else []
-
-
-def _jira_preview_payload(issues: list[dict], existing_keys: set[str]) -> dict:
-    items = []
-    skipped = []
-    seen: set[str] = set()
-    for issue in issues:
-        key = str(issue.get("key") or "").strip().upper()
-        if not key:
-            continue
-        item = {
-            "key": key,
-            "summary": issue.get("summary") or key,
-            "url": issue.get("url"),
-            "story_points": issue.get("story_points"),
-            "duplicate": key in existing_keys or key in seen,
-        }
-        if item["duplicate"]:
-            skipped.append(key)
-        items.append(item)
-        seen.add(key)
-    return {
-        "items": items,
-        "total": len(items),
-        "importable": sum(1 for item in items if not item["duplicate"]),
-        "skipped_keys": skipped,
-    }
-
-
-async def _get_redis(request: Request) -> aioredis.Redis:
-    return request.app.state.web_redis
-
-
-def _extract_bearer(authorization: Optional[str]) -> Optional[str]:
-    if not authorization or not authorization.startswith("Bearer "):
-        return None
-    return authorization.removeprefix("Bearer ").strip() or None
-
-
-async def _audit(request: Request, action: str, actor: Optional[str], status: str, payload: Optional[dict] = None) -> None:
-    store = getattr(request.app.state, "cms_store", None)
-    if store:
-        await store.record_audit_event(
-            action=action,
-            actor=actor,
-            status=status,
-            ip=_client_ip(request),
-            payload=payload,
-        )
-
-
-def _principal_from_record(record: dict) -> CmsPrincipal:
-    theme = record.get("theme_preference") or DEFAULT_THEME_PREFERENCE
-    if theme not in ALLOWED_THEME_PREFERENCES:
-        theme = DEFAULT_THEME_PREFERENCE
-    return CmsPrincipal(
-        id=int(record["id"]),
-        username=record["username"],
-        display_name=record.get("display_name"),
-        is_superuser=bool(record.get("is_superuser")),
-        permissions=frozenset(record.get("permissions") or []),
-        roles=tuple(record.get("roles") or []),
-        pages=tuple(record.get("pages") or []),
-        theme_preference=theme,
-    )
-
-
-async def _require_auth(
-    request: Request,
-    authorization: Optional[str] = Header(default=None),
-    cookie_token: Optional[str] = Cookie(default=None, alias=CMS_COOKIE_NAME),
-) -> CmsPrincipal:
-    token = cookie_token or _extract_bearer(authorization)
-    if not token:
-        raise HTTPException(status_code=401, detail="Unauthorized")
-
-    redis_client = await _get_redis(request)
-    raw = await redis_client.get(f"cms_token:{token}")
-    if not raw:
-        raise HTTPException(status_code=401, detail="Token expired or invalid")
-
-    try:
-        data = json.loads(raw)
-    except json.JSONDecodeError:
-        data = {}
-
-    store = _get_cms_store(request)
-    principal_record = await store.get_admin_principal(
-        admin_id=data.get("admin_id"),
-        username=data.get("username"),
-    )
-    if not principal_record:
-        await redis_client.delete(f"cms_token:{token}")
-        raise HTTPException(status_code=401, detail="Token expired or invalid")
-
-    await redis_client.expire(f"cms_token:{token}", CMS_TOKEN_TTL)
-    return _principal_from_record(principal_record)
-
-
-AuthDep = Depends(_require_auth)
-
-
-def require_permission(permission: str):
-    async def checker(principal: CmsPrincipal = AuthDep) -> CmsPrincipal:
-        if not principal.can(permission):
-            raise HTTPException(status_code=403, detail="Forbidden")
-        return principal
-
-    return checker
 
 
 async def _ensure_login_not_limited(redis_client: aioredis.Redis, username: str, ip: str) -> str:
@@ -811,7 +586,7 @@ async def cms_import_jira_tasks(
             session.bump_tasks_version()
             return TaskMutationResult(session=session, task=added[-1], tasks=tuple(added))
 
-        result = await _mutate_repo_session(request.app.state.repository, chat_id, topic_id, mutate)
+        _, result = await _mutate_repo_session(request.app.state.repository, chat_id, topic_id, mutate)
     except TaskQueueError as exc:
         await _audit(request, "cms.task.jira_import", actor.username, "failed", {"error": str(exc), "session_id": session_id})
         _raise_task_error(exc)
@@ -854,11 +629,12 @@ def _close_session_mutator() -> "callable":
 
 
 async def _broadcast_session_state(request: Request, session: Session) -> None:
-    """Publish a fresh state snapshot so participants see CMS-driven changes."""
-    try:
-        from services.voting_service.app_api import _publish_state  # local import: avoid circular import
-    except Exception:
-        return
+    """Publish a fresh state snapshot so participants see CMS-driven changes.
+
+    ``_publish_state`` is itself best-effort (swallows pub/sub failures) but we
+    add a second guard here so a CMS-driven mutation surface never returns
+    5xx because the broadcast attempt blew up in an unexpected way.
+    """
     try:
         await _publish_state(request, session)
     except Exception as exc:  # noqa: BLE001
@@ -905,7 +681,7 @@ async def cms_close_session(
 ) -> dict:
     """Force-finish a session from the CMS. Idempotent — safe to call twice."""
     chat_id, topic_id = await _session_ref(request, session_id)
-    completed = await _mutate_repo_session(
+    _, completed = await _mutate_repo_session(
         request.app.state.repository,
         chat_id,
         topic_id,
