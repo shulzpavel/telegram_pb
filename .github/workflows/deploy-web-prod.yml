@@ -6,10 +6,6 @@ on:
       - main
   workflow_dispatch:
 
-concurrency:
-  group: deploy-web-prod
-  cancel-in-progress: false
-
 jobs:
   deploy:
     runs-on: ubuntu-latest
