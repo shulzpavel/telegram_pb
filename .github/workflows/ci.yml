@@ -7,6 +7,44 @@ on:
       - main
 
 jobs:
+  notify-start:
+    name: Notify deploy pipeline started
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send Telegram start alert
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          DOMAIN: planning.shults-sync.com
+        run: |
+          if [ -z "${TELEGRAM_BOT_TOKEN:-}" ] || [ -z "${TELEGRAM_CHAT_ID:-}" ]; then
+            echo "Telegram secrets are not configured; skipping alert."
+            exit 0
+          fi
+
+          TEXT="$(cat <<EOF
+🚀 <b>Деплой pipeline запущен</b>
+
+<b>Проект:</b> Planning Poker
+<b>Окружение:</b> <code>production</code>
+<b>Домен:</b> <a href="https://${DOMAIN}">${DOMAIN}</a>
+<b>Ветка:</b> <code>${GITHUB_REF_NAME}</code>
+<b>Коммит:</b> <code>${GITHUB_SHA::7}</code>
+<b>Автор:</b> ${GITHUB_ACTOR}
+
+<a href="${RUN_URL}">Открыть GitHub Actions</a>
+EOF
+          )"
+
+          curl -fsS -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" \
+            --data-urlencode "parse_mode=HTML" \
+            --data-urlencode "disable_web_page_preview=true" \
+            --data-urlencode "text=${TEXT}" \
+            >/dev/null || true
+
   backend:
     runs-on: ubuntu-latest
     steps:
@@ -76,3 +114,69 @@ jobs:
             cd /opt/planning-poker
             git pull --ff-only origin main
             ./infra/deploy/deploy-web-prod.sh
+
+  notify-result:
+    name: Notify deploy pipeline result
+    if: always() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs:
+      - backend
+      - frontend
+      - compose
+      - deploy-web
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send Telegram result alert
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          DOMAIN: planning.shults-sync.com
+          BACKEND_RESULT: ${{ needs.backend.result }}
+          FRONTEND_RESULT: ${{ needs.frontend.result }}
+          COMPOSE_RESULT: ${{ needs.compose.result }}
+          DEPLOY_RESULT: ${{ needs.deploy-web.result }}
+        run: |
+          if [ -z "${TELEGRAM_BOT_TOKEN:-}" ] || [ -z "${TELEGRAM_CHAT_ID:-}" ]; then
+            echo "Telegram secrets are not configured; skipping alert."
+            exit 0
+          fi
+
+          if [ "$BACKEND_RESULT" = "success" ] \
+            && [ "$FRONTEND_RESULT" = "success" ] \
+            && [ "$COMPOSE_RESULT" = "success" ] \
+            && [ "$DEPLOY_RESULT" = "success" ]; then
+            ICON="✅"
+            TITLE="Деплой pipeline завершён"
+            DETAILS="CI пройден, deploy job завершился успешно. Финальное подтверждение с сервера приходит отдельным сообщением от deploy-скрипта."
+          else
+            ICON="❌"
+            TITLE="Деплой pipeline упал"
+            DETAILS="Деплой до сервера мог не дойти. Проверь GitHub Actions run."
+          fi
+
+          TEXT="$(cat <<EOF
+${ICON} <b>${TITLE}</b>
+
+<b>Проект:</b> Planning Poker
+<b>Окружение:</b> <code>production</code>
+<b>Домен:</b> <a href="https://${DOMAIN}">${DOMAIN}</a>
+<b>Ветка:</b> <code>${GITHUB_REF_NAME}</code>
+<b>Коммит:</b> <code>${GITHUB_SHA::7}</code>
+
+<b>backend:</b> <code>${BACKEND_RESULT}</code>
+<b>frontend:</b> <code>${FRONTEND_RESULT}</code>
+<b>compose:</b> <code>${COMPOSE_RESULT}</code>
+<b>deploy-web:</b> <code>${DEPLOY_RESULT}</code>
+
+${DETAILS}
+
+<a href="${RUN_URL}">Открыть GitHub Actions</a>
+EOF
+          )"
+
+          curl -fsS -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" \
+            --data-urlencode "parse_mode=HTML" \
+            --data-urlencode "disable_web_page_preview=true" \
+            --data-urlencode "text=${TEXT}" \
+            >/dev/null || true

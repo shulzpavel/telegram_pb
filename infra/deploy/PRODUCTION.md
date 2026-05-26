@@ -93,6 +93,12 @@ chmod 600 /opt/planning-poker/.deploy.env
 
 The deploy script automatically loads `.deploy.env` when it exists.
 
+GitHub Actions also sends pipeline notifications before and after CI/deploy.
+Add these repository secrets in `Settings -> Secrets and variables -> Actions`:
+
+- `TELEGRAM_CHAT_ID`
+- `TELEGRAM_BOT_TOKEN`
+
 ## Auto Deploy on push to main
 
 The repo deploys from the existing `.github/workflows/ci.yml` workflow.
