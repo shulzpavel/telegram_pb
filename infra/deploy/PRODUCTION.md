@@ -84,6 +84,9 @@ Create `/opt/planning-poker/.deploy.env`:
 cat >/opt/planning-poker/.deploy.env <<'EOF'
 TELEGRAM_CHAT_ID=-1003923094895
 TELEGRAM_BOT_TOKEN=<telegram-bot-token>
+DEPLOY_APP_NAME=Planning Poker
+DEPLOY_ENVIRONMENT=production
+DEPLOY_DOMAIN=planning.shults-sync.com
 EOF
 chmod 600 /opt/planning-poker/.deploy.env
 ```
