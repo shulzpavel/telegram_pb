@@ -12,6 +12,8 @@ import redis.asyncio as aioredis
 from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
+from app.usecases.web_join import JoinWebSessionUseCase
+from app.usecases.web_vote import WebVoteError, WebVoteUseCase
 from services.voting_service.participant_identity import (
     stable_user_id_from_email,
     validate_participant_email,
@@ -159,21 +161,6 @@ def _build_web_session_state(session) -> dict:
     }
 
 
-async def _mutate_session(repo, chat_id: int, topic_id: Optional[int], mutator):
-    if hasattr(repo, "mutate_session"):
-        return await repo.mutate_session(chat_id, topic_id, mutator)
-    if hasattr(repo, "get_session_async"):
-        session = await repo.get_session_async(chat_id, topic_id)
-    else:
-        session = repo.get_session(chat_id, topic_id)
-    result = mutator(session)
-    if hasattr(repo, "save_session_async"):
-        await repo.save_session_async(session)
-    else:
-        repo.save_session(session)
-    return session, result
-
-
 # ---------------------------------------------------------------------------
 # REST endpoints
 # ---------------------------------------------------------------------------
@@ -231,34 +218,15 @@ async def web_join(body: WebJoinRequest, request: Request) -> dict:
             WEB_TOKEN_TTL,
         )
 
-    repo = request.app.state.repository
-    added = False
+    use_case = JoinWebSessionUseCase(request.app.state.repository)
+    result = await use_case.execute(chat_id, topic_id, user_id, display_name)
 
-    def mutate(session):
-        nonlocal added
-        from app.domain.participant import Participant
-        from config import UserRole
-
-        existing = session.participants.get(user_id)
-        if existing:
-            existing.name = display_name
-        else:
-            session.participants[user_id] = Participant(
-                user_id=user_id,
-                name=display_name,
-                role=UserRole.PARTICIPANT,
-            )
-            added = True
-        return None
-
-    session, _ = await _mutate_session(repo, chat_id, topic_id, mutate)
-
-    if added:
+    if result.added:
         channel = _channel_name(chat_id, topic_id)
-        state = _build_web_session_state(session)
+        state = _build_web_session_state(result.session)
         await redis_client.publish(channel, json.dumps({"type": "session_state", "state": state}))
 
-    state = _build_web_session_state(session)
+    state = _build_web_session_state(result.session)
     return {"participant_id": participant_id, "session": state}
 
 
@@ -296,17 +264,11 @@ async def web_vote(body: WebVoteRequest, request: Request) -> dict:
 
     user_id = json.loads(p_data)["user_id"]
 
-    repo = request.app.state.repository
-
-    def mutate(session):
-        if not session.current_task:
-            raise HTTPException(status_code=400, detail="No active task")
-        if not session.can_vote(user_id):
-            raise HTTPException(status_code=403, detail="Not authorized to vote")
-        session.current_task.votes[user_id] = body.value
-        return None
-
-    session, _ = await _mutate_session(repo, chat_id, topic_id, mutate)
+    use_case = WebVoteUseCase(request.app.state.repository)
+    try:
+        session = await use_case.execute(chat_id, topic_id, user_id, body.value)
+    except WebVoteError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
     # Build and publish state update
     task = session.current_task

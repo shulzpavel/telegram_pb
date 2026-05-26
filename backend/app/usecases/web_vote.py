@@ -1,0 +1,93 @@
+"""Use case for casting a vote from the public web voting UI.
+
+Wraps the existing :class:`CastVoteUseCase` machinery but raises structured
+``WebVoteError`` exceptions instead of returning a bare boolean, so the
+HTTP layer can translate them into 400/403 responses without re-deriving
+the rejection reason. The atomic fast path (``SessionRepository.cast_vote_atomic``)
+is preserved for the production Redis adapter — the read-modify-write
+mutator is only used by simpler in-memory test repositories.
+"""
+
+from __future__ import annotations
+
+from typing import Optional
+
+from app.domain.session import Session
+from app.ports.session_repository import SessionRepository
+
+
+class WebVoteError(Exception):
+    """Raised by ``WebVoteUseCase`` to signal why a vote was rejected.
+
+    The ``status_code`` mirrors what the HTTP handler should surface
+    (400 for state errors, 403 for authorization). Keeps the use case
+    free of FastAPI imports.
+    """
+
+    def __init__(self, message: str, status_code: int):
+        super().__init__(message)
+        self.status_code = status_code
+
+
+class WebVoteUseCase:
+    """Cast a vote on the currently active task in a web session."""
+
+    def __init__(self, session_repo: SessionRepository):
+        self.session_repo = session_repo
+
+    async def execute(
+        self,
+        chat_id: int,
+        topic_id: Optional[int],
+        user_id: int,
+        vote_value: str,
+    ) -> Session:
+        """Persist the vote and return the post-mutation session.
+
+        Raises ``WebVoteError`` when the session has no active task, the
+        participant is not allowed to vote, or (atomic path only) when the
+        repository rejects the write for an unknown reason.
+        """
+        repo = self.session_repo
+
+        # Atomic fast path. The Redis repository handles concurrent voting
+        # without read-modify-write races. It returns a bare bool, so on
+        # failure we re-read the session to derive the precise reason.
+        if hasattr(repo, "cast_vote_atomic"):
+            ok = await repo.cast_vote_atomic(chat_id, topic_id, user_id, vote_value)  # type: ignore[attr-defined]
+            if ok:
+                return await _load_session(repo, chat_id, topic_id)
+            session = await _load_session(repo, chat_id, topic_id)
+            _raise_rejection_reason(session, user_id)
+            # _raise_rejection_reason always raises; keep mypy/IDE happy.
+            raise WebVoteError("Vote rejected", 403)
+
+        def mutate(session: Session) -> None:
+            _raise_rejection_reason(session, user_id)
+            session.current_task.votes[user_id] = vote_value  # type: ignore[union-attr]
+
+        session, _ = await repo.mutate_session(chat_id, topic_id, mutate)
+        return session
+
+
+async def _load_session(
+    repo: SessionRepository,
+    chat_id: int,
+    topic_id: Optional[int],
+) -> Session:
+    if hasattr(repo, "get_session_async"):
+        return await repo.get_session_async(chat_id, topic_id)  # type: ignore[attr-defined]
+    return await repo.get_session(chat_id, topic_id)
+
+
+def _raise_rejection_reason(session: Session, user_id: int) -> None:
+    """Translate session state into a structured ``WebVoteError``.
+
+    Returns silently when the vote would be accepted. Otherwise raises
+    ``WebVoteError`` with the precise HTTP status the public API should
+    surface — preserves the existing 400 vs 403 distinction.
+    """
+    if not session.current_task:
+        raise WebVoteError("No active task", status_code=400)
+    if not session.can_vote(user_id):
+        raise WebVoteError("Not authorized to vote", status_code=403)
