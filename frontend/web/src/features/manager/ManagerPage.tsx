@@ -18,6 +18,7 @@ import { Children, FormEvent, useCallback, useEffect, useMemo, useRef, useState,
 import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
 import { apiUrl } from "../../app/config";
 import TaskTextBlock from "../../components/TaskTextBlock";
+import JiraDescriptionPanel from "../../components/JiraDescriptionPanel";
 import { AiIntelligenceSurface, AiSparkleButton, Alert, Badge, Button, ConfirmDialog, EmptyState, ScrollArea, Spinner, Surface, TextField, TextareaField, ThemeToggle, cn, useTheme, useToast, type ThemeMode } from "../../design-system";
 import { cmsAuthApi } from "../cms/api/cmsClient";
 import type { CmsPrincipal } from "../cms/api/cmsTypes";
@@ -1503,6 +1504,19 @@ function ControlRoom({
           busy={busy}
           onFinalEstimate={onFinalEstimate}
         />
+      ) : null}
+
+      {/* JIRA DESCRIPTION — same component the voters see, rendered
+          inline in the cockpit so the manager has the spec body without
+          flipping to Jira. Backfilled lazily on the backend if the task
+          was imported before the field existed. */}
+      {task?.description ? (
+        <div className="mt-4">
+          <JiraDescriptionPanel
+            description={task.description}
+            jiraKey={task.jira_key ?? null}
+          />
+        </div>
       ) : null}
 
       {/* LIVE VOTING / RESULTS ------------------------------------------ */}

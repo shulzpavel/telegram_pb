@@ -14,6 +14,10 @@ from pydantic import BaseModel
 
 from app.usecases.web_join import JoinWebSessionUseCase
 from app.usecases.web_vote import WebVoteError, WebVoteUseCase
+# NOTE: ``_ensure_current_task_description`` is imported lazily inside the
+# endpoints below to avoid the circular import between ``_http_shared``
+# (which already imports ``_build_web_session_state`` / ``_channel_name``
+# from this module for pub/sub broadcasts) and ``web_api``.
 from services.voting_service.participant_identity import (
     stable_user_id_from_email,
     validate_participant_email,
@@ -270,6 +274,16 @@ async def web_join(body: WebJoinRequest, request: Request) -> dict:
     use_case = JoinWebSessionUseCase(request.app.state.repository)
     result = await use_case.execute(chat_id, topic_id, user_id, display_name)
 
+    # Backfill the current task's Jira description on first join so the
+    # voter sees the spec immediately. Helper mutates ``result.session``
+    # in place when it succeeds, so we don't need to re-read from repo
+    # for the broadcast / return payload. Best-effort; warm path is a
+    # no-op. Lazy import — see module-top NOTE about the import cycle.
+    from services.voting_service._http_shared import _ensure_current_task_description
+    await _ensure_current_task_description(
+        request, chat_id, topic_id, session=result.session,
+    )
+
     if result.added:
         channel = _channel_name(chat_id, topic_id)
         state = _build_web_session_state(result.session)
@@ -286,6 +300,13 @@ async def web_state(token: str, request: Request) -> dict:
     info = await _resolve_token(redis_client, token)
     chat_id: int = info["chat_id"]
     topic_id: Optional[int] = info["topic_id"]
+
+    # Backfill Jira description for the current task if it wasn't
+    # captured at import time. See the helper docstring; no-op once
+    # the field is populated, so safe to call on every read. Lazy
+    # import — see module-top NOTE about the import cycle.
+    from services.voting_service._http_shared import _ensure_current_task_description
+    await _ensure_current_task_description(request, chat_id, topic_id)
 
     repo = request.app.state.repository
     state = await _get_web_session_state(token, chat_id, topic_id, repo, redis_client)
