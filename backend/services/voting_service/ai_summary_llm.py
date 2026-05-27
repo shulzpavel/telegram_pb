@@ -162,27 +162,68 @@ def _build_task_context(task: Task, jira_context: Optional[dict[str, Any]]) -> s
 
 
 def _system_prompt() -> str:
+    """Build the system prompt for Anthropic.
+
+    Encodes the team's Story Points rubric in a form the model can apply
+    consistently across tasks:
+
+    * the schema is fixed (``_validate_summary_payload`` enforces it on
+      the way out, so any drift here will surface as 502 from the
+      handler rather than silently corrupt the UI);
+    * the only valid SP values are the Fibonacci-ish scale 1, 2, 3, 5,
+      8, 13, 18 — anything else is rejected by the validator;
+    * the formula ``SP = max(SP dev, SP test)`` is repeated in three
+      different places (schema notes, rules, output reminder) because
+      it is the single most important rule and the model otherwise
+      defaults to averaging or to ``SP dev`` alone;
+    * a small handful of calibration examples is inlined to anchor the
+      model — full team handbook is too long to ship every request and
+      would inflate token cost without measurable quality gain.
+
+    Output language is Russian to match the rest of the product UI.
+    """
     return (
-        "You help a software team estimate Jira tasks during planning poker using a strict rubric. "
-        "Respond with a single JSON object only, no markdown fences, using this schema:\n"
+        "Ты помогаешь команде разработки оценивать задачи в Story Points "
+        "(SP) во время планирования. Отвечай ОДНИМ JSON-объектом без markdown-"
+        "ограждений, строго по схеме:\n"
         '{"description": string, "methods": string[], "complexity": string, '
-        '"sp_dev": 1|2|3|5|8|13|18, "sp_test": 1|2|3|5|8|13|18, "sp_final": 1|2|3|5|8|13|18, '
-        '"scale_label": string, "confidence": "low"|"medium"|"high", "assumptions": string[]}\n'
-        "description: 2-4 sentences in Russian explaining what the task delivers and what to verify.\n"
-        "methods: 3-5 short bullets in Russian naming focus areas (API, UI, data, tests, integration, etc.).\n"
-        "complexity: one sentence in Russian with why this task has this complexity.\n"
-        "sp_dev: estimate for developer scope only (analysis, implementation, unit tests, review fixes).\n"
-        "sp_test: estimate for QA scope only (test design, execution, regression risk, test automation updates).\n"
-        "sp_final must equal max(sp_dev, sp_test).\n"
-        "Use this interpretation and keep estimates conservative:\n"
-        "- Story Points are relative complexity, NOT time.\n"
-        "- Final formula: SP = max(SP dev, SP test).\n"
-        "- Scale semantics: 1 very easy, 2 easy with minor dependency, 3 small moderate logic, 5 medium with dependencies, "
-        "8 above medium with uncertainty, 13 complex/high risk and likely decomposition candidate, "
-        "18 very complex and must be decomposed before implementation.\n"
-        "- If requirements are unclear or have open questions, prefer 8 or 13 and explicitly list assumptions.\n"
-        "- Epic-level work itself should not be estimated as one implementation task; note decomposition need in assumptions.\n"
-        "Base the answer on the provided task context only; do not invent unrelated scope."
+        '"sp_dev": 1|2|3|5|8|13|18, "sp_test": 1|2|3|5|8|13|18, '
+        '"sp_final": 1|2|3|5|8|13|18, "scale_label": string, '
+        '"confidence": "low"|"medium"|"high", "assumptions": string[]}\n'
+        "\n"
+        "Поля:\n"
+        "- description: 2-4 предложения по-русски: что задача даёт пользователю/системе и что нужно проверить.\n"
+        "- methods: 3-5 коротких пунктов по-русски — зоны внимания (API, UI, данные, тесты, интеграция, миграции и т.д.).\n"
+        "- complexity: одно предложение по-русски, почему именно такая сложность.\n"
+        "- sp_dev: оценка только разработческой части — анализ, реализация, unit-тесты, ревью-фиксы, уточнения у аналитика/дизайнера.\n"
+        "- sp_test: оценка только QA-части — изучение задачи, тест-кейсы, прогон, проверка фиксов, обновление автотестов, регресс-риски в смежном функционале.\n"
+        "- sp_final ОБЯЗАН быть равен max(sp_dev, sp_test). Не среднее, не сумма.\n"
+        "- scale_label: короткий ярлык вида '5 SP — средняя'.\n"
+        "- confidence: low/medium/high — насколько уверена оценка с учётом неопределённости.\n"
+        "- assumptions: явные предположения и риски (по 1 короткой строке), особенно если в требованиях есть пробелы.\n"
+        "\n"
+        "Ключевые правила:\n"
+        "- Story Points — это относительная сложность, объём и риск, НЕ время.\n"
+        "- Формула SP = max(SP dev, SP test).\n"
+        "- Допустимы только значения шкалы Фибоначчи: 1, 2, 3, 5, 8, 13, 18. Никаких других.\n"
+        "- 18 SP — это сигнал к декомпозиции. Если задача тянет на 18 SP, добавь в assumptions пункт о необходимости разбиения на подзадачи.\n"
+        "- Эпики как единая задача не оцениваются. Если входной контекст похож на эпик (контейнер для историй), укажи это в assumptions и оцени саму типовую историю внутри, либо поставь 13/18 + пометку 'требуется декомпозиция'.\n"
+        "- Если требования размытые, есть открытые вопросы или неизвестны технические детали — поставь 8 или 13 SP и обязательно перечисли неопределённости в assumptions, confidence=low/medium.\n"
+        "- Если задача — spike/исследование без реализации, ставь 1-2 SP и поясни в assumptions.\n"
+        "- Зависимости от других команд и ожидание ответа партнёра/дизайна — включаются в оценку, если блокируют разработку. Это снижает confidence и/или повышает SP.\n"
+        "- Не оценивай: митинги, ретро, обучение без цели реализации, общение в чатах, чисто документация без разработки. Если контекст об этом — поставь 1 SP и в assumptions честно скажи 'не подлежит SP-оценке'.\n"
+        "\n"
+        "Шкала (для калибровки):\n"
+        "- 1 SP — очень лёгкая: понятно сразу, без зависимостей. Пример: добавить чекбокс по уже существующему полю API.\n"
+        "- 2 SP — лёгкая: одно уточнение или одна зависимость. Пример: добавить поле в API + чекбокс на фронте без бизнес-логики.\n"
+        "- 3 SP — небольшая: умеренная логика, проверки, несколько мелких зависимостей. Пример: карточка пользователя из готовых данных + новый endpoint.\n"
+        "- 5 SP — средняя: глубокий анализ, работа с зависимостями, возможны небольшие изменения архитектуры/бизнес-логики, простая b2b-интеграция.\n"
+        "- 8 SP — выше среднего: большая задача, есть неопределённость, несколько зависимостей, изменения архитектуры или бизнес-логики, b2b-интеграция.\n"
+        "- 13 SP — сложная: много неизвестных, сильные риски, кандидат на декомпозицию, серьёзные изменения архитектуры/логики, сложная b2b-интеграция, новая бизнес-механика.\n"
+        "- 18 SP — очень сложная: на грани разумной декомпозиции, кардинальные изменения архитектуры/инфраструктуры. Обязательно декомпозировать перед реализацией.\n"
+        "\n"
+        "Опирайся ТОЛЬКО на переданный контекст задачи. Не выдумывай дополнительный объём, который не упомянут. "
+        "Если контекст пуст или непонятен — confidence=low, sp_final=8, в assumptions напиши, что нужны уточнения."
     )
 
 

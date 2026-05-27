@@ -18,7 +18,7 @@ import { Children, FormEvent, useCallback, useEffect, useMemo, useRef, useState,
 import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
 import { apiUrl } from "../../app/config";
 import TaskTextBlock from "../../components/TaskTextBlock";
-import { Alert, Badge, Button, ConfirmDialog, EmptyState, ScrollArea, Spinner, Surface, TextField, TextareaField, ThemeToggle, cn, useTheme, useToast, type ThemeMode } from "../../design-system";
+import { AiIntelligenceSurface, Alert, Badge, Button, ConfirmDialog, EmptyState, ScrollArea, Spinner, Surface, TextField, TextareaField, ThemeToggle, cn, useTheme, useToast, type ThemeMode } from "../../design-system";
 import { cmsAuthApi } from "../cms/api/cmsClient";
 import type { CmsPrincipal } from "../cms/api/cmsTypes";
 import CmsLoginPage from "../cms/auth/CmsLoginPage";
@@ -1570,7 +1570,10 @@ function AiSummaryPanel({ summary }: { summary: NonNullable<NonNullable<ManagerS
     typeof summary.sp_final === "number";
 
   return (
-    <Surface className="mb-4 border-blue/25 bg-blue/5 p-4">
+    <AiIntelligenceSurface
+      className="mb-4 p-4"
+      sparkleLabel="AI summary"
+    >
       <div className="flex flex-wrap items-center gap-2">
         <Badge tone="info">AI summary</Badge>
         <span className="text-xs text-ink3">Подсказка уже видна участникам</span>
@@ -1625,7 +1628,7 @@ function AiSummaryPanel({ summary }: { summary: NonNullable<NonNullable<ManagerS
           </ul>
         </div>
       ) : null}
-    </Surface>
+    </AiIntelligenceSurface>
   );
 }
 

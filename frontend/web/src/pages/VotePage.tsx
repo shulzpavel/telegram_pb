@@ -3,7 +3,7 @@ import { type MouseEvent, useEffect, useState } from "react";
 import ParticipantChip from "../components/ParticipantChip";
 import TaskTextBlock from "../components/TaskTextBlock";
 import VoteCard from "../components/VoteCard";
-import { Alert, Badge, BrandHomeLink, LoadingDots, ProgressBar, Surface, ThemeToggle } from "../design-system";
+import { AiIntelligenceSurface, Alert, Badge, BrandHomeLink, LoadingDots, ProgressBar, Surface, ThemeToggle } from "../design-system";
 import { ParticipantStatus, TaskInfo } from "../hooks/useSession";
 
 /**
@@ -110,7 +110,10 @@ export default function VotePage({ task, participants, onVote, error, onLogoClic
             </Surface>
 
             {task.ai_summary ? (
-              <Surface className="border-blue/25 bg-blue/5 p-4 md:p-5">
+              <AiIntelligenceSurface
+                className="p-4 md:p-5"
+                sparkleLabel="AI-подсказка"
+              >
                 <div className="mb-2 flex flex-wrap items-center gap-2">
                   <Badge tone="info">AI-подсказка</Badge>
                   <span className="text-2xs font-semibold uppercase tracking-wide text-ink3">для оценки</span>
@@ -133,7 +136,7 @@ export default function VotePage({ task, participants, onVote, error, onLogoClic
                     <p className="mt-1 text-xs leading-5 text-ink2">{task.ai_summary.complexity}</p>
                   </div>
                 </div>
-              </Surface>
+              </AiIntelligenceSurface>
             ) : null}
 
             {participants.length > 0 ? (
