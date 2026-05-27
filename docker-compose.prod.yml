@@ -11,6 +11,9 @@ services:
     environment:
       - APP_DOMAIN=${APP_DOMAIN}
       - ACME_EMAIL=${ACME_EMAIL}
+      # Space-separated VPN/office CIDRs, e.g. "203.0.113.10 198.51.100.0/24"
+      - SITE_ALLOWED_IPS=${SITE_ALLOWED_IPS}
+      - SITE_IP_WHITELIST_ENABLED=${SITE_IP_WHITELIST_ENABLED:-true}
     volumes:
       - ./infra/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy-data:/data

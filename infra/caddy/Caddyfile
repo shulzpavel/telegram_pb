@@ -1,9 +1,21 @@
 {
 	email {$ACME_EMAIL}
+	# Behind Cloudflare (or another reverse proxy) Caddy must trust forwarded
+	# client IPs; otherwise remote_ip would see Cloudflare egress, not VPN.
+	servers {
+		trusted_proxies static private_ranges cloudflare
+		client_ip_headers CF-Connecting-IP X-Forwarded-For
+	}
 }
 
 http://{$APP_DOMAIN} {
 	redir https://{$APP_DOMAIN}{uri} permanent
+}
+
+# Shared upstream routes for the React app and voting-service API.
+(secure_upstream) {
+	reverse_proxy /api/* voting-service:8002
+	reverse_proxy web:80
 }
 
 {$APP_DOMAIN} {
@@ -13,7 +25,24 @@ http://{$APP_DOMAIN} {
 		Strict-Transport-Security "max-age=31536000; includeSubDomains"
 	}
 
-	reverse_proxy /api/* voting-service:8002
-	reverse_proxy /health/* voting-service:8002
-	reverse_proxy web:80
+	# Health checks (deploy script, uptime probes) — not gated by VPN.
+	handle /health/* {
+		reverse_proxy voting-service:8002
+	}
+
+	# Set SITE_IP_WHITELIST_ENABLED=false in local/dev to disable the gate.
+	@sitewhitelist_off expression {$SITE_IP_WHITELIST_ENABLED:true} == "false"
+	@allowed remote_ip {$SITE_ALLOWED_IPS}
+
+	handle @sitewhitelist_off {
+		import secure_upstream
+	}
+
+	handle @allowed {
+		import secure_upstream
+	}
+
+	handle {
+		respond "Forbidden" 403
+	}
 }

@@ -19,6 +19,40 @@ Create an `A` record:
 - SSL/TLS mode: `Full (strict)`
 - Network: WebSockets `On`
 
+## Site IP allowlist (VPN)
+
+Production gates **the entire site** at Caddy. Only clients whose IP is listed in
+`SITE_ALLOWED_IPS` can open the UI, vote, or call the API. `/health/*` stays
+public so deploy checks and uptime probes still work.
+
+In `.env` set space-separated VPN/office egress addresses:
+
+```bash
+SITE_ALLOWED_IPS=203.0.113.10 198.51.100.0/24
+SITE_IP_WHITELIST_ENABLED=true
+```
+
+After changing the list, reload Caddy:
+
+```bash
+docker compose -f docker-compose.prod.yml --env-file .env up -d --force-recreate caddy
+```
+
+**Before enabling:** confirm your current public IP while on VPN:
+
+```bash
+curl -s https://ifconfig.me
+```
+
+Add that IP (or your VPN CIDR) to `SITE_ALLOWED_IPS` first, then recreate Caddy.
+Otherwise you will lock yourself out of the site (except `/health/`).
+
+To disable the gate (local experiments only): `SITE_IP_WHITELIST_ENABLED=false`.
+
+With Cloudflare **Proxied**, Caddy uses `CF-Connecting-IP` (see `trusted_proxies`
+in `infra/caddy/Caddyfile`) so the allowlist still matches the user's VPN IP,
+not Cloudflare's edge.
+
 ## First Deploy
 
 Install Docker Engine and Compose plugin using Docker's official apt repository.
