@@ -33,7 +33,7 @@ http://{$APP_DOMAIN} {
 	}
 
 	# Set SITE_IP_WHITELIST_ENABLED=false in local/dev to disable the gate.
-	@sitewhitelist_off expression {$SITE_IP_WHITELIST_ENABLED:true} == "false"
+	@sitewhitelist_off expression {$SITE_IP_WHITELIST_ENABLED:true} == false
 	@allowed remote_ip {$SITE_ALLOWED_IPS}
 
 	handle @sitewhitelist_off {
