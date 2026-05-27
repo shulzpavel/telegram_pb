@@ -111,6 +111,7 @@ def test_ensure_current_task_description_backfills_in_place() -> None:
         return JiraDescriptionFetch(
             text="Fetched body",
             adf={"type": "doc", "content": [{"type": "paragraph"}]},
+            html="<p>Fetched body</p>",
         )
 
     request = SimpleNamespace(
@@ -136,9 +137,10 @@ def test_ensure_current_task_description_backfills_in_place() -> None:
     assert changed is True
     assert task.description == "Fetched body"
     assert task.description_adf == {"type": "doc", "content": [{"type": "paragraph"}]}
+    assert task.description_html == "<p>Fetched body</p>"
     assert saved and saved[0] is session
 
-    # Warm path: second call must be a no-op (both fields already set).
+    # Warm path: second call must be a no-op (all fields already set).
     changed_again = asyncio.run(
         _http_shared._ensure_current_task_description(
             request, 1, None, session=session
@@ -165,10 +167,12 @@ def test_task_description_round_trips_through_serialization() -> None:
         summary="Build",
         description="Spec body",
         description_adf=adf,
+        description_html="<p>Spec body</p>",
     )
     loaded = Task.from_dict(task.to_dict())
     assert loaded.description == "Spec body"
     assert loaded.description_adf == adf
+    assert loaded.description_html == "<p>Spec body</p>"
 
     # Legacy payloads (no description fields) must still load cleanly.
     legacy = Task.from_dict({"jira_key": "OLD-1", "summary": "Legacy"})

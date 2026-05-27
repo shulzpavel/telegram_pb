@@ -3,33 +3,23 @@ import { Badge, Surface } from "../design-system";
 import JiraAdfRenderer, { type AdfNode } from "./JiraAdfRenderer";
 
 interface JiraDescriptionPanelProps {
-  /** Plain-text fallback captured at import time. Used when ADF is
-   *  missing or malformed. */
+  /** Plain-text fallback captured at import time. */
   description?: string | null;
-  /** Raw ADF payload (typed loosely because it crosses the JSON wire
-   *  unvalidated). When present and well-formed, takes precedence over
-   *  the plain-text fallback. */
+  /** Raw ADF payload when Jira returned API v3 ADF. */
   descriptionAdf?: unknown;
+  /** Sanitized HTML from Jira ``renderedFields`` — preferred when present. */
+  descriptionHtml?: string | null;
   jiraKey?: string | null;
 }
 
 /**
- * Renders the Jira issue body next to the voting controls so the team
- * doesn't have to context-switch to Jira mid-grooming.
+ * Renders the Jira issue body next to the voting controls.
  *
- * Long descriptions are collapsed to a fixed pixel height (not a line
- * count — works for both ADF tables/headings and plain wrapped text)
- * with a soft fade and a Развернуть/Свернуть toggle. The collapse
- * threshold is height-driven, measured after mount, so we don't have
- * to guess "is 240 chars long?" — a 1-line description with a giant
- * embedded table still folds correctly.
- *
- * Prefers the ADF renderer over plain text whenever the backend ships a
- * structured payload; falls back to ``whitespace-pre-wrap`` text only
- * when ADF is missing (manual tasks, legacy sessions, malformed input).
+ * Priority: sanitized HTML (matches Jira UI) → ADF → plain text.
+ * Long content collapses by measured height with Развернуть/Свернуть.
  */
-const COLLAPSED_HEIGHT_PX = 192; // ~ md:6 lines of leading-6 text-sm
-const COLLAPSE_TRIGGER_PX = 240; // only show the toggle if content exceeds this
+const COLLAPSED_HEIGHT_PX = 192;
+const COLLAPSE_TRIGGER_PX = 240;
 
 function isAdfDoc(value: unknown): value is AdfNode {
   return (
@@ -42,25 +32,22 @@ function isAdfDoc(value: unknown): value is AdfNode {
 export default function JiraDescriptionPanel({
   description,
   descriptionAdf,
+  descriptionHtml,
   jiraKey,
 }: JiraDescriptionPanelProps) {
-  const adf = isAdfDoc(descriptionAdf) ? descriptionAdf : null;
-  const plain = (description ?? "").trim();
-  // Hide the entire panel only when there's truly nothing to show.
-  if (!adf && !plain) return null;
+  const html = (descriptionHtml ?? "").trim();
+  const adf = !html && isAdfDoc(descriptionAdf) ? descriptionAdf : null;
+  const plain = !html && !adf ? (description ?? "").trim() : "";
+  if (!html && !adf && !plain) return null;
 
   const [expanded, setExpanded] = useState(false);
   const [needsCollapse, setNeedsCollapse] = useState(false);
   const contentRef = useRef<HTMLDivElement | null>(null);
 
-  // Measure rendered height once (and on content swap) to decide whether
-  // the collapse toggle is needed. Pure character-count heuristics break
-  // for ADF where one node can render a multi-row table.
   useEffect(() => {
     if (!contentRef.current) return;
-    const measured = contentRef.current.scrollHeight;
-    setNeedsCollapse(measured > COLLAPSE_TRIGGER_PX);
-  }, [adf, plain]);
+    setNeedsCollapse(contentRef.current.scrollHeight > COLLAPSE_TRIGGER_PX);
+  }, [html, adf, plain]);
 
   return (
     <Surface className="p-4 md:p-5">
@@ -81,7 +68,13 @@ export default function JiraDescriptionPanel({
               : undefined
           }
         >
-          {adf ? (
+          {html ? (
+            <div
+              className="jira-html-content text-sm leading-6 text-ink2"
+              // HTML is sanitized on the backend before storage.
+              dangerouslySetInnerHTML={{ __html: html }}
+            />
+          ) : adf ? (
             <JiraAdfRenderer doc={adf} />
           ) : (
             <p className="whitespace-pre-wrap break-words text-sm leading-6 text-ink2">
