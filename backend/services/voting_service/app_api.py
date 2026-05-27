@@ -780,6 +780,30 @@ async def app_preview_jira_tasks(
     return _jira_preview_payload(issues, _existing_jira_keys(session))
 
 
+@app_router.get("/app/debug/jira-description/{issue_key}")
+async def app_debug_jira_description(
+    issue_key: str,
+    request: Request,
+    _: CmsPrincipal = Depends(_manager_dep),
+) -> dict:
+    """Diagnostic endpoint: ask jira-service for the description of a key.
+
+    Lets operators verify in one curl whether the issue actually carries
+    a non-empty description, without spinning up an import. Returns the
+    raw length and a short preview so it's also safe to share in chat.
+    Bounded by manager auth — no anonymous use.
+    """
+    description = await _fetch_jira_description(request.app.state.http_session, issue_key)
+    if not description:
+        return {"key": issue_key.strip().upper(), "found": False}
+    return {
+        "key": issue_key.strip().upper(),
+        "found": True,
+        "length": len(description),
+        "preview": description[:300],
+    }
+
+
 @app_router.post("/app/sessions/{chat_id}/tasks/jira-import")
 async def app_import_jira_tasks(
     chat_id: int,
@@ -814,6 +838,16 @@ async def app_import_jira_tasks(
             ),
         )
     ) if keys_to_fetch else {}
+    # One summary line per import call: how many keys we tried and how
+    # many actually got a non-empty description. If the number is 0 the
+    # ratio gives operators an immediate "Jira returns empty bodies"
+    # signal without grepping per-key warnings.
+    logger.info(
+        "jira import description fetch chat=%s tried=%d filled=%d",
+        chat_id,
+        len(keys_to_fetch),
+        sum(1 for v in descriptions.values() if v),
+    )
 
     def mutate(session: Session) -> TaskMutationResult:
         if body.expected_version is not None and body.expected_version != session.tasks_version:

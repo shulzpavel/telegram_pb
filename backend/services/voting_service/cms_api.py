@@ -558,6 +558,13 @@ async def cms_import_jira_tasks(
                 ),
             )
         ) if keys_to_fetch else {}
+        # Same import-side log line as the manager path — see app_api.
+        logger.info(
+            "jira import description fetch (cms) chat=%s tried=%d filled=%d",
+            chat_id,
+            len(keys_to_fetch),
+            sum(1 for v in descriptions.values() if v),
+        )
 
         def mutate(session: Session) -> TaskMutationResult:
             if body.expected_version is not None and body.expected_version != session.tasks_version:

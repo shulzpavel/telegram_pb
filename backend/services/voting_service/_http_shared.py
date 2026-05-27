@@ -370,6 +370,10 @@ async def _ensure_current_task_description(
     task = session.current_task
     if task is None or not task.jira_key or task.description:
         return False
+    logger.info(
+        "jira description backfill start chat=%s topic=%s task_id=%s key=%s",
+        chat_id, topic_id, task.task_id, task.jira_key,
+    )
     description = await _fetch_jira_description(http_session, task.jira_key)
     if not description:
         return False
@@ -377,8 +381,13 @@ async def _ensure_current_task_description(
     task.touch()
     try:
         await repo.save_session(session)
-    except Exception:  # noqa: BLE001 — write failure is non-fatal here too.
+    except Exception as exc:  # noqa: BLE001 — write failure is non-fatal here too.
+        logger.warning("jira description backfill save failed key=%s err=%r", task.jira_key, exc)
         return False
+    logger.info(
+        "jira description backfill ok chat=%s task_id=%s key=%s len=%d",
+        chat_id, task.task_id, task.jira_key, len(description),
+    )
     return True
 
 
@@ -393,6 +402,11 @@ async def _fetch_jira_description(
     swallowed and surfaced as ``None`` — a missing description is a
     cosmetic loss, not an import-blocking error. The jira-service
     in-memory cache de-duplicates these calls across rapid re-imports.
+
+    Logs every outcome (success / non-200 / network error / empty body)
+    so operators can diagnose "why isn't the description showing up?"
+    from the voting-service logs without redeploying with extra prints.
+    Log volume is bounded — one line per fetched key, no retries.
     """
     key = (issue_key or "").strip().upper()
     if not key:
@@ -405,17 +419,29 @@ async def _fetch_jira_description(
     try:
         async with http_session.get(url, timeout=timeout) as response:
             if response.status != 200:
+                body_snippet = (await response.text())[:200]
+                logger.warning(
+                    "jira description fetch non-200 key=%s status=%s body=%r",
+                    key, response.status, body_snippet,
+                )
                 return None
             data = await response.json()
-    except Exception:  # noqa: BLE001 — see docstring: missing description is non-fatal.
+    except Exception as exc:  # noqa: BLE001 — see docstring: missing description is non-fatal.
+        logger.warning("jira description fetch failed key=%s err=%r url=%s", key, exc, url)
         return None
     if not isinstance(data, dict):
+        logger.warning("jira description fetch unexpected body key=%s type=%s", key, type(data).__name__)
         return None
     raw = data.get("description")
     if not isinstance(raw, str):
+        logger.info("jira description fetch missing/non-string key=%s value=%r", key, raw)
         return None
     cleaned = raw.strip()
-    return cleaned or None
+    if not cleaned:
+        logger.info("jira description fetch empty body key=%s", key)
+        return None
+    logger.info("jira description fetched key=%s len=%d", key, len(cleaned))
+    return cleaned
 
 
 def _jira_preview_payload(issues: list[dict], existing_keys: set[str]) -> dict:
