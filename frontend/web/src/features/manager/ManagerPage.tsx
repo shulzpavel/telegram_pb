@@ -18,11 +18,11 @@ import { Children, FormEvent, useCallback, useEffect, useMemo, useRef, useState,
 import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
 import { apiUrl } from "../../app/config";
 import TaskTextBlock from "../../components/TaskTextBlock";
-import { AiIntelligenceSurface, Alert, Badge, Button, ConfirmDialog, EmptyState, ScrollArea, Spinner, Surface, TextField, TextareaField, ThemeToggle, cn, useTheme, useToast, type ThemeMode } from "../../design-system";
+import { AiIntelligenceSurface, AiSparkleButton, Alert, Badge, Button, ConfirmDialog, EmptyState, ScrollArea, Spinner, Surface, TextField, TextareaField, ThemeToggle, cn, useTheme, useToast, type ThemeMode } from "../../design-system";
 import { cmsAuthApi } from "../cms/api/cmsClient";
 import type { CmsPrincipal } from "../cms/api/cmsTypes";
 import CmsLoginPage from "../cms/auth/CmsLoginPage";
-import { normalizeOptionalNumber, normalizeOptionalText, parseBulkTasks } from "../cms/sessions/taskInput";
+import { normalizeOptionalNumber, normalizeOptionalText } from "../cms/sessions/taskInput";
 import { ManagerTopBar } from "./ManagerTopBar";
 import { ManagerBottomDock } from "./ManagerBottomDock";
 import { SessionTabsBar } from "./SessionTabsBar";
@@ -31,8 +31,8 @@ import type { CompletedTask, JiraPreview, ManagerSession, ManagerSessionRef, Nam
 
 const PHASE_META: Record<string, { label: string; tone: "info" | "success" | "warning" | "danger" | "neutral"; description: string }> = {
   waiting: { label: "Готовы к старту", tone: "warning",  description: "Очередь задач сформирована — ждём команду и жмём Start." },
-  voting:  { label: "Идёт голосование", tone: "info",     description: "Карты розданы. Голоса видны только вам до Reveal." },
-  results: { label: "Reveal — обсуждение", tone: "success", description: "Голоса раскрыты. Обсудите расхождения и зафиксируйте SP." },
+  voting:  { label: "Идёт голосование", tone: "info",     description: "Карты розданы. Голоса видны всем в лайве." },
+  results: { label: "Все проголосовали",  tone: "success", description: "Обсудите расхождения и зафиксируйте Story Points." },
   complete:{ label: "Сессия завершена", tone: "neutral", description: "Все задачи отыграны. Откройте отчёт или добавьте ещё задач." },
 };
 
@@ -330,10 +330,10 @@ function ManagerLogin({ onLogin }: { onLogin: (principal: CmsPrincipal) => void 
         <div>
           <p className="text-sm font-semibold text-blue">Planning Poker</p>
           <h1 className="mt-5 max-w-xl text-4xl font-bold leading-tight text-ink">Рабочая комната для фасилитации оценки</h1>
-          <p className="mt-4 max-w-lg text-base leading-7 text-ink3">Создайте сессию, соберите участников, подготовьте backlog и управляйте reveal/next без перехода в CMS.</p>
+          <p className="mt-4 max-w-lg text-base leading-7 text-ink3">Создайте сессию, соберите участников, подготовьте backlog и управляйте голосованием без перехода в CMS.</p>
         </div>
         <div className="grid max-w-xl grid-cols-3 gap-3 text-sm">
-          {["Lobby", "Queue", "Reveal"].map((item) => (
+          {["Lobby", "Queue", "Live votes"].map((item) => (
             <div key={item} className="rounded-lg border border-line bg-line2 px-3 py-3 font-semibold text-ink2">{item}</div>
           ))}
         </div>
@@ -884,7 +884,6 @@ function ManagerWorkspace({
         busy={busy}
         canStart={session.tasks_queue_count > 0 && phase === "waiting"}
         onStart={() => applyAction("start", () => managerApi.start(sessionRef.chatId))}
-        onReveal={() => applyAction("reveal", () => managerApi.reveal(sessionRef.chatId))}
         onGenerateAiSummary={() => applyAction("ai-summary", () => managerApi.generateAiSummary(sessionRef.chatId))}
         onNext={() => applyAction("next", () => managerApi.next(sessionRef.chatId))}
         onSkip={() => applyAction("skip", () => managerApi.skip(sessionRef.chatId))}
@@ -1344,7 +1343,6 @@ function ControlRoom({
   busy,
   canStart,
   onStart,
-  onReveal,
   onGenerateAiSummary,
   onNext,
   onSkip,
@@ -1368,7 +1366,6 @@ function ControlRoom({
   busy: string | null;
   canStart: boolean;
   onStart: () => void;
-  onReveal: () => void;
   onGenerateAiSummary: () => void;
   onNext: () => void;
   onSkip: () => void;
@@ -1380,9 +1377,13 @@ function ControlRoom({
   const totalVoters = participants.length;
   const progress = totalVoters > 0 ? votedCount / totalVoters : 0;
 
-  // After reveal we trust `results`; before reveal, the manager-only `liveVotes`
-  // is the source of truth (participants only see vote/not-voted booleans).
+  // Votes are live for everyone now (no manager-only Reveal stage). `results`
+  // arrives via the server once the auto-reveal threshold (all voted) flips
+  // `phase` to "results"; until then `liveVotes` (manager-only enrichment of
+  // `current_task_votes`) is the freshest source of per-name values.
   const revealedVotes = phase === "results" ? (results ?? []) : [];
+
+  const showFinalEstimate = (phase === "voting" || phase === "results") && task !== null;
 
   return (
     <Surface className="relative isolate min-h-0 p-4 md:p-6">
@@ -1444,28 +1445,15 @@ function ControlRoom({
                 </Button>
               ) : null}
               {phase === "voting" ? (
-                <>
-                  <Button
-                    variant="primary"
-                    size="lg"
-                    disabled={!task || busy !== null}
-                    loading={busy === "reveal"}
-                    onClick={onReveal}
-                    title={!task ? "Текущей задачи нет — добавьте задачи в очередь" : undefined}
-                  >
-                    👁 Reveal — раскрыть голоса
-                  </Button>
-                  <Button
-                    variant={task?.ai_summary ? "secondary" : "success"}
-                    size="lg"
-                    disabled={!task || busy !== null}
-                    loading={busy === "ai-summary"}
-                    onClick={onGenerateAiSummary}
-                    title={!task ? "Сначала нужна текущая задача" : "Сгенерировать подсказку для оценки задачи"}
-                  >
-                    {task?.ai_summary ? "↻ Обновить AI summary" : "Generate AI summary"}
-                  </Button>
-                </>
+                <AiSparkleButton
+                  size="lg"
+                  disabled={!task || busy !== null}
+                  loading={busy === "ai-summary"}
+                  onClick={onGenerateAiSummary}
+                  title={!task ? "Сначала нужна текущая задача" : "Сгенерировать подсказку для оценки задачи"}
+                >
+                  {task?.ai_summary ? "Обновить AI подсказку" : "Сгенерировать AI подсказку"}
+                </AiSparkleButton>
               ) : null}
               {(phase === "voting" || phase === "results") ? (
                 <>
@@ -1504,7 +1492,20 @@ function ControlRoom({
         );
       })()}
 
-      {/* LIVE VOTING / RESULTS / FINAL SP ------------------------------- */}
+      {/* FINAL ESTIMATE — promoted out of ResultsPanel and parked right
+          under the action row. Visible the moment voting starts so the
+          manager can lock in an SP without scrolling past the live
+          distribution / voter roster. Hidden in waiting/complete phases
+          where there is nothing to estimate. */}
+      {showFinalEstimate ? (
+        <FinalEstimateBlock
+          currentSp={task?.story_points ?? null}
+          busy={busy}
+          onFinalEstimate={onFinalEstimate}
+        />
+      ) : null}
+
+      {/* LIVE VOTING / RESULTS ------------------------------------------ */}
       <div className="mt-6">
         {task?.ai_summary ? <AiSummaryPanel summary={task.ai_summary} /> : null}
         {phase === "waiting" ? (
@@ -1515,12 +1516,7 @@ function ControlRoom({
         ) : phase === "voting" ? (
           <LiveVotesPanel participants={participants} liveVotes={liveVotes} />
         ) : phase === "results" ? (
-          <ResultsPanel
-            revealedVotes={revealedVotes}
-            currentSp={task?.story_points ?? null}
-            busy={busy}
-            onFinalEstimate={onFinalEstimate}
-          />
+          <ResultsPanel revealedVotes={revealedVotes} />
         ) : (
           <EmptyState
             title="Сессия завершена"
@@ -1678,17 +1674,7 @@ function LiveVotesPanel({
   );
 }
 
-function ResultsPanel({
-  revealedVotes,
-  currentSp,
-  busy,
-  onFinalEstimate,
-}: {
-  revealedVotes: NamedVote[];
-  currentSp: number | null;
-  busy: string | null;
-  onFinalEstimate: (value: number) => void;
-}) {
+function ResultsPanel({ revealedVotes }: { revealedVotes: NamedVote[] }) {
   const distribution = useMemo(() => {
     const counts: Record<string, number> = {};
     for (const vote of revealedVotes) counts[vote.value] = (counts[vote.value] ?? 0) + 1;
@@ -1697,51 +1683,70 @@ function ResultsPanel({
   const max = distribution.reduce((acc, [, count]) => Math.max(acc, count), 1);
 
   return (
-    <div className="space-y-5">
-      <div className="rounded-lg border border-line bg-line2 p-4">
-        <p className="text-xs font-semibold uppercase tracking-wide text-ink3">Распределение голосов</p>
-        {distribution.length === 0 ? (
-          <p className="mt-2 text-sm text-ink3">Никто не проголосовал.</p>
-        ) : (
-          <div className="mt-3 space-y-2">
-            {distribution.map(([value, count]) => (
-              <div key={value} className="flex items-center gap-3">
-                <span className="w-10 shrink-0 rounded-md bg-blue px-2 py-1 text-center text-sm font-bold tabular-nums text-white">{value}</span>
-                <div className="h-2 flex-1 overflow-hidden rounded-full bg-line">
-                  <div className="h-full rounded-full bg-blue" style={{ width: `${(count / max) * 100}%` }} />
-                </div>
-                <span className="w-12 shrink-0 text-right text-sm font-semibold tabular-nums text-ink2">×{count}</span>
+    <div className="rounded-lg border border-line bg-line2 p-4">
+      <p className="text-xs font-semibold uppercase tracking-wide text-ink3">Распределение голосов</p>
+      {distribution.length === 0 ? (
+        <p className="mt-2 text-sm text-ink3">Никто не проголосовал.</p>
+      ) : (
+        <div className="mt-3 space-y-2">
+          {distribution.map(([value, count]) => (
+            <div key={value} className="flex items-center gap-3">
+              <span className="w-10 shrink-0 rounded-md bg-blue px-2 py-1 text-center text-sm font-bold tabular-nums text-white">{value}</span>
+              <div className="h-2 flex-1 overflow-hidden rounded-full bg-line">
+                <div className="h-full rounded-full bg-blue" style={{ width: `${(count / max) * 100}%` }} />
               </div>
-            ))}
-          </div>
-        )}
-        {revealedVotes.length > 0 ? (
-          <div className="mt-4 flex flex-wrap gap-1.5">
-            {revealedVotes.map((vote, idx) => (
-              <span key={`${vote.name}-${idx}`} className="rounded-md border border-line bg-surface px-2 py-1 text-xs font-semibold text-ink2">
-                {vote.name} → <span className="text-blue">{vote.value}</span>
-              </span>
-            ))}
-          </div>
-        ) : null}
-      </div>
-
-      <div className="rounded-lg border border-line bg-surface p-4">
-        <p className="text-sm font-bold text-ink">Зафиксируйте итоговую оценку</p>
-        <p className="mt-1 text-xs text-ink3">После выбора SP мы автоматически перейдём к следующей задаче.</p>
-        <div className="mt-3 flex flex-wrap gap-2">
-          {ESTIMATE_VALUES.map((value) => (
-            <Button
-              key={value}
-              size="md"
-              variant={currentSp === value ? "primary" : "secondary"}
-              disabled={busy !== null}
-              onClick={() => onFinalEstimate(value)}
-            >
-              {value}
-            </Button>
+              <span className="w-12 shrink-0 text-right text-sm font-semibold tabular-nums text-ink2">×{count}</span>
+            </div>
           ))}
         </div>
+      )}
+      {revealedVotes.length > 0 ? (
+        <div className="mt-4 flex flex-wrap gap-1.5">
+          {revealedVotes.map((vote, idx) => (
+            <span key={`${vote.name}-${idx}`} className="rounded-md border border-line bg-surface px-2 py-1 text-xs font-semibold text-ink2">
+              {vote.name} → <span className="text-blue">{vote.value}</span>
+            </span>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * Top-of-card SP picker. Used to live inside `ResultsPanel` (only
+ * visible after all voters had cast their vote); product moved it
+ * directly under the Skip/Next action row so the facilitator can lock
+ * in an estimate at any moment without scrolling past the live
+ * distribution.
+ */
+function FinalEstimateBlock({
+  currentSp,
+  busy,
+  onFinalEstimate,
+}: {
+  currentSp: number | null;
+  busy: string | null;
+  onFinalEstimate: (value: number) => void;
+}) {
+  return (
+    <div className="mt-4 rounded-lg border border-line bg-surface p-4">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <p className="text-sm font-bold text-ink">Зафиксируйте итоговую оценку</p>
+        <p className="text-xs text-ink3">После выбора SP перейдём к следующей задаче.</p>
+      </div>
+      <div className="mt-3 flex flex-wrap gap-2">
+        {ESTIMATE_VALUES.map((value) => (
+          <Button
+            key={value}
+            size="md"
+            variant={currentSp === value ? "primary" : "secondary"}
+            disabled={busy !== null}
+            onClick={() => onFinalEstimate(value)}
+          >
+            {value}
+          </Button>
+        ))}
       </div>
     </div>
   );
@@ -1832,11 +1837,10 @@ function BacklogWizard({
   completedCount: number;
   onAction: (label: string, action: () => Promise<ManagerSession | TaskMutation>) => Promise<void>;
 }) {
-  type Tab = "jira" | "manual" | "bulk";
+  type Tab = "jira" | "manual";
   const [tab, setTab] = useState<Tab>("jira");
   const tabHints: Record<Tab, string> = {
     manual: "Добавьте одну задачу — название обязательно, Jira-ключ и URL по желанию.",
-    bulk: "Вставьте список одной колонкой — каждая строка станет отдельной задачей в очереди.",
     jira: "Введите JQL и выберите задачи из результата. Появятся в очереди с ключом и ссылкой.",
   };
   return (
@@ -1874,7 +1878,7 @@ function BacklogWizard({
       {error ? <Alert tone="danger" className="mt-6">{error}</Alert> : null}
 
       <div className="mt-7 flex border-b border-line">
-        {(["jira", "manual", "bulk"] as Tab[]).map((value) => (
+        {(["jira", "manual"] as Tab[]).map((value) => (
           <button
             key={value}
             type="button"
@@ -1888,7 +1892,7 @@ function BacklogWizard({
                 : "border-transparent text-ink3 hover:text-ink",
             )}
           >
-            {value === "jira" ? "Jira import" : value === "manual" ? "Manual" : "Bulk paste"}
+            {value === "jira" ? "Jira import" : "Manual"}
           </button>
         ))}
       </div>
@@ -1900,10 +1904,8 @@ function BacklogWizard({
       <div className="mt-4">
         {tab === "jira" ? (
           <WizardJiraForm chatId={chatId} tasksVersion={tasksVersion} busy={busy} onAction={onAction} />
-        ) : tab === "manual" ? (
-          <WizardManualForm chatId={chatId} tasksVersion={tasksVersion} busy={busy} onAction={onAction} />
         ) : (
-          <WizardBulkForm chatId={chatId} tasksVersion={tasksVersion} busy={busy} onAction={onAction} />
+          <WizardManualForm chatId={chatId} tasksVersion={tasksVersion} busy={busy} onAction={onAction} />
         )}
       </div>
 
@@ -1925,9 +1927,9 @@ function BacklogWizard({
  *
  * On viewports < md the wrapper attaches itself to the bottom of the
  * visual viewport so the primary action stays reachable while the user
- * scrolls long forms (Bulk paste, Jira preview). The negative margins
- * cancel `Surface` padding so the footer visually extends to the card
- * edges, and `pb-safe-4` reserves space for the iOS home indicator.
+ * scrolls long forms (Jira preview). The negative margins cancel
+ * `Surface` padding so the footer visually extends to the card edges,
+ * and `pb-safe-4` reserves space for the iOS home indicator.
  *
  * On md+ the wrapper degrades to a plain block — desktop layouts have
  * room for the CTA inline, no need to overlay it on top of the form.
@@ -1979,42 +1981,6 @@ function WizardManualForm({
           })}
         >
           Добавить и продолжить
-        </Button>
-      </MobileStickyFormFooter>
-    </Surface>
-  );
-}
-
-function WizardBulkForm({
-  chatId,
-  tasksVersion,
-  busy,
-  onAction,
-}: {
-  chatId: number;
-  tasksVersion: number;
-  busy: string | null;
-  onAction: (label: string, action: () => Promise<ManagerSession | TaskMutation>) => Promise<void>;
-}) {
-  const [bulk, setBulk] = useState("");
-  const bulkTasks = useMemo(() => parseBulkTasks(bulk), [bulk]);
-  return (
-    <Surface className="p-5">
-      <p className="text-sm font-semibold text-ink">Множество задач</p>
-      <p className="mt-1 text-xs text-ink3">Одна задача в строку. Формат: <code>JIRA-123 Резюме</code> или просто <code>Резюме</code>.</p>
-      <TextareaField className="mt-4" label="Список задач" value={bulk} onChange={(event) => setBulk(event.target.value)} rows={8} />
-      <MobileStickyFormFooter>
-        <Button
-          variant="primary"
-          className="w-full"
-          disabled={bulkTasks.length === 0 || busy !== null}
-          onClick={() => onAction("bulk", async () => {
-            const result = await managerApi.addTasksBulk(chatId, bulkTasks, tasksVersion);
-            setBulk("");
-            return result;
-          })}
-        >
-          Добавить {bulkTasks.length || ""} задач
         </Button>
       </MobileStickyFormFooter>
     </Surface>
@@ -2170,12 +2136,9 @@ function TaskAddPanel({
   const [summary, setSummary] = useState("");
   const [jiraKey, setJiraKey] = useState("");
   const [storyPoints, setStoryPoints] = useState("");
-  const [bulk, setBulk] = useState("");
   const [jql, setJql] = useState("");
   const [preview, setPreview] = useState<JiraPreview | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
-
-  const bulkTasks = useMemo(() => parseBulkTasks(bulk), [bulk]);
 
   async function previewJira() {
     const data = await managerApi.jiraPreview(chatId, jql, 500);
@@ -2282,22 +2245,6 @@ function TaskAddPanel({
             Add task
           </Button>
         </div>
-      </Surface>
-
-      <Surface className="p-4">
-        <h2 className="text-sm font-bold text-ink">Bulk paste</h2>
-        <TextareaField className="mt-3" label="One task per line" value={bulk} onChange={(event) => setBulk(event.target.value)} />
-        <Button
-          className="mt-3 w-full"
-          disabled={bulkTasks.length === 0 || busy !== null}
-          onClick={() => onAction("bulk", async () => {
-            const result = await managerApi.addTasksBulk(chatId, bulkTasks, tasksVersion);
-            setBulk("");
-            return result;
-          })}
-        >
-          Add {bulkTasks.length || ""} tasks
-        </Button>
       </Surface>
 
     </div>

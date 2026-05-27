@@ -132,6 +132,20 @@ def _validate_summary_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def _build_task_context(task: Task, jira_context: Optional[dict[str, Any]]) -> str:
+    """Pack the task context Anthropic sees.
+
+    The prompt uses both the task summary (title) and — when available —
+    the Jira description body. Order of preference for the description:
+
+    1. ``jira_context["description"]`` — freshest, comes from a live
+       jira-service call (handles edits made after import).
+    2. ``task.description`` — captured at Jira import time. Pre-fetched
+       and stored on the Task so subsequent AI generations don't need to
+       hit jira-service, and so the voter UI can show the same body.
+
+    Manual tasks have neither and the prompt happily works off the
+    summary alone.
+    """
     lines = [
         f"summary: {task.summary.strip()}",
         f"source: {task.source}",
@@ -143,6 +157,7 @@ def _build_task_context(task: Task, jira_context: Optional[dict[str, Any]]) -> s
     if task.story_points is not None:
         lines.append(f"story_points_in_session: {task.story_points}")
 
+    description_from_context = ""
     if jira_context:
         for key in ("key", "summary", "url", "issue_type", "story_points"):
             value = jira_context.get(key)
@@ -154,9 +169,15 @@ def _build_task_context(task: Task, jira_context: Optional[dict[str, Any]]) -> s
         components = jira_context.get("components") or []
         if components:
             lines.append(f"jira_components: {', '.join(str(item) for item in components)}")
-        description = str(jira_context.get("description") or "").strip()
-        if description:
-            lines.append(f"jira_description:\n{description}")
+        description_from_context = str(jira_context.get("description") or "").strip()
+        if description_from_context:
+            lines.append(f"jira_description:\n{description_from_context}")
+
+    # Fallback to the description we captured at import time when the
+    # live jira-service call didn't return one (offline jira, demo mode,
+    # cache miss, …). Avoids dropping the planning spec from the prompt.
+    if not description_from_context and task.description:
+        lines.append(f"jira_description:\n{task.description.strip()}")
 
     return truncate_text("\n".join(lines), _max_context_chars())
 

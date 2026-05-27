@@ -37,7 +37,7 @@ A manager can:
 - log in with the same secure cookie auth used by CMS;
 - create a session and copy the participant invite link;
 - see lobby participants and vote progress;
-- add one manual task or bulk paste many tasks;
+- add tasks manually one by one;
 - preview and import Jira tasks;
 - edit, delete, and move backlog tasks;
 - start voting;

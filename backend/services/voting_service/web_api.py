@@ -124,6 +124,10 @@ def _build_web_session_state(session) -> dict:
             "jira_key": task.jira_key,
             "story_points": task.story_points,
             "ai_summary": task.ai_summary,
+            # Captured at Jira import time. Voter UI renders it as a
+            # collapsible spec block; ``None`` for manual tasks or when
+            # the import-time fetch failed (best-effort).
+            "description": task.description,
             "index": session.current_task_index + 1,
             "total": len(session.tasks_queue),
         }
@@ -143,21 +147,36 @@ def _build_web_session_state(session) -> dict:
     else:
         phase = "waiting"
 
-    # Participants: show name + voted status
+    # Participants: name + voted bool + (NEW) live vote value.
+    #
+    # Previously voters only saw who had/hadn't voted — actual values were
+    # hidden until the manager pressed Reveal. Product decision: kill the
+    # Reveal stage entirely and show live values to everyone, manager and
+    # voter alike. `value` is `None` for participants who haven't voted yet
+    # and `phase` still flips to "results" once everyone has voted so the
+    # FinalEstimate UI lights up, but the votes themselves are no longer
+    # gated.
     participants = []
     if task:
         voted_ids = set(task.votes.keys())
         for uid, p in session.participants.items():
             if session.can_vote(uid):
-                participants.append({"name": p.name, "voted": uid in voted_ids})
+                participants.append({
+                    "name": p.name,
+                    "voted": uid in voted_ids,
+                    "value": task.votes.get(uid) if uid in voted_ids else None,
+                })
     else:
         for uid, p in session.participants.items():
             if session.can_vote(uid):
-                participants.append({"name": p.name, "voted": False})
+                participants.append({"name": p.name, "voted": False, "value": None})
 
-    # Results only when phase == results
+    # Results: always include the per-name vote breakdown when there's an
+    # active task. Frontend used to only render this in `phase == results`,
+    # but since votes are live now we expose them as soon as they arrive.
+    # The `phase` field still drives FinalEstimate visibility.
     results = None
-    if phase == "results" and task:
+    if task:
         results = [
             {"name": session.participants[uid].name, "value": val}
             for uid, val in task.votes.items()
@@ -339,9 +358,13 @@ async def web_vote(body: WebVoteRequest, request: Request) -> dict:
             },
         })
     else:
+        # Live-votes mode: broadcast the actual value too, not just "x voted".
+        # Was previously gated behind manager Reveal — see the Reveal removal
+        # cleanup in this commit.
         payload = json.dumps({
             "type": "vote_cast",
             "voter_name": voter_name,
+            "voter_value": body.value,
             "voted_count": voted_count,
             "total_voters": total_voters,
         })

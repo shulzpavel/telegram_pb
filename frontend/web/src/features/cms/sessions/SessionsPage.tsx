@@ -30,7 +30,7 @@ import type {
   TaskItem,
   WebParticipantItem,
 } from "../api/cmsTypes";
-import { Alert, Badge, Button, ConfirmDialog, EmptyState, ScrollArea, SelectField, Surface, TextareaField, TextField } from "../../../design-system";
+import { Alert, Badge, Button, ConfirmDialog, EmptyState, ScrollArea, SelectField, Surface, TextField } from "../../../design-system";
 import {
   CompactList,
   DataTable,
@@ -48,7 +48,7 @@ import { useCmsList } from "../hooks/useCmsList";
 import { useDebouncedValue } from "../hooks/useDebouncedValue";
 import { formatDate, shortHash } from "../../../shared/lib/format";
 import { displaySessionTitle, sessionKeyChip } from "./sessionTitle";
-import { normalizeOptionalNumber, normalizeOptionalText, parseBulkTasks } from "./taskInput";
+import { normalizeOptionalNumber, normalizeOptionalText } from "./taskInput";
 import { canUseFullReorder, reorderedTaskIds } from "./taskQueueList";
 
 interface SessionsPageProps {
@@ -1189,7 +1189,6 @@ function ManualTaskPanel({
   const [jiraKey, setJiraKey] = useState("");
   const [url, setUrl] = useState("");
   const [storyPoints, setStoryPoints] = useState("");
-  const [bulk, setBulk] = useState("");
 
   function taskBody(): CmsTaskBody {
     return {
@@ -1212,16 +1211,8 @@ function ManualTaskPanel({
     setStoryPoints("");
   }
 
-  async function submitBulk(event: FormEvent) {
-    event.preventDefault();
-    const tasks = parseBulkTasks(bulk);
-    if (tasks.length === 0) return;
-    await onRun("bulk", async () => cmsTasksApi.createBulk(sessionId, tasks, expectedVersion));
-    setBulk("");
-  }
-
   return (
-    <div className="grid gap-3 xl:grid-cols-3">
+    <div className="grid gap-3 xl:grid-cols-2">
       <JiraImportPanel
         sessionId={sessionId}
         expectedVersion={expectedVersion}
@@ -1240,18 +1231,6 @@ function ManualTaskPanel({
         </div>
         <Button type="submit" variant="primary" className="w-full" disabled={busy !== null || !summary.trim()}>
           Добавить задачу
-        </Button>
-      </Surface>
-      <Surface as="form" className="space-y-3 p-3" onSubmit={submitBulk}>
-        <p className="text-xs font-semibold uppercase tracking-wide text-ink3">Массовая вставка</p>
-        <TextareaField
-          label="По одной задаче на строку"
-          placeholder={"Чек-аут крайних случаев\nNotifications: rate limit\nSearch facets"}
-          value={bulk}
-          onChange={(event) => setBulk(event.target.value)}
-        />
-        <Button type="submit" variant="secondary" className="w-full" disabled={busy !== null || parseBulkTasks(bulk, 1).length === 0}>
-          Добавить из вставки
         </Button>
       </Surface>
     </div>

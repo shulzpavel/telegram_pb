@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import csv
 import io
 import json
@@ -35,8 +36,8 @@ from services.voting_service._http_shared import (
     CmsPrincipal,
     JiraImportRequest,
     JiraPreviewRequest,
-    TaskBulkCreateRequest,
     TaskCreateRequest,
+    _fetch_jira_description,
     TaskInput,
     TaskMoveRequest,
     TaskReorderRequest,
@@ -663,30 +664,6 @@ async def app_create_task(
     return _mutation_payload(result, -1)
 
 
-@app_router.post("/app/sessions/{chat_id}/tasks/bulk")
-async def app_create_tasks_bulk(
-    chat_id: int,
-    body: TaskBulkCreateRequest,
-    request: Request,
-    topic_id: Optional[int] = None,
-    actor: CmsPrincipal = Depends(_manager_dep),
-) -> dict:
-    use_case = AddManualTasksUseCase(request.app.state.repository)
-    try:
-        result = await use_case.execute(
-            chat_id=chat_id,
-            topic_id=topic_id,
-            items=[item.model_dump() for item in body.tasks],
-            expected_version=body.expected_version,
-        )
-    except TaskQueueError as exc:
-        await _audit(request, "app.task.bulk_create", actor.username, "failed", {"error": str(exc), "chat_id": chat_id})
-        _raise_task_error(exc)
-    await _publish_state(request, result.session)
-    await _audit(request, "app.task.bulk_create", actor.username, "ok", {"chat_id": chat_id, "count": len(result.tasks)})
-    return _mutation_payload(result, -1)
-
-
 @app_router.patch("/app/sessions/{chat_id}/tasks/{task_id}")
 async def app_update_task(
     chat_id: int,
@@ -808,6 +785,30 @@ async def app_import_jira_tasks(
     selected = {key.strip().upper() for key in body.selected_keys if key.strip()}
     issues = await _jira_preview(request.app.state.http_session, body.jql, body.max_results)
 
+    # Pre-fetch the issue body for every selected key so we can store it on
+    # the Task at import time. Voters then see the full Jira spec inline on
+    # the vote page and the AI summary prompt has a cheap fallback when
+    # the per-request context fetch fails. Each call is best-effort and
+    # de-duped by the jira-service in-memory cache; failures resolve to
+    # ``None`` and never block the import.
+    keys_to_fetch = [
+        str(issue.get("key") or "").strip().upper()
+        for issue in issues
+        if str(issue.get("key") or "").strip()
+        and (not selected or str(issue.get("key") or "").strip().upper() in selected)
+    ]
+    descriptions = dict(
+        zip(
+            keys_to_fetch,
+            await asyncio.gather(
+                *[
+                    _fetch_jira_description(request.app.state.http_session, key)
+                    for key in keys_to_fetch
+                ]
+            ),
+        )
+    ) if keys_to_fetch else {}
+
     def mutate(session: Session) -> TaskMutationResult:
         if body.expected_version is not None and body.expected_version != session.tasks_version:
             raise TaskQueueError("Task queue was changed. Refresh and try again.", status_code=409)
@@ -827,6 +828,7 @@ async def app_import_jira_tasks(
                 story_points=issue.get("story_points") or None,
                 jql=body.jql,
                 source="jira",
+                description=descriptions.get(key),
             )
             session.tasks_queue.append(task)
             added.append(task)
@@ -874,28 +876,6 @@ async def app_start_session(
         raise HTTPException(status_code=400, detail=error)
     await _publish_state(request, session)
     await _audit(request, "app.session.start", actor.username, "ok", {"chat_id": chat_id})
-    return _manager_session_payload(session)
-
-
-@app_router.post("/app/sessions/{chat_id}/reveal")
-async def app_reveal_session(
-    chat_id: int,
-    request: Request,
-    topic_id: Optional[int] = None,
-    actor: CmsPrincipal = Depends(_manager_dep),
-) -> dict:
-    def mutate(session: Session) -> Optional[str]:
-        if not session.current_task or not session.current_batch_started_at:
-            return "No active task to reveal."
-        session.revealed_task_id = session.current_task.task_id
-        session.bump_tasks_version()
-        return None
-
-    session, error = await _mutate_repo_session(request.app.state.repository, chat_id, topic_id, mutate)
-    if error:
-        raise HTTPException(status_code=400, detail=error)
-    await _publish_state(request, session)
-    await _audit(request, "app.session.reveal", actor.username, "ok", {"chat_id": chat_id})
     return _manager_session_payload(session)
 
 
