@@ -10,6 +10,7 @@ from urllib.parse import quote
 import aiohttp
 
 from app.ports.jira_client import JiraClient
+from app.utils.jira_html import sanitize_jira_html
 from app.utils.jira_text import adf_to_plain_text, truncate_text
 
 logger = logging.getLogger(__name__)
@@ -277,7 +278,12 @@ class JiraHttpClient(JiraClient):
             "story_points": story_points,
         }
 
-    def _issue_context_from_fields(self, issue_key: str, fields: Dict[str, Any]) -> Dict[str, Any]:
+    def _issue_context_from_fields(
+        self,
+        issue_key: str,
+        fields: Dict[str, Any],
+        rendered_fields: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
         summary = str(fields.get("summary") or issue_key)
         raw_description = fields.get("description")
         if isinstance(raw_description, dict):
@@ -290,6 +296,22 @@ class JiraHttpClient(JiraClient):
         else:
             description = str(raw_description or "").strip()
             description_adf = None
+            if raw_description is not None and not isinstance(raw_description, str):
+                logger.warning(
+                    "jira description unexpected type key=%s type=%s",
+                    issue_key,
+                    type(raw_description).__name__,
+                )
+
+        # Jira Cloud can return description as a flat string when the REST
+        # client fell back to API v2, OR when ADF exists but the voter UI
+        # needs the same look as Jira itself. ``renderedFields.description``
+        # is server-rendered HTML — closest match to what you see in Jira.
+        description_html: Optional[str] = None
+        if rendered_fields and isinstance(rendered_fields, dict):
+            raw_html = rendered_fields.get("description")
+            if isinstance(raw_html, str) and raw_html.strip():
+                description_html = sanitize_jira_html(raw_html) or None
 
         max_chars = max(500, int(os.getenv("ANTHROPIC_MAX_CONTEXT_CHARS", "6000")))
         description = truncate_text(description, max_chars)
@@ -313,6 +335,7 @@ class JiraHttpClient(JiraClient):
             "url": self.get_issue_url(issue_key),
             "description": description,
             "description_adf": description_adf,
+            "description_html": description_html,
             "issue_type": issue_type,
             "labels": labels[:20],
             "components": components[:20],
@@ -325,12 +348,21 @@ class JiraHttpClient(JiraClient):
             f"summary,description,labels,components,issuetype,{self.story_points_field}",
             safe=",",
         )
+        # API v3 only + renderedFields: v2 returns description as a single
+        # plain/wiki string (no ADF, no newlines) which is exactly the
+        # "wall of text" voters were seeing. renderedFields is what Jira
+        # UI uses to paint headings, lists, and tables.
         issue = await self._make_request(
             "GET",
-            f"issue/{issue_key}?fields={fields_list}",
-            api_versions=["3", "2"],
+            f"issue/{issue_key}?expand=renderedFields&fields={fields_list}",
+            api_versions=["3"],
         )
         if not issue:
             return None
         fields = issue.get("fields") or {}
-        return self._issue_context_from_fields(issue_key, fields)
+        rendered = issue.get("renderedFields")
+        return self._issue_context_from_fields(
+            issue_key,
+            fields,
+            rendered if isinstance(rendered, dict) else None,
+        )

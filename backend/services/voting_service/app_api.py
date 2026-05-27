@@ -797,12 +797,10 @@ async def app_debug_jira_description(
     if fetched.is_empty:
         return {"key": issue_key.strip().upper(), "found": False}
     text = fetched.text or ""
-    # ``format`` makes the source obvious in one curl: "adf" means rich
-    # rendering on the voter UI, "plain" means the fallback (Jira
-    # Server, wiki markup, or empty ADF). ``adf_root_type`` /
-    # ``adf_first_block_types`` reveal whether ADF is structured
-    # (paragraphs/headings/lists) or arrived as an empty ``doc``.
-    fmt = "adf" if fetched.adf else "plain"
+    # ``format`` makes the source obvious in one curl: "html" is Jira
+    # renderedFields (what the voter UI prefers), "adf" is structured
+    # ADF, "plain" is the flat string fallback.
+    fmt = "html" if fetched.html else ("adf" if fetched.adf else "plain")
     adf_root_type = fetched.adf.get("type") if isinstance(fetched.adf, dict) else None
     adf_first_block_types: list[str] = []
     if isinstance(fetched.adf, dict):
@@ -817,6 +815,8 @@ async def app_debug_jira_description(
         "newline_count": text.count("\n"),
         "preview": text[:300],
         "has_adf": bool(fetched.adf),
+        "has_html": bool(fetched.html),
+        "html_length": len(fetched.html or ""),
         "adf_root_type": adf_root_type,
         "adf_first_block_types": adf_first_block_types,
     }
@@ -861,11 +861,12 @@ async def app_import_jira_tasks(
     # are 0 the ratio gives operators an immediate "Jira returns empty
     # bodies" signal without grepping per-key warnings.
     logger.info(
-        "jira import description fetch chat=%s tried=%d filled_text=%d filled_adf=%d",
+        "jira import description fetch chat=%s tried=%d filled_text=%d filled_adf=%d filled_html=%d",
         chat_id,
         len(keys_to_fetch),
         sum(1 for v in descriptions.values() if v.text),
         sum(1 for v in descriptions.values() if v.adf),
+        sum(1 for v in descriptions.values() if v.html),
     )
 
     def mutate(session: Session) -> TaskMutationResult:
@@ -890,6 +891,7 @@ async def app_import_jira_tasks(
                 source="jira",
                 description=fetched.text if fetched else None,
                 description_adf=fetched.adf if fetched else None,
+                description_html=fetched.html if fetched else None,
             )
             session.tasks_queue.append(task)
             added.append(task)

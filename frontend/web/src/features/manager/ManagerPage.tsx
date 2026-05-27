@@ -1511,11 +1511,12 @@ function ControlRoom({
           inline in the cockpit so the manager has the spec body without
           flipping to Jira. Backfilled lazily on the backend if the task
           was imported before the field existed. */}
-      {task && (task.description || task.description_adf) ? (
+      {task && (task.description || task.description_adf || task.description_html) ? (
         <div className="mt-4">
           <JiraDescriptionPanel
             description={task.description}
             descriptionAdf={task.description_adf}
+            descriptionHtml={task.description_html}
             jiraKey={task.jira_key ?? null}
           />
         </div>

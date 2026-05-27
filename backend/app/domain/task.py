@@ -47,6 +47,9 @@ class Task:
     # version. ``None`` when the field is empty, when the source is a
     # plain string instead of ADF, or for manual tasks.
     description_adf: Optional[Any] = None
+    # Sanitized HTML from Jira ``renderedFields.description``. Preferred
+    # by the voter UI when present — matches Jira's own rendering.
+    description_html: Optional[str] = None
     created_at: str = field(default_factory=_utc_now)
     updated_at: str = field(default_factory=_utc_now)
 
@@ -65,6 +68,7 @@ class Task:
             "ai_summary": self.ai_summary,
             "description": self.description,
             "description_adf": self.description_adf,
+            "description_html": self.description_html,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }
@@ -98,6 +102,12 @@ class Task:
             if isinstance(description_adf_raw, dict) and description_adf_raw.get("type")
             else None
         )
+        description_html_raw = data.get("description_html")
+        description_html = (
+            str(description_html_raw).strip()
+            if isinstance(description_html_raw, str) and description_html_raw.strip()
+            else None
+        )
         return cls(
             task_id=task_id,
             jira_key=data.get("jira_key"),
@@ -111,6 +121,7 @@ class Task:
             ai_summary=data.get("ai_summary") if isinstance(data.get("ai_summary"), dict) else None,
             description=description,
             description_adf=description_adf,
+            description_html=description_html,
             created_at=data.get("created_at") or _utc_now(),
             updated_at=data.get("updated_at") or _utc_now(),
         )

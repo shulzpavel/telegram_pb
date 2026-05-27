@@ -134,6 +134,7 @@ def _build_web_session_state(session) -> dict:
             # manual tasks or when the import-time fetch failed.
             "description": task.description,
             "description_adf": task.description_adf,
+            "description_html": task.description_html,
             "index": session.current_task_index + 1,
             "total": len(session.tasks_queue),
         }
@@ -378,6 +379,7 @@ async def web_vote(body: WebVoteRequest, request: Request) -> dict:
                 "ai_summary": task.ai_summary,
                 "description": task.description,
                 "description_adf": task.description_adf,
+                "description_html": task.description_html,
                 "index": session.current_task_index + 1,
                 "total": len(session.tasks_queue),
             },

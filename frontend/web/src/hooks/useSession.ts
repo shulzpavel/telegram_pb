@@ -17,6 +17,8 @@ export interface TaskInfo {
    *  `unknown` rather than a strict ADF type — the renderer treats any
    *  non-doc shape as opaque and falls back to plain text. */
   description_adf?: unknown;
+  /** Sanitized HTML from Jira renderedFields — preferred for display. */
+  description_html?: string | null;
   index: number;
   total: number;
 }

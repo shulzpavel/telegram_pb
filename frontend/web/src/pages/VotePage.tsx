@@ -64,7 +64,10 @@ export default function VotePage({ task, participants, onVote, error, onLogoClic
   const totalCount = participants.length;
   const progress = totalCount > 0 ? votedCount / totalCount : 0;
   const transitionBase = { duration: reduceMotion ? 0 : 0.18, ease: [0.2, 0, 0, 1] as const };
-  const hasDescription = Boolean(task.description) || Boolean(task.description_adf);
+  const hasDescription =
+    Boolean(task.description) ||
+    Boolean(task.description_adf) ||
+    Boolean(task.description_html);
 
   return (
     <div className="flex min-h-screen-mobile flex-col app-gradient-bg">
@@ -227,6 +230,7 @@ export default function VotePage({ task, participants, onVote, error, onLogoClic
             <JiraDescriptionPanel
               description={task.description}
               descriptionAdf={task.description_adf}
+              descriptionHtml={task.description_html}
               jiraKey={task.jira_key ?? null}
             />
           ) : null}

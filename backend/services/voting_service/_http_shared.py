@@ -368,17 +368,16 @@ async def _ensure_current_task_description(
         except Exception:  # noqa: BLE001 — read failure is non-fatal here.
             return False
     task = session.current_task
-    # Skip if both representations are already populated. We backfill if
-    # *either* is missing — a task imported before the ADF field landed
-    # has ``description`` but no ``description_adf``, and the voter UI
-    # would otherwise stay on the plain-text fallback even though Jira
-    # carries rich formatting.
-    if task is None or not task.jira_key or (task.description and task.description_adf):
+    # Backfill when any representation is missing — tasks imported before
+    # ``description_html`` landed may already have a flat plain string.
+    if task is None or not task.jira_key:
+        return False
+    if task.description and task.description_adf and task.description_html:
         return False
     logger.info(
-        "jira description backfill start chat=%s topic=%s task_id=%s key=%s has_text=%s has_adf=%s",
+        "jira description backfill start chat=%s topic=%s task_id=%s key=%s has_text=%s has_adf=%s has_html=%s",
         chat_id, topic_id, task.task_id, task.jira_key,
-        bool(task.description), bool(task.description_adf),
+        bool(task.description), bool(task.description_adf), bool(task.description_html),
     )
     fetched = await _fetch_jira_description(http_session, task.jira_key)
     if fetched.is_empty:
@@ -390,6 +389,9 @@ async def _ensure_current_task_description(
     if not task.description_adf and fetched.adf:
         task.description_adf = fetched.adf
         changed = True
+    if not task.description_html and fetched.html:
+        task.description_html = fetched.html
+        changed = True
     if not changed:
         return False
     task.touch()
@@ -399,9 +401,9 @@ async def _ensure_current_task_description(
         logger.warning("jira description backfill save failed key=%s err=%r", task.jira_key, exc)
         return False
     logger.info(
-        "jira description backfill ok chat=%s task_id=%s key=%s text_len=%d has_adf=%s",
+        "jira description backfill ok chat=%s task_id=%s key=%s text_len=%d has_adf=%s has_html=%s",
         chat_id, task.task_id, task.jira_key,
-        len(task.description or ""), bool(task.description_adf),
+        len(task.description or ""), bool(task.description_adf), bool(task.description_html),
     )
     return True
 
@@ -412,18 +414,19 @@ class JiraDescriptionFetch:
 
     ``text`` is the plain-text projection used by AI prompts and as the
     voter-UI fallback. ``adf`` is the raw Atlassian Document Format
-    payload (a ``{"type": "doc", ...}`` dict) — present only when Jira
-    returned ADF for the description field, ``None`` otherwise. Both
-    fields are independently optional so callers can store whatever is
-    available without dropping the other side.
+    payload (a ``{"type": "doc", ...}`` dict). ``html`` is sanitized
+    Jira ``renderedFields.description`` — the closest match to the Jira
+    UI when ADF is missing or the REST client returned a flat string.
+    All three are independently optional.
     """
 
     text: Optional[str] = None
     adf: Optional[Any] = None
+    html: Optional[str] = None
 
     @property
     def is_empty(self) -> bool:
-        return not self.text and not self.adf
+        return not self.text and not self.adf and not self.html
 
 
 _EMPTY_JIRA_FETCH = JiraDescriptionFetch()
@@ -478,14 +481,16 @@ async def _fetch_jira_description(
     # Only accept ADF in the structured ``{"type": "doc", ...}`` shape;
     # anything else (empty dict, string, None) is collapsed to ``None``.
     adf = raw_adf if isinstance(raw_adf, dict) and raw_adf.get("type") else None
-    if not cleaned and not adf:
+    raw_html = data.get("description_html")
+    html = raw_html.strip() if isinstance(raw_html, str) and raw_html.strip() else None
+    if not cleaned and not adf and not html:
         logger.info("jira description fetch empty body key=%s", key)
         return _EMPTY_JIRA_FETCH
     logger.info(
-        "jira description fetched key=%s text_len=%d has_adf=%s",
-        key, len(cleaned or ""), bool(adf),
+        "jira description fetched key=%s text_len=%d has_adf=%s html_len=%d",
+        key, len(cleaned or ""), bool(adf), len(html or ""),
     )
-    return JiraDescriptionFetch(text=cleaned, adf=adf)
+    return JiraDescriptionFetch(text=cleaned, adf=adf, html=html)
 
 
 def _jira_preview_payload(issues: list[dict], existing_keys: set[str]) -> dict:
@@ -544,6 +549,7 @@ def _task_payload(session: Session, task: Task) -> dict:
         "jql": task.jql,
         "description": task.description,
         "description_adf": task.description_adf,
+        "description_html": task.description_html,
         "created_at_text": task.created_at,
         "domain_updated_at": task.updated_at,
         "updated_at": task.updated_at,

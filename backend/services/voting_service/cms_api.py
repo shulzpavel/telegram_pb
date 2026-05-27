@@ -560,11 +560,12 @@ async def cms_import_jira_tasks(
         descriptions = dict(zip(keys_to_fetch, fetched_payloads))
         # Same import-side log line as the manager path — see app_api.
         logger.info(
-            "jira import description fetch (cms) chat=%s tried=%d filled_text=%d filled_adf=%d",
+            "jira import description fetch (cms) chat=%s tried=%d filled_text=%d filled_adf=%d filled_html=%d",
             chat_id,
             len(keys_to_fetch),
             sum(1 for v in descriptions.values() if v.text),
             sum(1 for v in descriptions.values() if v.adf),
+            sum(1 for v in descriptions.values() if v.html),
         )
 
         def mutate(session: Session) -> TaskMutationResult:
@@ -590,6 +591,7 @@ async def cms_import_jira_tasks(
                     source="jira",
                     description=fetched.text if fetched else None,
                     description_adf=fetched.adf if fetched else None,
+                    description_html=fetched.html if fetched else None,
                 )
                 session.tasks_queue.append(task)
                 added.append(task)
