@@ -793,14 +793,16 @@ async def app_debug_jira_description(
     raw length and a short preview so it's also safe to share in chat.
     Bounded by manager auth — no anonymous use.
     """
-    description = await _fetch_jira_description(request.app.state.http_session, issue_key)
-    if not description:
+    fetched = await _fetch_jira_description(request.app.state.http_session, issue_key)
+    if fetched.is_empty:
         return {"key": issue_key.strip().upper(), "found": False}
+    text = fetched.text or ""
     return {
         "key": issue_key.strip().upper(),
         "found": True,
-        "length": len(description),
-        "preview": description[:300],
+        "length": len(text),
+        "preview": text[:300],
+        "has_adf": bool(fetched.adf),
     }
 
 
@@ -827,26 +829,27 @@ async def app_import_jira_tasks(
         if str(issue.get("key") or "").strip()
         and (not selected or str(issue.get("key") or "").strip().upper() in selected)
     ]
-    descriptions = dict(
-        zip(
-            keys_to_fetch,
-            await asyncio.gather(
-                *[
-                    _fetch_jira_description(request.app.state.http_session, key)
-                    for key in keys_to_fetch
-                ]
-            ),
+    fetched_payloads = (
+        await asyncio.gather(
+            *[
+                _fetch_jira_description(request.app.state.http_session, key)
+                for key in keys_to_fetch
+            ]
         )
-    ) if keys_to_fetch else {}
-    # One summary line per import call: how many keys we tried and how
-    # many actually got a non-empty description. If the number is 0 the
-    # ratio gives operators an immediate "Jira returns empty bodies"
-    # signal without grepping per-key warnings.
+        if keys_to_fetch
+        else []
+    )
+    descriptions = dict(zip(keys_to_fetch, fetched_payloads))
+    # One summary line per import call: how many keys we tried, how
+    # many got plain text, and how many got rich ADF. If both numbers
+    # are 0 the ratio gives operators an immediate "Jira returns empty
+    # bodies" signal without grepping per-key warnings.
     logger.info(
-        "jira import description fetch chat=%s tried=%d filled=%d",
+        "jira import description fetch chat=%s tried=%d filled_text=%d filled_adf=%d",
         chat_id,
         len(keys_to_fetch),
-        sum(1 for v in descriptions.values() if v),
+        sum(1 for v in descriptions.values() if v.text),
+        sum(1 for v in descriptions.values() if v.adf),
     )
 
     def mutate(session: Session) -> TaskMutationResult:
@@ -861,6 +864,7 @@ async def app_import_jira_tasks(
                 continue
             if selected and key not in selected:
                 continue
+            fetched = descriptions.get(key)
             task = Task(
                 jira_key=key,
                 summary=issue.get("summary") or key,
@@ -868,7 +872,8 @@ async def app_import_jira_tasks(
                 story_points=issue.get("story_points") or None,
                 jql=body.jql,
                 source="jira",
-                description=descriptions.get(key),
+                description=fetched.text if fetched else None,
+                description_adf=fetched.adf if fetched else None,
             )
             session.tasks_queue.append(task)
             added.append(task)

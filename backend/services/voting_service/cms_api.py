@@ -547,23 +547,24 @@ async def cms_import_jira_tasks(
             if str(issue.get("key") or "").strip()
             and (not selected or str(issue.get("key") or "").strip().upper() in selected)
         ]
-        descriptions = dict(
-            zip(
-                keys_to_fetch,
-                await asyncio.gather(
-                    *[
-                        _fetch_jira_description(request.app.state.http_session, key)
-                        for key in keys_to_fetch
-                    ]
-                ),
+        fetched_payloads = (
+            await asyncio.gather(
+                *[
+                    _fetch_jira_description(request.app.state.http_session, key)
+                    for key in keys_to_fetch
+                ]
             )
-        ) if keys_to_fetch else {}
+            if keys_to_fetch
+            else []
+        )
+        descriptions = dict(zip(keys_to_fetch, fetched_payloads))
         # Same import-side log line as the manager path — see app_api.
         logger.info(
-            "jira import description fetch (cms) chat=%s tried=%d filled=%d",
+            "jira import description fetch (cms) chat=%s tried=%d filled_text=%d filled_adf=%d",
             chat_id,
             len(keys_to_fetch),
-            sum(1 for v in descriptions.values() if v),
+            sum(1 for v in descriptions.values() if v.text),
+            sum(1 for v in descriptions.values() if v.adf),
         )
 
         def mutate(session: Session) -> TaskMutationResult:
@@ -579,6 +580,7 @@ async def cms_import_jira_tasks(
                     continue
                 if selected and key not in selected:
                     continue
+                fetched = descriptions.get(key)
                 task = Task(
                     jira_key=key,
                     summary=issue.get("summary") or key,
@@ -586,7 +588,8 @@ async def cms_import_jira_tasks(
                     story_points=issue.get("story_points"),
                     jql=body.jql,
                     source="jira",
-                    description=descriptions.get(key),
+                    description=fetched.text if fetched else None,
+                    description_adf=fetched.adf if fetched else None,
                 )
                 session.tasks_queue.append(task)
                 added.append(task)

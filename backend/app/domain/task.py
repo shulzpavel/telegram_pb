@@ -40,6 +40,13 @@ class Task:
     # cheap fallback when the per-request jira-service context fetch
     # fails or is skipped. Optional — manual tasks have no description.
     description: Optional[str] = None
+    # Raw Atlassian Document Format payload for the same description.
+    # Stored separately from ``description`` (plain text) so the voter UI
+    # can render the original Jira formatting (lists, headings, code,
+    # links, bold/italic) while the AI prompt still uses the plain text
+    # version. ``None`` when the field is empty, when the source is a
+    # plain string instead of ADF, or for manual tasks.
+    description_adf: Optional[Any] = None
     created_at: str = field(default_factory=_utc_now)
     updated_at: str = field(default_factory=_utc_now)
 
@@ -57,6 +64,7 @@ class Task:
             "source": self.source,
             "ai_summary": self.ai_summary,
             "description": self.description,
+            "description_adf": self.description_adf,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }
@@ -80,6 +88,16 @@ class Task:
             if isinstance(description_raw, str) and description_raw.strip()
             else None
         )
+        # Only accept ADF in the structured shape Jira itself uses
+        # (``{"type": "doc", ...}``). Everything else (strings, empty
+        # dicts, lists, None) is collapsed to ``None`` so the frontend
+        # has a single boolean to switch on.
+        description_adf_raw = data.get("description_adf")
+        description_adf = (
+            description_adf_raw
+            if isinstance(description_adf_raw, dict) and description_adf_raw.get("type")
+            else None
+        )
         return cls(
             task_id=task_id,
             jira_key=data.get("jira_key"),
@@ -92,6 +110,7 @@ class Task:
             source=source,
             ai_summary=data.get("ai_summary") if isinstance(data.get("ai_summary"), dict) else None,
             description=description,
+            description_adf=description_adf,
             created_at=data.get("created_at") or _utc_now(),
             updated_at=data.get("updated_at") or _utc_now(),
         )

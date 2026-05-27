@@ -128,10 +128,12 @@ def _build_web_session_state(session) -> dict:
             "jira_key": task.jira_key,
             "story_points": task.story_points,
             "ai_summary": task.ai_summary,
-            # Captured at Jira import time. Voter UI renders it as a
-            # collapsible spec block; ``None`` for manual tasks or when
-            # the import-time fetch failed (best-effort).
+            # Captured at Jira import time. Voter UI prefers
+            # ``description_adf`` (rich Jira formatting) and falls back
+            # to ``description`` (plain text). Both are ``None`` for
+            # manual tasks or when the import-time fetch failed.
             "description": task.description,
+            "description_adf": task.description_adf,
             "index": session.current_task_index + 1,
             "total": len(session.tasks_queue),
         }
@@ -374,6 +376,8 @@ async def web_vote(body: WebVoteRequest, request: Request) -> dict:
                 "jira_key": task.jira_key,
                 "story_points": task.story_points,
                 "ai_summary": task.ai_summary,
+                "description": task.description,
+                "description_adf": task.description_adf,
                 "index": session.current_task_index + 1,
                 "total": len(session.tasks_queue),
             },
