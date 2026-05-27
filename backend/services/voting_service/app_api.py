@@ -797,12 +797,28 @@ async def app_debug_jira_description(
     if fetched.is_empty:
         return {"key": issue_key.strip().upper(), "found": False}
     text = fetched.text or ""
+    # ``format`` makes the source obvious in one curl: "adf" means rich
+    # rendering on the voter UI, "plain" means the fallback (Jira
+    # Server, wiki markup, or empty ADF). ``adf_root_type`` /
+    # ``adf_first_block_types`` reveal whether ADF is structured
+    # (paragraphs/headings/lists) or arrived as an empty ``doc``.
+    fmt = "adf" if fetched.adf else "plain"
+    adf_root_type = fetched.adf.get("type") if isinstance(fetched.adf, dict) else None
+    adf_first_block_types: list[str] = []
+    if isinstance(fetched.adf, dict):
+        for child in (fetched.adf.get("content") or [])[:5]:
+            if isinstance(child, dict) and child.get("type"):
+                adf_first_block_types.append(str(child.get("type")))
     return {
         "key": issue_key.strip().upper(),
         "found": True,
+        "format": fmt,
         "length": len(text),
+        "newline_count": text.count("\n"),
         "preview": text[:300],
         "has_adf": bool(fetched.adf),
+        "adf_root_type": adf_root_type,
+        "adf_first_block_types": adf_first_block_types,
     }
 
 
