@@ -63,7 +63,6 @@ from services.voting_service._http_shared import (
     DEFAULT_THEME_PREFERENCE,
     JiraImportRequest,
     JiraPreviewRequest,
-    TaskBulkCreateRequest,
     TaskCreateRequest,
     TaskInput,
     TaskMoveRequest,
@@ -404,35 +403,6 @@ async def cms_create_session_task(
         await _audit(request, "cms.task.create", actor.username, "failed", {"error": str(exc), "session_id": session_id})
         _raise_task_error(exc)
     await _audit(request, "cms.task.create", actor.username, "ok", {"session_id": session_id, "task_id": result.task.task_id if result.task else None})
-    return _mutation_payload(result, session_id)
-
-
-@cms_router.post("/cms/sessions/{session_id}/tasks/bulk")
-async def cms_create_session_tasks_bulk(
-    session_id: int,
-    body: TaskBulkCreateRequest,
-    request: Request,
-    actor: CmsPrincipal = Depends(require_permission(PERM_TASKS_MANAGE)),
-) -> dict:
-    chat_id, topic_id = await _session_ref(request, session_id)
-    use_case = AddManualTasksUseCase(request.app.state.repository)
-    try:
-        result = await use_case.execute(
-            chat_id=chat_id,
-            topic_id=topic_id,
-            items=[item.model_dump() for item in body.tasks],
-            expected_version=body.expected_version,
-        )
-    except TaskQueueError as exc:
-        await _audit(request, "cms.task.bulk_create", actor.username, "failed", {"error": str(exc), "session_id": session_id})
-        _raise_task_error(exc)
-    await _audit(
-        request,
-        "cms.task.bulk_create",
-        actor.username,
-        "ok",
-        {"session_id": session_id, "count": len(result.tasks)},
-    )
     return _mutation_payload(result, session_id)
 
 

@@ -107,16 +107,6 @@ export const managerApi = {
       body: JSON.stringify(body),
     }),
 
-  addTasksBulk: (
-    chatId: number,
-    tasks: Array<{ summary: string; jira_key?: string | null; url?: string | null; story_points?: number | null }>,
-    expectedVersion?: number | null,
-  ) =>
-    appFetch<TaskMutation>(`/sessions/${chatId}/tasks/bulk`, {
-      method: "POST",
-      body: JSON.stringify({ tasks, expected_version: expectedVersion ?? null }),
-    }),
-
   updateTask: (
     chatId: number,
     taskId: string,

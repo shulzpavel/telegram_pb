@@ -46,8 +46,13 @@ class TestTaskIdentity:
 
 class TestTaskQueueManagement:
     @pytest.mark.asyncio
-    async def test_bulk_add_manual_tasks_bumps_version(self):
-        repo, path = temp_repo("test_bulk_add_manual_tasks")
+    async def test_add_manual_tasks_bumps_version(self):
+        # ``AddManualTasksUseCase`` still accepts a list (used by both the
+        # single-task endpoint and the Jira import path), but the legacy
+        # "bulk paste" HTTP route has been removed — see the matching
+        # frontend cleanup in ManagerPage / SessionsPage. This test
+        # exercises the underlying use case directly.
+        repo, path = temp_repo("test_add_manual_tasks")
         try:
             await repo.save_session(Session(chat_id=1, topic_id=None))
             use_case = AddManualTasksUseCase(repo)

@@ -200,11 +200,6 @@ export const cmsTasksApi = {
       method: "POST",
       body: JSON.stringify(body),
     }),
-  createBulk: (sessionId: number, tasks: CmsTaskBody[], expectedVersion?: number | null) =>
-    cmsFetch<CmsTaskMutation>(`/sessions/${sessionId}/tasks/bulk`, {
-      method: "POST",
-      body: JSON.stringify({ tasks, expected_version: expectedVersion ?? null }),
-    }),
   update: (sessionId: number, taskId: string, body: CmsTaskBody) =>
     cmsFetch<CmsTaskMutation>(`/sessions/${sessionId}/tasks/${encodeURIComponent(taskId)}`, {
       method: "PATCH",

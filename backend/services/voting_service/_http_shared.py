@@ -76,11 +76,6 @@ class TaskCreateRequest(TaskInput):
     expected_version: Optional[int] = Field(default=None, ge=0)
 
 
-class TaskBulkCreateRequest(BaseModel):
-    tasks: list[TaskInput] = Field(min_length=1, max_length=500)
-    expected_version: Optional[int] = Field(default=None, ge=0)
-
-
 class TaskUpdateRequest(TaskInput):
     expected_version: Optional[int] = Field(default=None, ge=0)
 

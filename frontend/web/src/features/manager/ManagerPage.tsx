@@ -22,7 +22,7 @@ import { AiIntelligenceSurface, Alert, Badge, Button, ConfirmDialog, EmptyState,
 import { cmsAuthApi } from "../cms/api/cmsClient";
 import type { CmsPrincipal } from "../cms/api/cmsTypes";
 import CmsLoginPage from "../cms/auth/CmsLoginPage";
-import { normalizeOptionalNumber, normalizeOptionalText, parseBulkTasks } from "../cms/sessions/taskInput";
+import { normalizeOptionalNumber, normalizeOptionalText } from "../cms/sessions/taskInput";
 import { ManagerTopBar } from "./ManagerTopBar";
 import { ManagerBottomDock } from "./ManagerBottomDock";
 import { SessionTabsBar } from "./SessionTabsBar";
@@ -1832,11 +1832,10 @@ function BacklogWizard({
   completedCount: number;
   onAction: (label: string, action: () => Promise<ManagerSession | TaskMutation>) => Promise<void>;
 }) {
-  type Tab = "jira" | "manual" | "bulk";
+  type Tab = "jira" | "manual";
   const [tab, setTab] = useState<Tab>("jira");
   const tabHints: Record<Tab, string> = {
     manual: "Добавьте одну задачу — название обязательно, Jira-ключ и URL по желанию.",
-    bulk: "Вставьте список одной колонкой — каждая строка станет отдельной задачей в очереди.",
     jira: "Введите JQL и выберите задачи из результата. Появятся в очереди с ключом и ссылкой.",
   };
   return (
@@ -1874,7 +1873,7 @@ function BacklogWizard({
       {error ? <Alert tone="danger" className="mt-6">{error}</Alert> : null}
 
       <div className="mt-7 flex border-b border-line">
-        {(["jira", "manual", "bulk"] as Tab[]).map((value) => (
+        {(["jira", "manual"] as Tab[]).map((value) => (
           <button
             key={value}
             type="button"
@@ -1888,7 +1887,7 @@ function BacklogWizard({
                 : "border-transparent text-ink3 hover:text-ink",
             )}
           >
-            {value === "jira" ? "Jira import" : value === "manual" ? "Manual" : "Bulk paste"}
+            {value === "jira" ? "Jira import" : "Manual"}
           </button>
         ))}
       </div>
@@ -1900,10 +1899,8 @@ function BacklogWizard({
       <div className="mt-4">
         {tab === "jira" ? (
           <WizardJiraForm chatId={chatId} tasksVersion={tasksVersion} busy={busy} onAction={onAction} />
-        ) : tab === "manual" ? (
-          <WizardManualForm chatId={chatId} tasksVersion={tasksVersion} busy={busy} onAction={onAction} />
         ) : (
-          <WizardBulkForm chatId={chatId} tasksVersion={tasksVersion} busy={busy} onAction={onAction} />
+          <WizardManualForm chatId={chatId} tasksVersion={tasksVersion} busy={busy} onAction={onAction} />
         )}
       </div>
 
@@ -1925,9 +1922,9 @@ function BacklogWizard({
  *
  * On viewports < md the wrapper attaches itself to the bottom of the
  * visual viewport so the primary action stays reachable while the user
- * scrolls long forms (Bulk paste, Jira preview). The negative margins
- * cancel `Surface` padding so the footer visually extends to the card
- * edges, and `pb-safe-4` reserves space for the iOS home indicator.
+ * scrolls long forms (Jira preview). The negative margins cancel
+ * `Surface` padding so the footer visually extends to the card edges,
+ * and `pb-safe-4` reserves space for the iOS home indicator.
  *
  * On md+ the wrapper degrades to a plain block — desktop layouts have
  * room for the CTA inline, no need to overlay it on top of the form.
@@ -1979,42 +1976,6 @@ function WizardManualForm({
           })}
         >
           Добавить и продолжить
-        </Button>
-      </MobileStickyFormFooter>
-    </Surface>
-  );
-}
-
-function WizardBulkForm({
-  chatId,
-  tasksVersion,
-  busy,
-  onAction,
-}: {
-  chatId: number;
-  tasksVersion: number;
-  busy: string | null;
-  onAction: (label: string, action: () => Promise<ManagerSession | TaskMutation>) => Promise<void>;
-}) {
-  const [bulk, setBulk] = useState("");
-  const bulkTasks = useMemo(() => parseBulkTasks(bulk), [bulk]);
-  return (
-    <Surface className="p-5">
-      <p className="text-sm font-semibold text-ink">Множество задач</p>
-      <p className="mt-1 text-xs text-ink3">Одна задача в строку. Формат: <code>JIRA-123 Резюме</code> или просто <code>Резюме</code>.</p>
-      <TextareaField className="mt-4" label="Список задач" value={bulk} onChange={(event) => setBulk(event.target.value)} rows={8} />
-      <MobileStickyFormFooter>
-        <Button
-          variant="primary"
-          className="w-full"
-          disabled={bulkTasks.length === 0 || busy !== null}
-          onClick={() => onAction("bulk", async () => {
-            const result = await managerApi.addTasksBulk(chatId, bulkTasks, tasksVersion);
-            setBulk("");
-            return result;
-          })}
-        >
-          Добавить {bulkTasks.length || ""} задач
         </Button>
       </MobileStickyFormFooter>
     </Surface>
@@ -2170,12 +2131,9 @@ function TaskAddPanel({
   const [summary, setSummary] = useState("");
   const [jiraKey, setJiraKey] = useState("");
   const [storyPoints, setStoryPoints] = useState("");
-  const [bulk, setBulk] = useState("");
   const [jql, setJql] = useState("");
   const [preview, setPreview] = useState<JiraPreview | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
-
-  const bulkTasks = useMemo(() => parseBulkTasks(bulk), [bulk]);
 
   async function previewJira() {
     const data = await managerApi.jiraPreview(chatId, jql, 500);
@@ -2282,22 +2240,6 @@ function TaskAddPanel({
             Add task
           </Button>
         </div>
-      </Surface>
-
-      <Surface className="p-4">
-        <h2 className="text-sm font-bold text-ink">Bulk paste</h2>
-        <TextareaField className="mt-3" label="One task per line" value={bulk} onChange={(event) => setBulk(event.target.value)} />
-        <Button
-          className="mt-3 w-full"
-          disabled={bulkTasks.length === 0 || busy !== null}
-          onClick={() => onAction("bulk", async () => {
-            const result = await managerApi.addTasksBulk(chatId, bulkTasks, tasksVersion);
-            setBulk("");
-            return result;
-          })}
-        >
-          Add {bulkTasks.length || ""} tasks
-        </Button>
       </Surface>
 
     </div>
