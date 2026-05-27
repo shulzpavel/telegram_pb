@@ -18,7 +18,7 @@ import { Children, FormEvent, useCallback, useEffect, useMemo, useRef, useState,
 import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
 import { apiUrl } from "../../app/config";
 import TaskTextBlock from "../../components/TaskTextBlock";
-import { AiIntelligenceSurface, Alert, Badge, Button, ConfirmDialog, EmptyState, ScrollArea, Spinner, Surface, TextField, TextareaField, ThemeToggle, cn, useTheme, useToast, type ThemeMode } from "../../design-system";
+import { AiIntelligenceSurface, AiSparkleButton, Alert, Badge, Button, ConfirmDialog, EmptyState, ScrollArea, Spinner, Surface, TextField, TextareaField, ThemeToggle, cn, useTheme, useToast, type ThemeMode } from "../../design-system";
 import { cmsAuthApi } from "../cms/api/cmsClient";
 import type { CmsPrincipal } from "../cms/api/cmsTypes";
 import CmsLoginPage from "../cms/auth/CmsLoginPage";
@@ -1383,6 +1383,8 @@ function ControlRoom({
   // `current_task_votes`) is the freshest source of per-name values.
   const revealedVotes = phase === "results" ? (results ?? []) : [];
 
+  const showFinalEstimate = (phase === "voting" || phase === "results") && task !== null;
+
   return (
     <Surface className="relative isolate min-h-0 p-4 md:p-6">
       {/* PHASE HEADER --------------------------------------------------- */}
@@ -1443,16 +1445,15 @@ function ControlRoom({
                 </Button>
               ) : null}
               {phase === "voting" ? (
-                <Button
-                  variant={task?.ai_summary ? "secondary" : "success"}
+                <AiSparkleButton
                   size="lg"
                   disabled={!task || busy !== null}
                   loading={busy === "ai-summary"}
                   onClick={onGenerateAiSummary}
                   title={!task ? "Сначала нужна текущая задача" : "Сгенерировать подсказку для оценки задачи"}
                 >
-                  {task?.ai_summary ? "↻ Обновить AI summary" : "Generate AI summary"}
-                </Button>
+                  {task?.ai_summary ? "Обновить AI подсказку" : "Сгенерировать AI подсказку"}
+                </AiSparkleButton>
               ) : null}
               {(phase === "voting" || phase === "results") ? (
                 <>
@@ -1491,7 +1492,20 @@ function ControlRoom({
         );
       })()}
 
-      {/* LIVE VOTING / RESULTS / FINAL SP ------------------------------- */}
+      {/* FINAL ESTIMATE — promoted out of ResultsPanel and parked right
+          under the action row. Visible the moment voting starts so the
+          manager can lock in an SP without scrolling past the live
+          distribution / voter roster. Hidden in waiting/complete phases
+          where there is nothing to estimate. */}
+      {showFinalEstimate ? (
+        <FinalEstimateBlock
+          currentSp={task?.story_points ?? null}
+          busy={busy}
+          onFinalEstimate={onFinalEstimate}
+        />
+      ) : null}
+
+      {/* LIVE VOTING / RESULTS ------------------------------------------ */}
       <div className="mt-6">
         {task?.ai_summary ? <AiSummaryPanel summary={task.ai_summary} /> : null}
         {phase === "waiting" ? (
@@ -1502,12 +1516,7 @@ function ControlRoom({
         ) : phase === "voting" ? (
           <LiveVotesPanel participants={participants} liveVotes={liveVotes} />
         ) : phase === "results" ? (
-          <ResultsPanel
-            revealedVotes={revealedVotes}
-            currentSp={task?.story_points ?? null}
-            busy={busy}
-            onFinalEstimate={onFinalEstimate}
-          />
+          <ResultsPanel revealedVotes={revealedVotes} />
         ) : (
           <EmptyState
             title="Сессия завершена"
@@ -1665,17 +1674,7 @@ function LiveVotesPanel({
   );
 }
 
-function ResultsPanel({
-  revealedVotes,
-  currentSp,
-  busy,
-  onFinalEstimate,
-}: {
-  revealedVotes: NamedVote[];
-  currentSp: number | null;
-  busy: string | null;
-  onFinalEstimate: (value: number) => void;
-}) {
+function ResultsPanel({ revealedVotes }: { revealedVotes: NamedVote[] }) {
   const distribution = useMemo(() => {
     const counts: Record<string, number> = {};
     for (const vote of revealedVotes) counts[vote.value] = (counts[vote.value] ?? 0) + 1;
@@ -1684,51 +1683,70 @@ function ResultsPanel({
   const max = distribution.reduce((acc, [, count]) => Math.max(acc, count), 1);
 
   return (
-    <div className="space-y-5">
-      <div className="rounded-lg border border-line bg-line2 p-4">
-        <p className="text-xs font-semibold uppercase tracking-wide text-ink3">Распределение голосов</p>
-        {distribution.length === 0 ? (
-          <p className="mt-2 text-sm text-ink3">Никто не проголосовал.</p>
-        ) : (
-          <div className="mt-3 space-y-2">
-            {distribution.map(([value, count]) => (
-              <div key={value} className="flex items-center gap-3">
-                <span className="w-10 shrink-0 rounded-md bg-blue px-2 py-1 text-center text-sm font-bold tabular-nums text-white">{value}</span>
-                <div className="h-2 flex-1 overflow-hidden rounded-full bg-line">
-                  <div className="h-full rounded-full bg-blue" style={{ width: `${(count / max) * 100}%` }} />
-                </div>
-                <span className="w-12 shrink-0 text-right text-sm font-semibold tabular-nums text-ink2">×{count}</span>
+    <div className="rounded-lg border border-line bg-line2 p-4">
+      <p className="text-xs font-semibold uppercase tracking-wide text-ink3">Распределение голосов</p>
+      {distribution.length === 0 ? (
+        <p className="mt-2 text-sm text-ink3">Никто не проголосовал.</p>
+      ) : (
+        <div className="mt-3 space-y-2">
+          {distribution.map(([value, count]) => (
+            <div key={value} className="flex items-center gap-3">
+              <span className="w-10 shrink-0 rounded-md bg-blue px-2 py-1 text-center text-sm font-bold tabular-nums text-white">{value}</span>
+              <div className="h-2 flex-1 overflow-hidden rounded-full bg-line">
+                <div className="h-full rounded-full bg-blue" style={{ width: `${(count / max) * 100}%` }} />
               </div>
-            ))}
-          </div>
-        )}
-        {revealedVotes.length > 0 ? (
-          <div className="mt-4 flex flex-wrap gap-1.5">
-            {revealedVotes.map((vote, idx) => (
-              <span key={`${vote.name}-${idx}`} className="rounded-md border border-line bg-surface px-2 py-1 text-xs font-semibold text-ink2">
-                {vote.name} → <span className="text-blue">{vote.value}</span>
-              </span>
-            ))}
-          </div>
-        ) : null}
-      </div>
-
-      <div className="rounded-lg border border-line bg-surface p-4">
-        <p className="text-sm font-bold text-ink">Зафиксируйте итоговую оценку</p>
-        <p className="mt-1 text-xs text-ink3">После выбора SP мы автоматически перейдём к следующей задаче.</p>
-        <div className="mt-3 flex flex-wrap gap-2">
-          {ESTIMATE_VALUES.map((value) => (
-            <Button
-              key={value}
-              size="md"
-              variant={currentSp === value ? "primary" : "secondary"}
-              disabled={busy !== null}
-              onClick={() => onFinalEstimate(value)}
-            >
-              {value}
-            </Button>
+              <span className="w-12 shrink-0 text-right text-sm font-semibold tabular-nums text-ink2">×{count}</span>
+            </div>
           ))}
         </div>
+      )}
+      {revealedVotes.length > 0 ? (
+        <div className="mt-4 flex flex-wrap gap-1.5">
+          {revealedVotes.map((vote, idx) => (
+            <span key={`${vote.name}-${idx}`} className="rounded-md border border-line bg-surface px-2 py-1 text-xs font-semibold text-ink2">
+              {vote.name} → <span className="text-blue">{vote.value}</span>
+            </span>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * Top-of-card SP picker. Used to live inside `ResultsPanel` (only
+ * visible after all voters had cast their vote); product moved it
+ * directly under the Skip/Next action row so the facilitator can lock
+ * in an estimate at any moment without scrolling past the live
+ * distribution.
+ */
+function FinalEstimateBlock({
+  currentSp,
+  busy,
+  onFinalEstimate,
+}: {
+  currentSp: number | null;
+  busy: string | null;
+  onFinalEstimate: (value: number) => void;
+}) {
+  return (
+    <div className="mt-4 rounded-lg border border-line bg-surface p-4">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <p className="text-sm font-bold text-ink">Зафиксируйте итоговую оценку</p>
+        <p className="text-xs text-ink3">После выбора SP перейдём к следующей задаче.</p>
+      </div>
+      <div className="mt-3 flex flex-wrap gap-2">
+        {ESTIMATE_VALUES.map((value) => (
+          <Button
+            key={value}
+            size="md"
+            variant={currentSp === value ? "primary" : "secondary"}
+            disabled={busy !== null}
+            onClick={() => onFinalEstimate(value)}
+          >
+            {value}
+          </Button>
+        ))}
       </div>
     </div>
   );
