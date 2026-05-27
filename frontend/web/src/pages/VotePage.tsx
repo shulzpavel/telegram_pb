@@ -1,10 +1,19 @@
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { type MouseEvent, useEffect, useState } from "react";
+import AiSummaryView from "../components/AiSummaryView";
 import JiraDescriptionPanel from "../components/JiraDescriptionPanel";
 import ParticipantChip from "../components/ParticipantChip";
 import TaskTextBlock from "../components/TaskTextBlock";
 import VoteCard from "../components/VoteCard";
-import { AiIntelligenceSurface, Alert, Badge, BrandHomeLink, LoadingDots, ProgressBar, Surface, ThemeToggle } from "../design-system";
+import {
+  Alert,
+  Badge,
+  BrandHomeLink,
+  LoadingDots,
+  ProgressBar,
+  Surface,
+  ThemeToggle,
+} from "../design-system";
 import { ParticipantStatus, TaskInfo } from "../hooks/useSession";
 
 /**
@@ -55,6 +64,7 @@ export default function VotePage({ task, participants, onVote, error, onLogoClic
   const totalCount = participants.length;
   const progress = totalCount > 0 ? votedCount / totalCount : 0;
   const transitionBase = { duration: reduceMotion ? 0 : 0.18, ease: [0.2, 0, 0, 1] as const };
+  const hasDescription = Boolean(task.description) || Boolean(task.description_adf);
 
   return (
     <div className="flex min-h-screen-mobile flex-col app-gradient-bg">
@@ -75,20 +85,21 @@ export default function VotePage({ task, participants, onVote, error, onLogoClic
         </div>
       </header>
 
-      {/* Main column. `flex-1` consumes remaining viewport height; the
-          bottom padding reserves space for safe-area + breathing room so
-          neither the cards nor the success-state get clipped by the home
-          indicator on iOS. */}
-      <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-4 px-4 py-4 pb-safe-6 md:flex-row md:gap-8 md:px-8 md:py-6">
-        {/* === Context panel ===
-            On mobile it sits above the cards and stays compact so the CTA
-            grid is reachable without scrolling. On md+ it becomes a fixed
-            side column. Animated `key` keeps task swaps smooth without
-            shifting the cards below. */}
+      {/* Main layout.
+          Mobile: single column, order = vote → description → AI → task → participants
+                  (action-first, context-second; thumb reaches the cards
+                  without scrolling past the spec body).
+          md+: two-column grid with a fixed-width left sidebar (Task /
+               Progress / Participants) and a wider centre column that
+               renders Vote → Description → AI summary. The centre
+               column gets a hard ``max-w`` so on ultra-wide displays
+               the description doesn't stretch into 200-column text. */}
+      <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-4 px-4 py-4 pb-safe-6 md:grid md:grid-cols-[18rem_minmax(0,1fr)] md:gap-8 md:px-8 md:py-6 lg:grid-cols-[20rem_minmax(0,1fr)]">
+        {/* === Left sidebar (Task / Progress / Participants) ============== */}
         <AnimatePresence mode="wait">
           <motion.aside
             key={taskKey}
-            className="flex flex-col gap-3 md:w-64 md:shrink-0 md:gap-5 lg:w-72"
+            className="order-3 flex flex-col gap-3 md:order-1 md:gap-5"
             initial={{ opacity: 0, y: 6 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -6 }}
@@ -110,43 +121,6 @@ export default function VotePage({ task, participants, onVote, error, onLogoClic
               </div>
             </Surface>
 
-            {task.description ? (
-              <JiraDescriptionPanel
-                description={task.description}
-                jiraKey={task.jira_key ?? null}
-              />
-            ) : null}
-
-            {task.ai_summary ? (
-              <AiIntelligenceSurface
-                className="p-4 md:p-5"
-                sparkleLabel="AI-подсказка"
-              >
-                <div className="mb-2 flex flex-wrap items-center gap-2">
-                  <Badge tone="info">AI-подсказка</Badge>
-                  <span className="text-2xs font-semibold uppercase tracking-wide text-ink3">для оценки</span>
-                </div>
-                <p className="text-sm leading-6 text-ink2">{task.ai_summary.description}</p>
-                <div className="mt-3 space-y-3">
-                  <div>
-                    <p className="text-2xs font-semibold uppercase tracking-widest text-ink3">Зоны внимания</p>
-                    <ul className="mt-1 space-y-1 text-xs text-ink2">
-                      {task.ai_summary.methods.map((method) => (
-                        <li key={method} className="flex gap-2">
-                          <span className="text-blue" aria-hidden="true">•</span>
-                          <span>{method}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                  <div>
-                    <p className="text-2xs font-semibold uppercase tracking-widest text-ink3">AI оценка сложности</p>
-                    <p className="mt-1 text-xs leading-5 text-ink2">{task.ai_summary.complexity}</p>
-                  </div>
-                </div>
-              </AiIntelligenceSurface>
-            ) : null}
-
             {participants.length > 0 ? (
               <Surface className="p-4 md:p-5">
                 <p className="mb-2 text-2xs font-semibold uppercase tracking-widest text-ink3 md:mb-3">Участники</p>
@@ -165,11 +139,13 @@ export default function VotePage({ task, participants, onVote, error, onLogoClic
           </motion.aside>
         </AnimatePresence>
 
-        {/* === Card grid ===
-            Reserve `min-h-[22rem]` so the inner state swap (cards ↔ voted
-            confirmation) doesn't push surrounding content around. The
-            surface stretches with flex to use the full visual area. */}
-        <section className="flex min-w-0 flex-1 flex-col justify-start">
+        {/* === Centre column (Vote → Description → AI summary) ============ */}
+        {/* `mx-auto max-w-2xl` caps line length on ultra-wide displays so
+            Description stays readable. `min-w-0` lets it shrink properly
+            inside the grid track on narrow viewports. `order-*` keeps
+            the vote card first on mobile (thumb reach) but in column 2
+            on md+ (visual hierarchy). */}
+        <section className="order-1 flex w-full min-w-0 flex-col gap-4 md:order-2 md:mx-auto md:max-w-2xl md:gap-6">
           <Surface className="flex min-h-[22rem] flex-col items-stretch justify-center p-4 md:p-6">
             <AnimatePresence mode="wait" initial={false}>
               {voted ? (
@@ -246,6 +222,28 @@ export default function VotePage({ task, participants, onVote, error, onLogoClic
               )}
             </AnimatePresence>
           </Surface>
+
+          {hasDescription ? (
+            <JiraDescriptionPanel
+              description={task.description}
+              descriptionAdf={task.description_adf}
+              jiraKey={task.jira_key ?? null}
+            />
+          ) : null}
+
+          {/* AI summary is rendered last in the centre column — same
+              component the manager sees in the cockpit, so the two
+              screens are byte-identical (description, methods, SP dev/
+              test/final, assumptions). Only appears when the manager
+              has actually generated the summary. */}
+          {task.ai_summary ? (
+            <AiSummaryView
+              summary={task.ai_summary}
+              helperText="для оценки"
+              sparkleLabel="AI-подсказка"
+              className="p-4 md:p-5"
+            />
+          ) : null}
         </section>
       </main>
     </div>

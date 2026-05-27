@@ -25,7 +25,7 @@ import json
 import logging
 import os
 from dataclasses import dataclass
-from typing import Optional
+from typing import Any, Optional
 
 import aiohttp
 import redis.asyncio as aioredis
@@ -368,16 +368,30 @@ async def _ensure_current_task_description(
         except Exception:  # noqa: BLE001 — read failure is non-fatal here.
             return False
     task = session.current_task
-    if task is None or not task.jira_key or task.description:
+    # Skip if both representations are already populated. We backfill if
+    # *either* is missing — a task imported before the ADF field landed
+    # has ``description`` but no ``description_adf``, and the voter UI
+    # would otherwise stay on the plain-text fallback even though Jira
+    # carries rich formatting.
+    if task is None or not task.jira_key or (task.description and task.description_adf):
         return False
     logger.info(
-        "jira description backfill start chat=%s topic=%s task_id=%s key=%s",
+        "jira description backfill start chat=%s topic=%s task_id=%s key=%s has_text=%s has_adf=%s",
         chat_id, topic_id, task.task_id, task.jira_key,
+        bool(task.description), bool(task.description_adf),
     )
-    description = await _fetch_jira_description(http_session, task.jira_key)
-    if not description:
+    fetched = await _fetch_jira_description(http_session, task.jira_key)
+    if fetched.is_empty:
         return False
-    task.description = description
+    changed = False
+    if not task.description and fetched.text:
+        task.description = fetched.text
+        changed = True
+    if not task.description_adf and fetched.adf:
+        task.description_adf = fetched.adf
+        changed = True
+    if not changed:
+        return False
     task.touch()
     try:
         await repo.save_session(session)
@@ -385,23 +399,49 @@ async def _ensure_current_task_description(
         logger.warning("jira description backfill save failed key=%s err=%r", task.jira_key, exc)
         return False
     logger.info(
-        "jira description backfill ok chat=%s task_id=%s key=%s len=%d",
-        chat_id, task.task_id, task.jira_key, len(description),
+        "jira description backfill ok chat=%s task_id=%s key=%s text_len=%d has_adf=%s",
+        chat_id, task.task_id, task.jira_key,
+        len(task.description or ""), bool(task.description_adf),
     )
     return True
+
+
+@dataclass(frozen=True)
+class JiraDescriptionFetch:
+    """Result of a best-effort Jira description fetch.
+
+    ``text`` is the plain-text projection used by AI prompts and as the
+    voter-UI fallback. ``adf`` is the raw Atlassian Document Format
+    payload (a ``{"type": "doc", ...}`` dict) — present only when Jira
+    returned ADF for the description field, ``None`` otherwise. Both
+    fields are independently optional so callers can store whatever is
+    available without dropping the other side.
+    """
+
+    text: Optional[str] = None
+    adf: Optional[Any] = None
+
+    @property
+    def is_empty(self) -> bool:
+        return not self.text and not self.adf
+
+
+_EMPTY_JIRA_FETCH = JiraDescriptionFetch()
 
 
 async def _fetch_jira_description(
     http_session: aiohttp.ClientSession,
     issue_key: str,
-) -> Optional[str]:
+) -> JiraDescriptionFetch:
     """Best-effort fetch of the Jira issue body for a single key.
 
-    Used at import time to populate ``Task.description`` so the voter UI
-    can show the original spec inline. Failures are deliberately
-    swallowed and surfaced as ``None`` — a missing description is a
-    cosmetic loss, not an import-blocking error. The jira-service
-    in-memory cache de-duplicates these calls across rapid re-imports.
+    Used at import time to populate ``Task.description`` /
+    ``Task.description_adf`` so the voter UI can render the original
+    spec (formatted) and the AI prompt can read the plain-text version.
+    Failures are deliberately swallowed and surfaced as an empty
+    ``JiraDescriptionFetch`` — a missing description is a cosmetic loss,
+    not an import-blocking error. The jira-service in-memory cache
+    de-duplicates these calls across rapid re-imports.
 
     Logs every outcome (success / non-200 / network error / empty body)
     so operators can diagnose "why isn't the description showing up?"
@@ -410,7 +450,7 @@ async def _fetch_jira_description(
     """
     key = (issue_key or "").strip().upper()
     if not key:
-        return None
+        return _EMPTY_JIRA_FETCH
     base_url = os.getenv("JIRA_SERVICE_URL", "http://jira-service:8001").rstrip("/")
     timeout = aiohttp.ClientTimeout(
         total=int(os.getenv("JIRA_DESCRIPTION_FETCH_TIMEOUT_SECONDS", "10"))
@@ -424,24 +464,28 @@ async def _fetch_jira_description(
                     "jira description fetch non-200 key=%s status=%s body=%r",
                     key, response.status, body_snippet,
                 )
-                return None
+                return _EMPTY_JIRA_FETCH
             data = await response.json()
     except Exception as exc:  # noqa: BLE001 — see docstring: missing description is non-fatal.
         logger.warning("jira description fetch failed key=%s err=%r url=%s", key, exc, url)
-        return None
+        return _EMPTY_JIRA_FETCH
     if not isinstance(data, dict):
         logger.warning("jira description fetch unexpected body key=%s type=%s", key, type(data).__name__)
-        return None
-    raw = data.get("description")
-    if not isinstance(raw, str):
-        logger.info("jira description fetch missing/non-string key=%s value=%r", key, raw)
-        return None
-    cleaned = raw.strip()
-    if not cleaned:
+        return _EMPTY_JIRA_FETCH
+    raw_text = data.get("description")
+    cleaned = raw_text.strip() if isinstance(raw_text, str) and raw_text.strip() else None
+    raw_adf = data.get("description_adf")
+    # Only accept ADF in the structured ``{"type": "doc", ...}`` shape;
+    # anything else (empty dict, string, None) is collapsed to ``None``.
+    adf = raw_adf if isinstance(raw_adf, dict) and raw_adf.get("type") else None
+    if not cleaned and not adf:
         logger.info("jira description fetch empty body key=%s", key)
-        return None
-    logger.info("jira description fetched key=%s len=%d", key, len(cleaned))
-    return cleaned
+        return _EMPTY_JIRA_FETCH
+    logger.info(
+        "jira description fetched key=%s text_len=%d has_adf=%s",
+        key, len(cleaned or ""), bool(adf),
+    )
+    return JiraDescriptionFetch(text=cleaned, adf=adf)
 
 
 def _jira_preview_payload(issues: list[dict], existing_keys: set[str]) -> dict:
@@ -499,6 +543,7 @@ def _task_payload(session: Session, task: Task) -> dict:
         "completed_at": task.completed_at,
         "jql": task.jql,
         "description": task.description,
+        "description_adf": task.description_adf,
         "created_at_text": task.created_at,
         "domain_updated_at": task.updated_at,
         "updated_at": task.updated_at,

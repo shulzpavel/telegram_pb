@@ -19,7 +19,8 @@ import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
 import { apiUrl } from "../../app/config";
 import TaskTextBlock from "../../components/TaskTextBlock";
 import JiraDescriptionPanel from "../../components/JiraDescriptionPanel";
-import { AiIntelligenceSurface, AiSparkleButton, Alert, Badge, Button, ConfirmDialog, EmptyState, ScrollArea, Spinner, Surface, TextField, TextareaField, ThemeToggle, cn, useTheme, useToast, type ThemeMode } from "../../design-system";
+import AiSummaryView from "../../components/AiSummaryView";
+import { AiSparkleButton, Alert, Badge, Button, ConfirmDialog, EmptyState, ScrollArea, Spinner, Surface, TextField, TextareaField, ThemeToggle, cn, useTheme, useToast, type ThemeMode } from "../../design-system";
 import { cmsAuthApi } from "../cms/api/cmsClient";
 import type { CmsPrincipal } from "../cms/api/cmsTypes";
 import CmsLoginPage from "../cms/auth/CmsLoginPage";
@@ -1510,10 +1511,11 @@ function ControlRoom({
           inline in the cockpit so the manager has the spec body without
           flipping to Jira. Backfilled lazily on the backend if the task
           was imported before the field existed. */}
-      {task?.description ? (
+      {task && (task.description || task.description_adf) ? (
         <div className="mt-4">
           <JiraDescriptionPanel
             description={task.description}
+            descriptionAdf={task.description_adf}
             jiraKey={task.jira_key ?? null}
           />
         </div>
@@ -1521,7 +1523,13 @@ function ControlRoom({
 
       {/* LIVE VOTING / RESULTS ------------------------------------------ */}
       <div className="mt-6">
-        {task?.ai_summary ? <AiSummaryPanel summary={task.ai_summary} /> : null}
+        {task?.ai_summary ? (
+          <AiSummaryView
+            summary={task.ai_summary}
+            helperText="Подсказка уже видна участникам"
+            className="mb-4 p-4"
+          />
+        ) : null}
         {phase === "waiting" ? (
           <EmptyState
             title="Готовы стартовать?"
@@ -1570,75 +1578,6 @@ function ControlRoom({
         </div>
       ) : null}
     </Surface>
-  );
-}
-
-function AiSummaryPanel({ summary }: { summary: NonNullable<NonNullable<ManagerSession["state"]["task"]>["ai_summary"]> }) {
-  const hasStructuredSp =
-    typeof summary.sp_dev === "number" &&
-    typeof summary.sp_test === "number" &&
-    typeof summary.sp_final === "number";
-
-  return (
-    <AiIntelligenceSurface
-      className="mb-4 p-4"
-      sparkleLabel="AI summary"
-    >
-      <div className="flex flex-wrap items-center gap-2">
-        <Badge tone="info">AI summary</Badge>
-        <span className="text-xs text-ink3">Подсказка уже видна участникам</span>
-      </div>
-      <p className="mt-3 text-sm leading-6 text-ink2">{summary.description}</p>
-      <div className="mt-3 grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-wide text-ink3">Методы / зоны внимания</p>
-          <ul className="mt-1 space-y-1 text-sm text-ink2">
-            {summary.methods.map((method) => (
-              <li key={method} className="flex gap-2">
-                <span className="text-blue" aria-hidden="true">•</span>
-                <span>{method}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-wide text-ink3">Оценка сложности от AI</p>
-          <p className="mt-1 text-sm leading-6 text-ink2">{summary.complexity}</p>
-        </div>
-      </div>
-      {hasStructuredSp ? (
-        <div className="mt-3 grid gap-2 sm:grid-cols-3">
-          <div className="rounded-lg border border-line bg-surface px-3 py-2">
-            <p className="text-xs font-semibold uppercase tracking-wide text-ink3">SP dev</p>
-            <p className="mt-1 text-lg font-bold text-ink">{summary.sp_dev}</p>
-          </div>
-          <div className="rounded-lg border border-line bg-surface px-3 py-2">
-            <p className="text-xs font-semibold uppercase tracking-wide text-ink3">SP test</p>
-            <p className="mt-1 text-lg font-bold text-ink">{summary.sp_test}</p>
-          </div>
-          <div className="rounded-lg border border-blue/30 bg-blue/10 px-3 py-2">
-            <p className="text-xs font-semibold uppercase tracking-wide text-ink3">SP final</p>
-            <p className="mt-1 text-lg font-bold text-blue">{summary.sp_final}</p>
-            <p className="text-[11px] text-ink3">
-              {summary.scale_label ?? "SP = max(SP dev, SP test)"}
-            </p>
-          </div>
-        </div>
-      ) : null}
-      {summary.assumptions && summary.assumptions.length > 0 ? (
-        <div className="mt-3">
-          <p className="text-xs font-semibold uppercase tracking-wide text-ink3">Предположения / риски</p>
-          <ul className="mt-1 space-y-1 text-sm text-ink2">
-            {summary.assumptions.map((item) => (
-              <li key={item} className="flex gap-2">
-                <span className="text-blue" aria-hidden="true">•</span>
-                <span>{item}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      ) : null}
-    </AiIntelligenceSurface>
   );
 }
 

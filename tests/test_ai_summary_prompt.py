@@ -85,13 +85,16 @@ def test_validator_still_accepts_well_formed_response() -> None:
 def test_ensure_current_task_description_backfills_in_place() -> None:
     """``_ensure_current_task_description`` must mutate the *same* session
     instance the caller passed in (so post-mutate endpoints don't have
-    to re-read the repo) and persist via ``save_session``."""
+    to re-read the repo) and persist via ``save_session``. The helper
+    now backfills both ``description`` (plain text) and
+    ``description_adf`` (raw ADF) in a single pass."""
     import asyncio
     from types import SimpleNamespace
 
     from app.domain.session import Session
     from app.domain.task import Task
     from services.voting_service import _http_shared
+    from services.voting_service._http_shared import JiraDescriptionFetch
 
     task = Task(jira_key="PROJ-7", summary="X")
     session = Session(chat_id=1, topic_id=None)
@@ -105,7 +108,10 @@ def test_ensure_current_task_description_backfills_in_place() -> None:
             saved.append(s)
 
     async def _fake_fetch(_http_session, _key):
-        return "Fetched body"
+        return JiraDescriptionFetch(
+            text="Fetched body",
+            adf={"type": "doc", "content": [{"type": "paragraph"}]},
+        )
 
     request = SimpleNamespace(
         app=SimpleNamespace(
@@ -129,9 +135,10 @@ def test_ensure_current_task_description_backfills_in_place() -> None:
 
     assert changed is True
     assert task.description == "Fetched body"
+    assert task.description_adf == {"type": "doc", "content": [{"type": "paragraph"}]}
     assert saved and saved[0] is session
 
-    # Warm path: second call must be a no-op (description already set).
+    # Warm path: second call must be a no-op (both fields already set).
     changed_again = asyncio.run(
         _http_shared._ensure_current_task_description(
             request, 1, None, session=session
@@ -143,16 +150,39 @@ def test_ensure_current_task_description_backfills_in_place() -> None:
 
 def test_task_description_round_trips_through_serialization() -> None:
     """Imported Jira description must survive ``to_dict``/``from_dict``
-    so it persists across reloads of the session file."""
+    so it persists across reloads of the session file. Both the plain
+    text projection and the raw ADF payload must round-trip cleanly."""
     from app.domain.task import Task
 
-    task = Task(jira_key="PROJ-1", summary="Build", description="Spec body")
+    adf = {
+        "type": "doc",
+        "content": [
+            {"type": "paragraph", "content": [{"type": "text", "text": "hi"}]}
+        ],
+    }
+    task = Task(
+        jira_key="PROJ-1",
+        summary="Build",
+        description="Spec body",
+        description_adf=adf,
+    )
     loaded = Task.from_dict(task.to_dict())
     assert loaded.description == "Spec body"
+    assert loaded.description_adf == adf
 
-    # Legacy payloads (no description field) must still load.
+    # Legacy payloads (no description fields) must still load cleanly.
     legacy = Task.from_dict({"jira_key": "OLD-1", "summary": "Legacy"})
     assert legacy.description is None
+    assert legacy.description_adf is None
+
+    # Defensive: junk in ``description_adf`` (string, empty dict, wrong
+    # type) must collapse to ``None`` so the renderer never has to
+    # defend itself against malformed data.
+    for bad in ["plain string", {}, {"foo": "bar"}, [], 42]:
+        coerced = Task.from_dict(
+            {"jira_key": "X-1", "summary": "x", "description_adf": bad}
+        )
+        assert coerced.description_adf is None, f"junk ADF {bad!r} must coerce to None"
 
 
 def test_build_task_context_uses_stored_description_when_jira_context_missing() -> None:

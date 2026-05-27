@@ -11,6 +11,12 @@ export interface TaskInfo {
   /** Jira description body captured at import time. `null`/undefined for
    *  manual tasks or when the import-time fetch came back empty. */
   description?: string | null;
+  /** Raw Atlassian Document Format payload for the same description.
+   *  When present, the voter UI renders this (with original Jira
+   *  formatting) instead of the plain-text `description` fallback.
+   *  `unknown` rather than a strict ADF type — the renderer treats any
+   *  non-doc shape as opaque and falls back to plain text. */
+  description_adf?: unknown;
   index: number;
   total: number;
 }

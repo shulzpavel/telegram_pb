@@ -47,6 +47,12 @@ class IssueContextResponse(BaseModel):
     summary: str
     url: str
     description: str = ""
+    # Raw Atlassian Document Format payload (a JSON object whose
+    # ``type`` is usually ``"doc"``). Optional — only present when
+    # Jira returned ADF for the description field. The voter UI
+    # renders this for original formatting; AI prompts stick to the
+    # plain ``description`` string above.
+    description_adf: Optional[dict] = None
     issue_type: Optional[str] = None
     labels: list[str] = []
     components: list[str] = []
@@ -186,6 +192,7 @@ async def get_issue_context(
             summary=context.get("summary", issue_key),
             url=context.get("url", ""),
             description=context.get("description") or "",
+            description_adf=context.get("description_adf"),
             issue_type=context.get("issue_type"),
             labels=context.get("labels") or [],
             components=context.get("components") or [],

@@ -282,8 +282,14 @@ class JiraHttpClient(JiraClient):
         raw_description = fields.get("description")
         if isinstance(raw_description, dict):
             description = adf_to_plain_text(raw_description)
+            # Keep the raw ADF tree alongside the plain-text projection.
+            # The voter UI renders this to preserve original Jira
+            # formatting (lists, headings, code, links). The plain text
+            # is still what the AI prompt consumes.
+            description_adf: Optional[Dict[str, Any]] = raw_description
         else:
             description = str(raw_description or "").strip()
+            description_adf = None
 
         max_chars = max(500, int(os.getenv("ANTHROPIC_MAX_CONTEXT_CHARS", "6000")))
         description = truncate_text(description, max_chars)
@@ -306,6 +312,7 @@ class JiraHttpClient(JiraClient):
             "summary": summary,
             "url": self.get_issue_url(issue_key),
             "description": description,
+            "description_adf": description_adf,
             "issue_type": issue_type,
             "labels": labels[:20],
             "components": components[:20],
