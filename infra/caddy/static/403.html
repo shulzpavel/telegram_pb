@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="noindex" />
+  <title>403 — доступ закрыт · Planning Poker</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --canvas: 18 18 22;
+      --surface: 28 28 33;
+      --ink: 245 245 247;
+      --ink3: 152 152 158;
+      --ink4: 99 99 106;
+      --line: 58 58 65;
+      --blue: 10 132 255;
+      --blue2: 64 156 255;
+      --radius: 1rem;
+      --font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    }
+    @media (prefers-color-scheme: light) {
+      :root {
+        color-scheme: light;
+        --canvas: 247 248 250;
+        --surface: 255 255 255;
+        --ink: 10 10 15;
+        --ink3: 110 110 115;
+        --ink4: 174 174 178;
+        --line: 229 229 234;
+        --blue: 0 113 227;
+        --blue2: 0 119 237;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100svh;
+      min-height: 100dvh;
+      font-family: var(--font);
+      color: rgb(var(--ink));
+      background-color: rgb(var(--canvas));
+      background-image:
+        radial-gradient(46rem 34rem at 14% -6rem, rgb(var(--blue2) / 0.16), transparent 72%),
+        radial-gradient(42rem 30rem at 52% 4rem, rgb(var(--blue) / 0.10), transparent 74%),
+        radial-gradient(44rem 32rem at 92% 92%, rgb(var(--blue) / 0.12), transparent 78%);
+      background-attachment: fixed;
+    }
+    .wrap {
+      display: flex;
+      min-height: inherit;
+      align-items: center;
+      justify-content: center;
+      padding: 2.5rem 1rem 2rem;
+    }
+    .card {
+      width: 100%;
+      max-width: 36rem;
+      padding: 1.75rem 1.5rem 2rem;
+      border-radius: var(--radius);
+      border: 1px solid rgb(var(--line) / 0.7);
+      background: rgb(var(--surface));
+      box-shadow: 0 1px 2px rgb(0 0 0 / 0.06), 0 8px 24px rgb(0 0 0 / 0.08);
+      text-align: center;
+    }
+    .badge {
+      font-size: 0.6875rem;
+      font-weight: 700;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      color: rgb(var(--ink3));
+    }
+    .hero {
+      position: relative;
+      margin-top: 1.5rem;
+      user-select: none;
+    }
+    .glyph {
+      position: absolute;
+      top: -0.25rem;
+      left: 50%;
+      transform: translateX(-50%);
+      font-size: 1.75rem;
+      pointer-events: none;
+      animation: drift 7s ease-in-out infinite;
+    }
+    .mascot {
+      display: block;
+      font-size: clamp(5rem, 18vw, 8rem);
+      line-height: 1;
+      animation: wobble 4.2s ease-in-out infinite;
+    }
+    @keyframes wobble {
+      0%, 100% { transform: rotate(-2deg) translateY(0); }
+      50% { transform: rotate(2deg) translateY(-3px); }
+    }
+    @keyframes drift {
+      0%, 100% { transform: translateX(calc(-50% - 28%)) rotate(-8deg); }
+      50% { transform: translateX(calc(-50% + 28%)) rotate(8deg); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .glyph, .mascot { animation: none; }
+    }
+    h1 {
+      margin: 1.5rem 0 0;
+      font-size: clamp(1.35rem, 4vw, 1.75rem);
+      line-height: 1.25;
+    }
+    p {
+      margin: 0.75rem auto 0;
+      max-width: 28rem;
+      font-size: 0.875rem;
+      line-height: 1.6;
+      color: rgb(var(--ink3));
+    }
+    .actions {
+      margin-top: 1.75rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+      align-items: center;
+    }
+    @media (min-width: 480px) {
+      .actions { flex-direction: row; justify-content: center; }
+    }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 2.5rem;
+      padding: 0 1.25rem;
+      border-radius: 0.625rem;
+      font-size: 0.875rem;
+      font-weight: 600;
+      text-decoration: none;
+      cursor: pointer;
+      border: none;
+      font-family: inherit;
+    }
+    .btn-primary {
+      background: rgb(var(--blue));
+      color: #fff;
+    }
+    .btn-ghost {
+      background: transparent;
+      color: rgb(var(--ink3));
+      border: 1px solid rgb(var(--line));
+    }
+    .foot {
+      margin-top: 1.5rem;
+      font-size: 0.6875rem;
+      color: rgb(var(--ink4));
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <article class="card">
+      <p class="badge">ошибка 403</p>
+      <div class="hero" aria-hidden="true">
+        <span class="glyph">☿️</span>
+        <span class="mascot" role="img" aria-label="Бибизяныч">🙈</span>
+      </div>
+      <h1>Бибизяныч не пускает с этой стороны интернета</h1>
+      <p>
+        Похоже, вы зашли без VPN — сейчас это очень плохо и карается полной
+        недоступностью ресурса. Ретроградный Меркурий, конечно, виноват во всём,
+        но у нас действует белый список IP, и он строже любой астрологии.
+      </p>
+      <p>
+        Подключите VPN из разрешённой сети и обновите страницу. Если VPN уже
+        включён — проверьте, что трафик идёт через туннель, а не напрямую.
+      </p>
+      <div class="actions">
+        <button type="button" class="btn btn-primary" onclick="location.reload()">
+          Обновить страницу
+        </button>
+        <a class="btn btn-ghost" href="/">На главную</a>
+      </div>
+      <p class="foot">
+        С VPN всё равно не пускает? Ваш IP ещё не в белом списке — напишите админу, не бибизяну.
+      </p>
+    </article>
+  </div>
+</body>
+</html>

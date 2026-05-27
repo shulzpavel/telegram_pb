@@ -45,7 +45,9 @@ curl -s https://ifconfig.me
 ```
 
 Add that IP (or your VPN CIDR) to `SITE_ALLOWED_IPS` first, then recreate Caddy.
-Otherwise you will lock yourself out of the site (except `/health/`).
+Otherwise you will lock yourself out of the site (except `/health/`). Blocked
+clients get a friendly **403** HTML page (Бибизяныч + VPN hint) served directly
+from Caddy — not the React app.
 
 To disable the gate (local experiments only): `SITE_IP_WHITELIST_ENABLED=false`.
 
@@ -174,6 +176,30 @@ chmod 600 ~/.ssh/authorized_keys
 ```bash
 docker compose -f docker-compose.prod.yml --env-file .env logs -f voting-service
 docker compose -f docker-compose.prod.yml --env-file .env logs -f caddy
+```
+
+## Caddy keeps restarting
+
+If `docker ps` shows `poker-caddy` as `Restarting` and `ss` has no `:80`/`:443`:
+
+```bash
+docker logs poker-caddy --tail 40
+```
+
+Common causes:
+
+1. **Invalid Caddyfile** — e.g. `trusted_proxies ... cloudflare` on stock `caddy:2-alpine`
+   (use static Cloudflare CIDRs in `infra/caddy/Caddyfile` instead).
+2. **Missing `APP_DOMAIN` / `ACME_EMAIL`** in `.env`.
+3. **Empty `SITE_ALLOWED_IPS`** while whitelist is enabled — add at least one IP/CIDR.
+4. **Missing static 403 page** — `infra/caddy/static/403.html` must exist on the server (`git pull`).
+
+After fixing `.env` or config:
+
+```bash
+docker compose -f docker-compose.prod.yml --env-file .env up -d --force-recreate caddy
+ss -tlnp | grep -E ':80|:443'
+curl -sI http://127.0.0.1/health/ -H "Host: planning.shults-sync.com"
 ```
 
 ## Jira Import

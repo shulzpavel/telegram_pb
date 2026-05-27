@@ -16,6 +16,7 @@ services:
       - SITE_IP_WHITELIST_ENABLED=${SITE_IP_WHITELIST_ENABLED:-true}
     volumes:
       - ./infra/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./infra/caddy/static:/etc/caddy/static:ro
       - caddy-data:/data
       - caddy-config:/config
     depends_on:
