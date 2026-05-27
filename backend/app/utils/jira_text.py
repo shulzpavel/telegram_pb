@@ -32,9 +32,37 @@ def adf_to_plain_text(node: Any) -> str:
 
 
 def truncate_text(text: str, max_chars: int) -> str:
-    """Trim text for LLM context without breaking mid-word when possible."""
-    cleaned = " ".join(text.split())
+    """Trim text for LLM/UI context without breaking mid-word when possible.
+
+    Newlines are preserved on purpose: this same projection is what the
+    voter UI shows as a plain-text fallback when the source field is not
+    ADF (e.g. Jira Server returns descriptions as wiki/plain strings).
+    Collapsing on every whitespace character — like an earlier version
+    did with ``" ".join(text.split())`` — flattened paragraphs into a
+    single run of text and made the description look like one big wall
+    on the voter screen. We still normalise runs of spaces/tabs inside a
+    line so wiki indentation doesn't blow up the budget.
+    """
+    if not text:
+        return ""
+    normalised_lines = ["\u00a0".join(line.split()) for line in text.splitlines()]
+    cleaned = "\n".join(normalised_lines).replace("\u00a0", " ").strip()
+    # Collapse 3+ consecutive blank lines down to 2 — large gaps from
+    # wiki markup are visual noise but a single blank line still
+    # separates paragraphs.
+    while "\n\n\n" in cleaned:
+        cleaned = cleaned.replace("\n\n\n", "\n\n")
     if max_chars <= 0 or len(cleaned) <= max_chars:
         return cleaned
-    clipped = cleaned[: max_chars - 1].rsplit(" ", 1)[0]
-    return f"{clipped}…" if clipped else cleaned[:max_chars]
+    # Try to clip on a whitespace boundary (newline or space) so we
+    # don't cut a word in half. Prefer a newline boundary when it lands
+    # at least 50% into the budget, otherwise fall back to the last
+    # space — keeps the truncation visually clean for both rich-text
+    # and one-paragraph descriptions.
+    window = cleaned[: max_chars - 1]
+    nl = window.rfind("\n")
+    sp = window.rfind(" ")
+    cut = nl if nl >= max_chars // 2 else max(sp, nl)
+    if cut <= 0:
+        cut = max_chars - 1
+    return f"{window[:cut].rstrip()}…"
