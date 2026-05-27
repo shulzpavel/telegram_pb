@@ -1,7 +1,7 @@
 import { motion, useReducedMotion } from "framer-motion";
 import { useEffect } from "react";
 import { Link } from "react-router-dom";
-import { Badge, BrandHomeLink, Button, Surface, ThemeToggle } from "../design-system";
+import { AiSparkleIcon, Badge, BrandHomeLink, Button, Surface, ThemeToggle } from "../design-system";
 
 interface HubAction {
   id: string;
@@ -26,7 +26,7 @@ const ACTIONS: HubAction[] = [
     eyebrow: "Я участник",
     title: "Посмотреть демо голосования",
     description: "Откройте демо как игрок: имя, роль, карточки оценки и live-состояния без настройки.",
-    details: ["Без логина", "Мобильный экран", "Карты оценки", "Reveal результатов"],
+    details: ["Без логина", "Мобильный экран", "Карты оценки", "Live-голоса"],
     cta: { label: "Открыть демо для игрока", to: "/demo", variant: "secondary" },
   },
 ];
@@ -108,9 +108,7 @@ export default function LandingPage() {
 
                   <div className="mt-4 flex flex-wrap gap-2">
                     {action.details.map((detail) => (
-                      <span key={detail} className="rounded-full border border-line bg-line2 px-3 py-1 text-xs font-semibold text-ink3">
-                        {detail}
-                      </span>
+                      <DetailChip key={detail} label={detail} />
                     ))}
                   </div>
 
@@ -122,6 +120,49 @@ export default function LandingPage() {
                 </Surface>
               </motion.div>
             ))}
+            <motion.div
+              {...(reduceMotion
+                ? {}
+                : {
+                    initial: { opacity: 0, y: 16 },
+                    animate: { opacity: 1, y: 0 },
+                    transition: { duration: 0.3, delay: 0.18, ease: [0.2, 0, 0, 1] as const },
+                  })}
+            >
+              <Surface className="p-5 sm:p-6">
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="min-w-0">
+                    <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue">Как это работает</p>
+                    <h2 className="mt-2 text-xl font-bold text-ink sm:text-2xl">Короткая инструкция</h2>
+                    <p className="mt-2 max-w-xl text-sm leading-6 text-ink2">
+                      Менеджер создаёт комнату, импортирует задачи из Jira, запускает голосование и при необходимости генерирует AI summary.
+                      Участники заходят по invite-ссылке, выбирают оценку, видят описание задачи и подсказку, если менеджер её сгенерировал.
+                    </p>
+                  </div>
+                  <span
+                    className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-line bg-line2 text-sm font-bold text-blue"
+                    aria-hidden
+                  >
+                    3
+                  </span>
+                </div>
+
+                <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                  <div className="rounded-xl border border-line bg-line2/70 p-3">
+                    <p className="text-xs font-bold uppercase tracking-wide text-ink3">Для менеджера</p>
+                    <p className="mt-1 text-sm leading-6 text-ink2">
+                      Добавьте задачи, нажмите «Начать голосование», следите за live-оценками и финализируйте SP.
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-line bg-line2/70 p-3">
+                    <p className="text-xs font-bold uppercase tracking-wide text-ink3">Для участника</p>
+                    <p className="mt-1 text-sm leading-6 text-ink2">
+                      Откройте invite, прочитайте задачу и описание, выберите карту — голос сразу виден команде.
+                    </p>
+                  </div>
+                </div>
+              </Surface>
+            </motion.div>
           </div>
         </div>
       </section>
@@ -136,5 +177,30 @@ export default function LandingPage() {
         </div>
       </footer>
     </main>
+  );
+}
+
+function DetailChip({ label }: { label: string }) {
+  if (label !== "AI summary") {
+    return (
+      <span className="rounded-full border border-line bg-line2 px-3 py-1 text-xs font-semibold text-ink3">
+        {label}
+      </span>
+    );
+  }
+
+  return (
+    <span
+      className="inline-flex items-center gap-1.5 rounded-full p-[1px] text-xs font-semibold shadow-card"
+      style={{
+        background:
+          "conic-gradient(from 0deg, rgb(var(--c-purple)), rgb(var(--c-blue2)), rgb(var(--c-blue)), rgb(var(--c-purple)))",
+      }}
+    >
+      <span className="inline-flex items-center gap-1.5 rounded-full bg-surface px-3 py-1 text-blue">
+        <AiSparkleIcon className="h-3.5 w-3.5" />
+        {label}
+      </span>
+    </span>
   );
 }
