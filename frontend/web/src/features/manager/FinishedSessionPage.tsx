@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   Alert,
+  AutoHideAppHeader,
   Badge,
   BackLink,
   BottomSheet,
@@ -210,8 +211,8 @@ export default function FinishedSessionPage() {
     <main className="min-h-screen-mobile app-gradient-bg md:pb-safe-6">
       {/* Header: full-width app chrome. Back navigation lives in its own row
           below so the menu line keeps a stable width and composition. */}
-      <header className="sticky top-0 z-10 border-b border-line bg-surface/90 pt-safe backdrop-blur">
-        <div className="flex min-h-14 w-full items-center gap-2 px-3 sm:px-4 md:min-h-16 md:gap-3 lg:px-6">
+      <AutoHideAppHeader className="z-10 border-line bg-surface/90">
+        <div className="flex min-h-14 w-full items-center gap-2 px-3 pt-safe sm:px-4 md:min-h-16 md:gap-3 lg:px-6">
           <BrandHomeLink size="sm" showWordmark={false} className="shrink-0" />
           <div className="min-w-0 flex-1">
             <p className="text-[11px] font-semibold uppercase tracking-wide text-ink3">Отчёт сессии</p>
@@ -270,7 +271,7 @@ export default function FinishedSessionPage() {
             className="shrink-0"
           />
         </div>
-      </header>
+      </AutoHideAppHeader>
 
       {/* Tabs strip stays directly under the sticky header to keep the
           relationship between "Управление" and "Отчёт" visible at all

@@ -1,7 +1,7 @@
 import { motion, useReducedMotion } from "framer-motion";
 import { type MouseEvent, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { BrandHomeLink, Button, ConfirmDialog, Spinner as DsSpinner, Surface, ThemeToggle } from "../design-system";
+import { AutoHideAppHeader, BrandHomeLink, Button, ConfirmDialog, Spinner as DsSpinner, Surface, ThemeToggle } from "../design-system";
 import { useSession } from "../hooks/useSession";
 import JoinPage from "./JoinPage";
 import ResultsPage from "./ResultsPage";
@@ -137,15 +137,15 @@ function FullScreen({ children, onLogoClick }: { children: React.ReactNode; onLo
   // gives the ThemeToggle a stable anchor instead of a floating overlay.
   return (
     <div className="flex min-h-screen-mobile flex-col app-gradient-bg">
-      <header className="sticky top-0 z-10 border-b border-line/60 bg-surface/85 pt-safe backdrop-blur">
-        <div className="flex min-h-14 w-full items-center px-3 sm:px-4 lg:px-6">
+      <AutoHideAppHeader className="z-10 border-line/60 bg-surface/85">
+        <div className="flex min-h-14 w-full items-center px-3 pt-safe sm:px-4 lg:px-6">
           <BrandHomeLink size="sm" showWordmark={false} onClick={onLogoClick} />
           <span className="ml-2 text-sm font-semibold text-ink2">Planning Poker</span>
           <div className="ml-auto">
             <ThemeToggle size="sm" tone="ghost" />
           </div>
         </div>
-      </header>
+      </AutoHideAppHeader>
       <div className="flex flex-1 items-center justify-center px-4 py-10 pb-safe-6">
         <motion.div
           className="flex flex-col items-center text-center"

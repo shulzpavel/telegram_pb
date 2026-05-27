@@ -20,7 +20,7 @@ import { apiUrl } from "../../app/config";
 import TaskTextBlock from "../../components/TaskTextBlock";
 import JiraDescriptionPanel from "../../components/JiraDescriptionPanel";
 import AiSummaryView from "../../components/AiSummaryView";
-import { AiSparkleButton, Alert, Badge, Button, ConfirmDialog, EmptyState, ScrollArea, Spinner, Surface, TextField, TextareaField, ThemeToggle, cn, useTheme, useToast, type ThemeMode } from "../../design-system";
+import { AiSparkleButton, Alert, AutoHideAppHeader, Badge, Button, ConfirmDialog, EmptyState, ScrollArea, Spinner, Surface, TextField, TextareaField, ThemeToggle, cn, useTheme, useToast, type ThemeMode } from "../../design-system";
 import { cmsAuthApi } from "../cms/api/cmsClient";
 import type { CmsPrincipal } from "../cms/api/cmsTypes";
 import CmsLoginPage from "../cms/auth/CmsLoginPage";
@@ -930,10 +930,9 @@ function ManagerWorkspace({
 }
 
 /**
- * Session cockpit shell: header + tabs stay fixed, content never grows
- * the document. On desktop the three columns fill the viewport and
- * scroll internally; on mobile the sections stack inside one scroll
- * region below the chrome (no "scroll the page to find the hint").
+ * Session cockpit shell. Below `md`, the document scrolls as one page (no nested
+ * scroll areas); the primary header auto-hides on scroll down. From `md` up,
+ * the shell locks to the viewport and columns scroll internally.
  */
 type MobileCockpitTab = "session" | "queue" | "more";
 
@@ -970,20 +969,33 @@ function CockpitShell({
   const childList = Children.toArray(children);
   const isWizard = childList.length === 1;
   const [mobileTab, setMobileTab] = useState<MobileCockpitTab>("session");
+  const [mobileDocScroll, setMobileDocScroll] = useState(false);
+
+  useEffect(() => {
+    const media = window.matchMedia("(max-width: 767px)");
+    function sync() {
+      setMobileDocScroll(media.matches);
+    }
+    sync();
+    media.addEventListener("change", sync);
+    return () => media.removeEventListener("change", sync);
+  }, []);
 
   return (
-    <main className="flex h-screen-mobile flex-col overflow-hidden app-gradient-bg">
-      <div className="shrink-0">
-        <ManagerTopBar
-          principal={principal}
-          title={title}
-          inviteUrl={inviteUrl}
-          onFinishSession={onFinishSession}
-          finishBusy={finishBusy}
-          onRename={onRename}
-          renameBusy={renameBusy}
-          onLogoClick={onLogoClick}
-        />
+    <main className="flex min-h-screen-mobile flex-col app-gradient-bg max-md:overflow-visible md:h-screen-mobile md:overflow-hidden">
+      <div className="sticky top-0 z-30 shrink-0 bg-surface/95 backdrop-blur supports-[backdrop-filter]:bg-surface/80">
+        <AutoHideAppHeader className="border-b-0">
+          <ManagerTopBar
+            principal={principal}
+            title={title}
+            inviteUrl={inviteUrl}
+            onFinishSession={onFinishSession}
+            finishBusy={finishBusy}
+            onRename={onRename}
+            renameBusy={renameBusy}
+            onLogoClick={onLogoClick}
+          />
+        </AutoHideAppHeader>
         <SessionTabsBar chatId={chatId} />
         {!isWizard ? (
           <div
@@ -1015,12 +1027,18 @@ function CockpitShell({
       </div>
 
       {isWizard ? (
-        <ScrollArea className="min-h-0 flex-1" viewportClassName="h-full pb-4 md:pb-safe-6" hint="Прокрутите ниже">
-          <div className="mx-auto w-full max-w-3xl px-4 py-4 md:py-6">{children}</div>
-        </ScrollArea>
+        mobileDocScroll ? (
+          <div className="mx-auto w-full max-w-3xl px-4 py-4 pb-mobile-dock">
+            {children}
+          </div>
+        ) : (
+          <ScrollArea className="min-h-0 flex-1" viewportClassName="h-full pb-4 md:pb-safe-6" hint="Прокрутите ниже">
+            <div className="mx-auto w-full max-w-3xl px-4 py-4 md:py-6">{children}</div>
+          </ScrollArea>
+        )
       ) : (
         <>
-          <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-4 py-4 lg:hidden">
+          <div className="px-4 py-4 pb-mobile-dock max-md:block md:min-h-0 md:flex-1 md:overflow-y-auto md:overflow-x-hidden lg:hidden">
             <div className="mx-auto w-full max-w-[1440px]">
               {mobileTab === "session" ? <div className="min-w-0">{childList[1]}</div> : null}
               {mobileTab === "queue" ? <div className="min-w-0">{childList[0]}</div> : null}
@@ -1204,7 +1222,7 @@ function QueuePanel({
   );
 
   return (
-    <Surface className={cn("flex flex-col p-4 lg:h-full lg:min-h-0 lg:overflow-hidden", className)}>
+    <Surface className={cn("flex flex-col p-4 max-md:overflow-visible lg:h-full lg:min-h-0 lg:overflow-hidden", className)}>
       <div className="flex items-center justify-between gap-3">
         <div>
           <h2 className="text-sm font-bold text-ink">Backlog</h2>
@@ -1213,7 +1231,7 @@ function QueuePanel({
         <Button size="sm" variant="ghost" onClick={onReload}>Refresh</Button>
       </div>
       <TextField className="mt-3" aria-label="Search tasks" placeholder="Search by Jira key or summary" value={query} onChange={(event) => onQuery(event.target.value)} />
-      <div className="mt-3 min-h-0 overflow-auto pr-1 lg:flex-1">
+      <div className="mt-3 pr-1 max-md:overflow-visible md:min-h-0 md:overflow-auto lg:flex-1">
         {queueList}
       </div>
       {cursor ? <Button className="mt-3 w-full" variant="secondary" onClick={onLoadMore}>Load more</Button> : null}
@@ -1994,7 +2012,11 @@ function WizardJiraForm({
           scroll area always fits between the JQL field and the action
           bar — neither overlaps the other when the keyboard opens. */}
       {preview ? (
-        <ScrollArea className="mt-4 max-h-64 rounded-lg border border-line" viewportClassName="max-h-64" hint="Ещё задачи">
+        <ScrollArea
+          className="mt-4 max-md:max-h-none max-md:rounded-lg max-md:border-0 md:max-h-64 md:rounded-lg md:border md:border-line"
+          viewportClassName="max-md:max-h-none max-md:overflow-visible md:max-h-64"
+          hint="Ещё задачи"
+        >
           <div className="sticky top-0 border-b border-line bg-surface px-3 py-2 text-xs font-semibold text-ink3">
             {preview.importable}/{preview.total} importable · {selected.size} selected
           </div>
@@ -2143,7 +2165,11 @@ function TaskAddPanel({
           </Button>
         </div>
         {preview ? (
-          <ScrollArea className="mt-3 max-h-56 rounded-lg border border-line" viewportClassName="max-h-56" hint="Ещё задачи">
+          <ScrollArea
+            className="mt-3 max-md:max-h-none max-md:rounded-lg max-md:border-0 md:max-h-56 md:rounded-lg md:border md:border-line"
+            viewportClassName="max-md:max-h-none max-md:overflow-visible md:max-h-56"
+            hint="Ещё задачи"
+          >
             <div className="sticky top-0 border-b border-line bg-surface px-3 py-2 text-xs font-semibold text-ink3">
               {preview.importable}/{preview.total} importable · {selected.size} selected
             </div>

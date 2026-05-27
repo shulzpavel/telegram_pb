@@ -397,6 +397,11 @@
      overlap the last item. */
   .scroll-pb-cta { padding-bottom: calc(var(--safe-bottom) + 5rem); }
 
+  /* Space for the manager mobile bottom dock so page scroll does not hide CTAs. */
+  .pb-mobile-dock {
+    padding-bottom: calc(var(--safe-bottom) + 5.5rem);
+  }
+
   /* Mobile viewport helpers. `dvh`/`svh` are already in Tailwind 3.4, this
      just gives a stable alias and a min-h-dvh-safe variant that reserves
      bottom inset on iOS Safari. */

@@ -1018,7 +1018,18 @@ function TaskVirtualList({
   onRun: (action: string, mutation: () => Promise<unknown>) => Promise<void>;
 }) {
   const parentRef = useRef<HTMLDivElement | null>(null);
+  const [mobileDocScroll, setMobileDocScroll] = useState(false);
   const queueMode = bucket === "tasks_queue";
+
+  useEffect(() => {
+    const media = window.matchMedia("(max-width: 767px)");
+    function sync() {
+      setMobileDocScroll(media.matches);
+    }
+    sync();
+    media.addEventListener("change", sync);
+    return () => media.removeEventListener("change", sync);
+  }, []);
   const sortableTasks = tasks.filter((task) => task.task_uid);
   const sortableIds = sortableTasks.map((task) => task.task_uid);
   const sensors = useSensors(
@@ -1027,7 +1038,7 @@ function TaskVirtualList({
   );
   const rowVirtualizer = useVirtualizer({
     count: tasks.length,
-    getScrollElement: () => parentRef.current,
+    getScrollElement: () => (mobileDocScroll ? document.documentElement : parentRef.current),
     estimateSize: () => 128,
     overscan: 8,
   });
@@ -1058,56 +1069,62 @@ function TaskVirtualList({
     );
   }
 
-  const content = (
+  const listBody = (
+    <div style={{ height: `${rowVirtualizer.getTotalSize()}px`, position: "relative" }}>
+      <AnimatePresence initial={false}>
+        {rowVirtualizer.getVirtualItems().map((virtualRow) => {
+          const item = tasks[virtualRow.index];
+          return (
+            <div
+              key={`${item.bucket}:${item.task_uid || item.id}`}
+              ref={rowVirtualizer.measureElement}
+              data-index={virtualRow.index}
+              style={{
+                position: "absolute",
+                top: 0,
+                left: 0,
+                width: "100%",
+                transform: `translateY(${virtualRow.start}px)`,
+              }}
+            >
+              {queueMode && canManage ? (
+                <SortableTaskRow
+                  sessionId={sessionId}
+                  detail={detail}
+                  task={item}
+                  canManage={canManage && item.bucket === "tasks_queue" && Boolean(item.task_uid)}
+                  busy={busy}
+                  reduceMotion={reduceMotion}
+                  onRun={onRun}
+                />
+              ) : (
+                <TaskRow
+                  sessionId={sessionId}
+                  detail={detail}
+                  task={item}
+                  canManage={false}
+                  busy={busy}
+                  reduceMotion={reduceMotion}
+                  onRun={onRun}
+                />
+              )}
+            </div>
+          );
+        })}
+      </AnimatePresence>
+    </div>
+  );
+
+  const content = mobileDocScroll ? (
+    listBody
+  ) : (
     <ScrollArea
       className="max-h-[min(640px,70dvh)]"
       viewportClassName="max-h-[min(640px,70dvh)]"
       viewportRef={parentRef}
       hint="Ещё задачи"
     >
-      <div style={{ height: `${rowVirtualizer.getTotalSize()}px`, position: "relative" }}>
-        <AnimatePresence initial={false}>
-          {rowVirtualizer.getVirtualItems().map((virtualRow) => {
-            const item = tasks[virtualRow.index];
-            return (
-              <div
-                key={`${item.bucket}:${item.task_uid || item.id}`}
-                ref={rowVirtualizer.measureElement}
-                data-index={virtualRow.index}
-                style={{
-                  position: "absolute",
-                  top: 0,
-                  left: 0,
-                  width: "100%",
-                  transform: `translateY(${virtualRow.start}px)`,
-                }}
-              >
-                {queueMode && canManage ? (
-                  <SortableTaskRow
-                    sessionId={sessionId}
-                    detail={detail}
-                    task={item}
-                    canManage={canManage && item.bucket === "tasks_queue" && Boolean(item.task_uid)}
-                    busy={busy}
-                    reduceMotion={reduceMotion}
-                    onRun={onRun}
-                  />
-                ) : (
-                  <TaskRow
-                    sessionId={sessionId}
-                    detail={detail}
-                    task={item}
-                    canManage={false}
-                    busy={busy}
-                    reduceMotion={reduceMotion}
-                    onRun={onRun}
-                  />
-                )}
-              </div>
-            );
-          })}
-        </AnimatePresence>
-      </div>
+      {listBody}
     </ScrollArea>
   );
 
@@ -1322,7 +1339,11 @@ function JiraImportPanel({
               Выбрать все
             </button>
           </div>
-          <ScrollArea className="max-h-56 rounded-lg border border-line" viewportClassName="max-h-56 px-2" hint="Ещё задачи">
+          <ScrollArea
+            className="max-md:max-h-none max-md:rounded-lg max-md:border-0 md:max-h-56 md:rounded-lg md:border md:border-line"
+            viewportClassName="max-md:max-h-none max-md:overflow-visible md:max-h-56 md:px-2"
+            hint="Ещё задачи"
+          >
             {preview.items.map((item) => (
               <label key={item.key} className="flex items-start gap-2 border-b border-line py-2 last:border-b-0">
                 <input

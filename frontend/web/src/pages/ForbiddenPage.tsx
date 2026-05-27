@@ -1,5 +1,5 @@
 import { motion, useReducedMotion } from "framer-motion";
-import { BackLink, BrandHomeLink, Button, Surface } from "../design-system";
+import { AutoHideAppHeader, BackLink, BrandHomeLink, Button, Surface } from "../design-system";
 
 /**
  * Friendly 403 page for VPN / IP allowlist blocks. Same tone as NotFoundPage:
@@ -25,11 +25,11 @@ export default function ForbiddenPage() {
 
   return (
     <main className="flex min-h-screen-mobile flex-col app-gradient-bg">
-      <header className="sticky top-0 z-10 border-b border-line/60 bg-surface/85 pt-safe backdrop-blur">
-        <div className="flex min-h-14 w-full items-center px-3 sm:px-4 lg:px-6">
+      <AutoHideAppHeader className="z-10 border-line/60 bg-surface/85">
+        <div className="flex min-h-14 w-full items-center px-3 pt-safe sm:px-4 lg:px-6">
           <BrandHomeLink size="sm" />
         </div>
-      </header>
+      </AutoHideAppHeader>
       <div className="flex flex-1 items-center justify-center px-4 py-10 pb-safe-6">
         <Surface className="w-full max-w-xl p-6 sm:p-8">
           <div className="relative flex flex-col items-center text-center">

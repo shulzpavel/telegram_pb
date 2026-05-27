@@ -1,6 +1,6 @@
 import { motion, useReducedMotion } from "framer-motion";
 import { useLocation } from "react-router-dom";
-import { BackLink, BrandHomeLink, Button, Surface } from "../design-system";
+import { AutoHideAppHeader, BackLink, BrandHomeLink, Button, Surface } from "../design-system";
 
 /**
  * Friendly 404 page. The mascot ("Бибизяныч") wobbles gently while a banana
@@ -33,11 +33,11 @@ export default function NotFoundPage() {
       {/* Tiny header so a wanderer who lands on /404 still feels they
           are inside Planning Poker — the brand mark also doubles as a
           fast escape hatch back to the landing page. */}
-      <header className="sticky top-0 z-10 border-b border-line/60 bg-surface/85 pt-safe backdrop-blur">
-        <div className="flex min-h-14 w-full items-center px-3 sm:px-4 lg:px-6">
+      <AutoHideAppHeader className="z-10 border-line/60 bg-surface/85">
+        <div className="flex min-h-14 w-full items-center px-3 pt-safe sm:px-4 lg:px-6">
           <BrandHomeLink size="sm" />
         </div>
-      </header>
+      </AutoHideAppHeader>
       <div className="flex flex-1 items-center justify-center px-4 py-10 pb-safe-6">
         <Surface className="w-full max-w-xl p-6 sm:p-8">
         <div className="relative flex flex-col items-center text-center">

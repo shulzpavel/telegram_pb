@@ -2,7 +2,7 @@ import { motion, useReducedMotion } from "framer-motion";
 import { type MouseEvent, useEffect, useState } from "react";
 import FlipCard from "../components/FlipCard";
 import TaskTextBlock from "../components/TaskTextBlock";
-import { Badge, BrandHomeLink, Button, LoadingDots, Surface } from "../design-system";
+import { AutoHideAppHeader, Badge, BrandHomeLink, Button, LoadingDots, Surface } from "../design-system";
 import { staggerDelay } from "../design-system/motion";
 import { TaskInfo, VoteResult } from "../hooks/useSession";
 
@@ -90,8 +90,8 @@ export default function ResultsPage({ task, results, _skipAnimation, onNextTask,
     <div className="flex min-h-screen-mobile flex-col app-gradient-bg pb-safe">
       {/* Top bar: matches Vote/Join shells — BrandMark + section
           label + counter on the right. Single row, no wraps. */}
-      <header className="sticky top-0 z-10 border-b border-line/60 bg-surface/85 backdrop-blur pt-safe">
-        <div className="flex min-h-14 w-full items-center gap-2 px-3 sm:px-4 md:px-8">
+      <AutoHideAppHeader className="z-10 border-line/60 bg-surface/85">
+        <div className="flex min-h-14 w-full items-center gap-2 px-3 pt-safe sm:px-4 md:px-8">
           <BrandHomeLink size="sm" showWordmark={false} className="shrink-0" onClick={onLogoClick} />
           <div className="flex min-w-0 flex-wrap items-center gap-2">
             <span className="text-sm font-semibold text-ink2">Результаты</span>
@@ -103,7 +103,7 @@ export default function ResultsPage({ task, results, _skipAnimation, onNextTask,
             </span>
           ) : null}
         </div>
-      </header>
+      </AutoHideAppHeader>
 
       <div className="flex-1 flex flex-col md:flex-row max-w-5xl mx-auto w-full px-4 md:px-8 py-8 gap-8 md:gap-12">
 

@@ -54,7 +54,7 @@ export function ManagerTopBar({
   const backLabel = canSeeSessions ? "К сессиям" : "В CMS";
   const userLabel = principal.display_name ?? principal.username;
   return (
-    <header className="sticky top-0 z-20 border-b border-line bg-surface/90 pt-safe backdrop-blur">
+    <header className="pt-safe">
       <div className="flex min-h-14 w-full items-center gap-2 px-3 py-2 sm:px-4 md:min-h-16 md:gap-3 lg:px-6">
         {/* Brand is icon-only on mobile so the editable title has room to breathe. */}
         <BrandHomeLink size="sm" showWordmark={false} className="shrink-0" onClick={onLogoClick} />

@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { Navigate, NavLink, Route, Routes, useLocation, useNavigate } from "react-router-dom";
-import { BottomSheet, BrandHomeLink, Button, DeferredFallback, RouteTransition, SheetItem, ThemeToggle, useTheme, type ThemeMode } from "../../../design-system";
+import { AutoHideAppHeader, BottomSheet, BrandHomeLink, Button, DeferredFallback, RouteTransition, SheetItem, ThemeToggle, useTheme, type ThemeMode } from "../../../design-system";
 import { cmsAuthApi } from "../api/cmsClient";
 import type { CmsPrincipal } from "../api/cmsTypes";
 import { InlineError, Skeleton } from "../components/CmsPrimitives";
@@ -87,8 +87,9 @@ export default function CmsShell({
 
   return (
     <main className="min-h-screen-mobile app-gradient-bg pb-safe">
-      <header className="sticky top-0 z-30 border-b border-line bg-surface/95 pt-safe backdrop-blur supports-[backdrop-filter]:bg-surface/80">
-        <div className="flex min-h-14 w-full items-center gap-2 px-3 py-2 sm:gap-3 sm:px-4 md:min-h-16 lg:px-6">
+      <header className="sticky top-0 z-30 border-b border-line bg-surface/95 backdrop-blur supports-[backdrop-filter]:bg-surface/80">
+        <AutoHideAppHeader className="border-b-0">
+        <div className="flex min-h-14 w-full items-center gap-2 px-3 py-2 sm:gap-3 sm:px-4 md:min-h-16 lg:px-6 pt-safe">
           <BrandHomeLink size="sm" showWordmark={false} className="shrink-0" />
           <div className="min-w-0 flex-1">
             <h1 className="hidden break-words text-base font-bold leading-snug text-ink sm:block md:text-lg">
@@ -131,6 +132,7 @@ export default function CmsShell({
             </button>
           </div>
         </div>
+        </AutoHideAppHeader>
         {/* Desktop tab strip — horizontal scrollable on tablet, full
             row on laptop+. Mobile uses the bottom sheet instead so we
             don't double-up the navigation surface. */}

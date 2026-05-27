@@ -71,7 +71,7 @@ export function PermissionPicker({ permissions, selected, disabled, onChange }: 
       {groups.length === 0 ? (
         <p className="px-3 py-6 text-center text-sm text-ink3">Ничего не найдено по «{query.trim()}».</p>
       ) : (
-        <div className="max-h-[34rem] space-y-3 overflow-auto pr-1">
+        <div className="space-y-3 pr-1 max-md:overflow-visible md:max-h-[34rem] md:overflow-auto">
           {groups.map((group) => {
             const groupKeys = group.permissions.map((permission) => permission.key);
             const selectedInGroup = groupKeys.filter((key) => selectedSet.has(key)).length;

@@ -62,7 +62,7 @@ export function ManagerBottomDock({
           exactly above the actions instead of reserving overlay space that
           shows up as a blank gap above the menu. */}
       <div
-        className="z-30 shrink-0 border-t border-line bg-surface/95 px-3 pb-safe-4 pt-2 backdrop-blur md:hidden motion-safe:animate-fade-up"
+        className="sticky bottom-0 z-30 shrink-0 border-t border-line bg-surface/95 px-3 pb-safe-4 pt-2 backdrop-blur max-md:shadow-[0_-4px_24px_rgba(0,0,0,0.06)] md:hidden motion-safe:animate-fade-up"
         role="toolbar"
         aria-label="Действия сессии"
       >

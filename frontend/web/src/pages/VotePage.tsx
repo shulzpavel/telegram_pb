@@ -7,8 +7,10 @@ import TaskTextBlock from "../components/TaskTextBlock";
 import VoteCard from "../components/VoteCard";
 import {
   Alert,
+  AutoHideAppHeader,
   Badge,
   BrandHomeLink,
+  CollapsibleSection,
   LoadingDots,
   ProgressBar,
   Surface,
@@ -74,8 +76,8 @@ export default function VotePage({ task, participants, onVote, error, onLogoClic
       {/* Sticky header. `pt-safe` honors the iPhone notch; `bg-surface/80
           backdrop-blur` keeps focus on the cards below while staying legible
           over scrolled content. */}
-      <header className="sticky top-0 z-10 border-b border-line/60 bg-surface/85 backdrop-blur pt-safe">
-        <div className="flex min-h-14 w-full items-center gap-2 px-3 sm:gap-3 sm:px-4 md:px-8">
+      <AutoHideAppHeader className="z-10 border-line/60 bg-surface/85">
+        <div className="flex min-h-14 w-full items-center gap-2 px-3 pt-safe sm:gap-3 sm:px-4 md:px-8">
           <BrandHomeLink size="sm" showWordmark={false} className="shrink-0 sm:hidden" onClick={onLogoClick} />
           <BrandHomeLink size="sm" className="hidden min-w-0 sm:inline-flex" onClick={onLogoClick} />
           <div className="ml-auto flex min-w-0 shrink-0 items-center gap-1.5 sm:gap-2">
@@ -86,7 +88,7 @@ export default function VotePage({ task, participants, onVote, error, onLogoClic
             <ThemeToggle size="sm" tone="ghost" />
           </div>
         </div>
-      </header>
+      </AutoHideAppHeader>
 
       {/* Main layout.
           Mobile: single column, order = vote → description → AI → task → participants
@@ -241,12 +243,22 @@ export default function VotePage({ task, participants, onVote, error, onLogoClic
               test/final, assumptions). Only appears when the manager
               has actually generated the summary. */}
           {task.ai_summary ? (
-            <AiSummaryView
-              summary={task.ai_summary}
-              helperText="для оценки"
-              sparkleLabel="AI-подсказка"
-              className="p-4 md:p-5"
-            />
+            <CollapsibleSection
+              className="rounded-lg border border-line bg-surface p-4 md:p-5 shadow-card"
+              defaultOpenMobile={false}
+              title={
+                <p className="text-2xs font-semibold uppercase tracking-widest text-ink3">
+                  AI-подсказка
+                </p>
+              }
+            >
+              <AiSummaryView
+                summary={task.ai_summary}
+                helperText="для оценки"
+                sparkleLabel="AI-подсказка"
+                className="p-0"
+              />
+            </CollapsibleSection>
           ) : null}
         </section>
       </main>

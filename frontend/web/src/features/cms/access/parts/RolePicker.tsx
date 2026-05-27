@@ -43,7 +43,7 @@ export function RolePicker({ roles, selected, disabled, onChange }: RolePickerPr
           disabled={disabled}
         />
       ) : null}
-      <div className="max-h-52 overflow-auto">
+      <div className="max-md:overflow-visible md:max-h-52 md:overflow-auto">
         {visibleRoles.map((role) => (
           <CheckboxField
             key={role.id}
