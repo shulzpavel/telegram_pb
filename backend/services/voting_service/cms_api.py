@@ -9,6 +9,7 @@ existing imports keep working.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -73,6 +74,7 @@ from services.voting_service._http_shared import (
     _client_ip,
     _existing_jira_keys,
     _extract_bearer,
+    _fetch_jira_description,
     _get_cms_store,
     _get_redis,
     _get_repo_session,
@@ -537,6 +539,26 @@ async def cms_import_jira_tasks(
         selected = {key.strip().upper() for key in body.selected_keys if key.strip()}
         issues = await _jira_preview(request.app.state.http_session, body.jql, body.max_results)
 
+        # Same best-effort description pre-fetch as the manager import path —
+        # see app_api.app_import_jira_tasks for the rationale.
+        keys_to_fetch = [
+            str(issue.get("key") or "").strip().upper()
+            for issue in issues
+            if str(issue.get("key") or "").strip()
+            and (not selected or str(issue.get("key") or "").strip().upper() in selected)
+        ]
+        descriptions = dict(
+            zip(
+                keys_to_fetch,
+                await asyncio.gather(
+                    *[
+                        _fetch_jira_description(request.app.state.http_session, key)
+                        for key in keys_to_fetch
+                    ]
+                ),
+            )
+        ) if keys_to_fetch else {}
+
         def mutate(session: Session) -> TaskMutationResult:
             if body.expected_version is not None and body.expected_version != session.tasks_version:
                 raise TaskQueueError("Task queue was changed. Refresh and try again.", status_code=409)
@@ -557,6 +579,7 @@ async def cms_import_jira_tasks(
                     story_points=issue.get("story_points"),
                     jql=body.jql,
                     source="jira",
+                    description=descriptions.get(key),
                 )
                 session.tasks_queue.append(task)
                 added.append(task)

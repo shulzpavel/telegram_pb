@@ -8,6 +8,9 @@ export interface TaskInfo {
   jira_key?: string;
   story_points?: number | null;
   ai_summary?: AiTaskSummary | null;
+  /** Jira description body captured at import time. `null`/undefined for
+   *  manual tasks or when the import-time fetch came back empty. */
+  description?: string | null;
   index: number;
   total: number;
 }

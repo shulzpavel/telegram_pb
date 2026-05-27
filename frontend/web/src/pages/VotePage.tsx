@@ -1,5 +1,6 @@
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { type MouseEvent, useEffect, useState } from "react";
+import JiraDescriptionPanel from "../components/JiraDescriptionPanel";
 import ParticipantChip from "../components/ParticipantChip";
 import TaskTextBlock from "../components/TaskTextBlock";
 import VoteCard from "../components/VoteCard";
@@ -109,6 +110,13 @@ export default function VotePage({ task, participants, onVote, error, onLogoClic
               </div>
             </Surface>
 
+            {task.description ? (
+              <JiraDescriptionPanel
+                description={task.description}
+                jiraKey={task.jira_key ?? null}
+              />
+            ) : null}
+
             {task.ai_summary ? (
               <AiIntelligenceSurface
                 className="p-4 md:p-5"
@@ -204,7 +212,7 @@ export default function VotePage({ task, participants, onVote, error, onLogoClic
                       a "wait, can I change it?" moment on the voted
                       screen. Compact, single line, single visual weight. */}
                   <p className="mb-3 text-center text-2xs text-ink4 md:mb-4 md:text-left">
-                    Выбор подтвердится сразу после тапа. Голос станет виден после Reveal от фасилитатора.
+                    Выбор подтвердится сразу после тапа и сразу станет виден всей команде.
                   </p>
                   <div className="grid grid-cols-5 gap-2 sm:gap-3">
                     {VOTE_VALUES.map((v) => (

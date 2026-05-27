@@ -124,6 +124,10 @@ def _build_web_session_state(session) -> dict:
             "jira_key": task.jira_key,
             "story_points": task.story_points,
             "ai_summary": task.ai_summary,
+            # Captured at Jira import time. Voter UI renders it as a
+            # collapsible spec block; ``None`` for manual tasks or when
+            # the import-time fetch failed (best-effort).
+            "description": task.description,
             "index": session.current_task_index + 1,
             "total": len(session.tasks_queue),
         }

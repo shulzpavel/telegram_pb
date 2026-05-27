@@ -319,6 +319,42 @@ async def _jira_preview(
     return issues if isinstance(issues, list) else []
 
 
+async def _fetch_jira_description(
+    http_session: aiohttp.ClientSession,
+    issue_key: str,
+) -> Optional[str]:
+    """Best-effort fetch of the Jira issue body for a single key.
+
+    Used at import time to populate ``Task.description`` so the voter UI
+    can show the original spec inline. Failures are deliberately
+    swallowed and surfaced as ``None`` — a missing description is a
+    cosmetic loss, not an import-blocking error. The jira-service
+    in-memory cache de-duplicates these calls across rapid re-imports.
+    """
+    key = (issue_key or "").strip().upper()
+    if not key:
+        return None
+    base_url = os.getenv("JIRA_SERVICE_URL", "http://jira-service:8001").rstrip("/")
+    timeout = aiohttp.ClientTimeout(
+        total=int(os.getenv("JIRA_DESCRIPTION_FETCH_TIMEOUT_SECONDS", "10"))
+    )
+    url = f"{base_url}/api/v1/issue/{key}/context"
+    try:
+        async with http_session.get(url, timeout=timeout) as response:
+            if response.status != 200:
+                return None
+            data = await response.json()
+    except Exception:  # noqa: BLE001 — see docstring: missing description is non-fatal.
+        return None
+    if not isinstance(data, dict):
+        return None
+    raw = data.get("description")
+    if not isinstance(raw, str):
+        return None
+    cleaned = raw.strip()
+    return cleaned or None
+
+
 def _jira_preview_payload(issues: list[dict], existing_keys: set[str]) -> dict:
     items = []
     skipped = []
@@ -373,6 +409,7 @@ def _task_payload(session: Session, task: Task) -> dict:
         "numeric_max": numeric_max,
         "completed_at": task.completed_at,
         "jql": task.jql,
+        "description": task.description,
         "created_at_text": task.created_at,
         "domain_updated_at": task.updated_at,
         "updated_at": task.updated_at,

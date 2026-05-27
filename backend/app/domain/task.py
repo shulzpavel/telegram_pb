@@ -35,6 +35,11 @@ class Task:
     jql: Optional[str] = None
     source: str = "manual"
     ai_summary: Optional[Dict[str, Any]] = None
+    # Jira issue body captured at import time. Used by the voter UI to
+    # show the original spec inline and by the AI summary prompt as a
+    # cheap fallback when the per-request jira-service context fetch
+    # fails or is skipped. Optional — manual tasks have no description.
+    description: Optional[str] = None
     created_at: str = field(default_factory=_utc_now)
     updated_at: str = field(default_factory=_utc_now)
 
@@ -51,6 +56,7 @@ class Task:
             "jql": self.jql,
             "source": self.source,
             "ai_summary": self.ai_summary,
+            "description": self.description,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }
@@ -68,6 +74,12 @@ class Task:
         source = data.get("source")
         if source not in {"jira", "manual"}:
             source = "jira" if data.get("jira_key") else "manual"
+        description_raw = data.get("description")
+        description = (
+            str(description_raw).strip()
+            if isinstance(description_raw, str) and description_raw.strip()
+            else None
+        )
         return cls(
             task_id=task_id,
             jira_key=data.get("jira_key"),
@@ -79,6 +91,7 @@ class Task:
             jql=data.get("jql"),
             source=source,
             ai_summary=data.get("ai_summary") if isinstance(data.get("ai_summary"), dict) else None,
+            description=description,
             created_at=data.get("created_at") or _utc_now(),
             updated_at=data.get("updated_at") or _utc_now(),
         )

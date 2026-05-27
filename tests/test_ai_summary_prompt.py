@@ -82,6 +82,37 @@ def test_validator_still_accepts_well_formed_response() -> None:
     assert payload["confidence"] == "medium"
 
 
+def test_task_description_round_trips_through_serialization() -> None:
+    """Imported Jira description must survive ``to_dict``/``from_dict``
+    so it persists across reloads of the session file."""
+    from app.domain.task import Task
+
+    task = Task(jira_key="PROJ-1", summary="Build", description="Spec body")
+    loaded = Task.from_dict(task.to_dict())
+    assert loaded.description == "Spec body"
+
+    # Legacy payloads (no description field) must still load.
+    legacy = Task.from_dict({"jira_key": "OLD-1", "summary": "Legacy"})
+    assert legacy.description is None
+
+
+def test_build_task_context_uses_stored_description_when_jira_context_missing() -> None:
+    """Stored ``Task.description`` (from import) must reach the prompt
+    when the live jira-service context fetch returned nothing — otherwise
+    the AI loses the spec body and falls back to estimating from the
+    title alone."""
+    from app.domain.task import Task
+    from services.voting_service.ai_summary_llm import _build_task_context
+
+    task = Task(
+        jira_key="PROJ-9",
+        summary="Add bonus tab",
+        description="Bonus tab spec captured from Jira at import time.",
+    )
+    context = _build_task_context(task, jira_context=None)
+    assert "Bonus tab spec captured from Jira at import time." in context
+
+
 def test_validator_corrects_sp_final_below_max() -> None:
     """The validator must enforce sp_final >= max(sp_dev, sp_test) regardless
     of what the model returns. Prompt rule + validator rule together — this
