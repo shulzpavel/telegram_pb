@@ -37,6 +37,7 @@ from services.voting_service._http_shared import (
     JiraImportRequest,
     JiraPreviewRequest,
     TaskCreateRequest,
+    _ensure_current_task_description,
     _fetch_jira_description,
     TaskInput,
     TaskMoveRequest,
@@ -515,6 +516,11 @@ async def app_session_state(
     completed_limit: Optional[int] = Query(default=None, ge=1, le=COMPLETED_MAX_LIMIT),
     _: CmsPrincipal = Depends(_manager_dep),
 ) -> dict:
+    # Backfill description for the current Jira task when it wasn't
+    # captured at import time (sessions imported before the field
+    # landed). No-op on the warm path — once the field is filled in,
+    # the helper short-circuits without doing any I/O.
+    await _ensure_current_task_description(request, chat_id, topic_id)
     session = await _get_repo_session(request.app.state.repository, chat_id, topic_id)
     stored_title = await _stored_session_title(request, chat_id, topic_id)
     resolved_title = _resolve_session_title(title, stored_title)
@@ -874,6 +880,11 @@ async def app_start_session(
     session, error = await _mutate_repo_session(request.app.state.repository, chat_id, topic_id, mutate)
     if error:
         raise HTTPException(status_code=400, detail=error)
+    # First task of the batch just became active — make sure its Jira
+    # description is loaded before we publish/return, otherwise the
+    # voter UI would briefly miss the spec block until the next WS
+    # push. Helper mutates ``session`` in place.
+    await _ensure_current_task_description(request, chat_id, topic_id, session=session)
     await _publish_state(request, session)
     await _audit(request, "app.session.start", actor.username, "ok", {"chat_id": chat_id})
     return _manager_session_payload(session)
@@ -976,6 +987,10 @@ async def app_next_task(
         session.bump_tasks_version()
 
     session, _ = await _mutate_repo_session(request.app.state.repository, chat_id, topic_id, mutate)
+    # The active task just rolled over — backfill its description before
+    # we broadcast so voters see the right spec block on the very first
+    # post-advance render. In-place mutation; no second repo read.
+    await _ensure_current_task_description(request, chat_id, topic_id, session=session)
     await _publish_state(request, session)
     await _audit(request, "app.session.next", actor.username, "ok", {"chat_id": chat_id})
     return _manager_session_payload(session)
@@ -1005,6 +1020,9 @@ async def app_skip_task(
         session.bump_tasks_version()
 
     session, _ = await _mutate_repo_session(request.app.state.repository, chat_id, topic_id, mutate)
+    # Same rationale as ``app_next_task`` — backfill before broadcasting
+    # the new active task's state. In-place mutation; no second repo read.
+    await _ensure_current_task_description(request, chat_id, topic_id, session=session)
     await _publish_state(request, session)
     await _audit(request, "app.session.skip", actor.username, "ok", {"chat_id": chat_id})
     return _manager_session_payload(session)

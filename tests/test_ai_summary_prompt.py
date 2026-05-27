@@ -82,6 +82,65 @@ def test_validator_still_accepts_well_formed_response() -> None:
     assert payload["confidence"] == "medium"
 
 
+def test_ensure_current_task_description_backfills_in_place() -> None:
+    """``_ensure_current_task_description`` must mutate the *same* session
+    instance the caller passed in (so post-mutate endpoints don't have
+    to re-read the repo) and persist via ``save_session``."""
+    import asyncio
+    from types import SimpleNamespace
+
+    from app.domain.session import Session
+    from app.domain.task import Task
+    from services.voting_service import _http_shared
+
+    task = Task(jira_key="PROJ-7", summary="X")
+    session = Session(chat_id=1, topic_id=None)
+    session.tasks_queue = [task]
+    session.current_task_index = 0
+
+    saved: list[Session] = []
+
+    class _Repo:
+        async def save_session(self, s):
+            saved.append(s)
+
+    async def _fake_fetch(_http_session, _key):
+        return "Fetched body"
+
+    request = SimpleNamespace(
+        app=SimpleNamespace(
+            state=SimpleNamespace(
+                repository=_Repo(),
+                http_session=object(),
+            )
+        )
+    )
+
+    saved_fetch = _http_shared._fetch_jira_description
+    _http_shared._fetch_jira_description = _fake_fetch
+    try:
+        changed = asyncio.run(
+            _http_shared._ensure_current_task_description(
+                request, 1, None, session=session
+            )
+        )
+    finally:
+        _http_shared._fetch_jira_description = saved_fetch
+
+    assert changed is True
+    assert task.description == "Fetched body"
+    assert saved and saved[0] is session
+
+    # Warm path: second call must be a no-op (description already set).
+    changed_again = asyncio.run(
+        _http_shared._ensure_current_task_description(
+            request, 1, None, session=session
+        )
+    )
+    assert changed_again is False
+    assert len(saved) == 1  # no extra write
+
+
 def test_task_description_round_trips_through_serialization() -> None:
     """Imported Jira description must survive ``to_dict``/``from_dict``
     so it persists across reloads of the session file."""

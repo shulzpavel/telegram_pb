@@ -319,6 +319,69 @@ async def _jira_preview(
     return issues if isinstance(issues, list) else []
 
 
+async def _ensure_current_task_description(
+    request: Request,
+    chat_id: int,
+    topic_id: Optional[int] = None,
+    *,
+    session: Optional[Session] = None,
+) -> bool:
+    """Lazy-backfill ``Task.description`` for the session's current task.
+
+    Reason this exists: ``description`` is captured at Jira import time,
+    but every session imported *before* that field landed has ``None``
+    for every task. Forcing a re-import is painful. Instead we top up
+    the field on demand — the first time any state-returning endpoint
+    (manager session, voting state, start/next/skip) is hit for a
+    session whose current task is a Jira task with no stored
+    description, we fetch it from jira-service and persist it.
+
+    Behaviour:
+      * Caller may pass an already-loaded ``session`` to skip the read.
+        The helper mutates that same instance in place so the caller's
+        reference is up-to-date on return — important for the post-
+        mutate paths (``start``/``next``/``skip``) that don't want to
+        do a second ``get_session`` round-trip.
+      * No-op when there is no current task, no ``jira_key``, the task
+        already has a description, or the app is missing
+        ``http_session``/``repository`` on state (test rigs).
+      * Best-effort fetch via ``_fetch_jira_description`` — failures
+        leave the task untouched, callers don't see an exception.
+      * Single ``repo.save_session`` write per backfill — no fan-out.
+      * O(1) on the warm path: once populated the function returns
+        without doing any I/O, so it's safe to call from every state
+        read.
+
+    Returns ``True`` iff the description was actually filled in (so
+    callers can decide whether to re-broadcast).
+    """
+    repo = getattr(request.app.state, "repository", None)
+    http_session = getattr(request.app.state, "http_session", None)
+    if repo is None or http_session is None:
+        return False
+    if session is None:
+        try:
+            if hasattr(repo, "get_session_async"):
+                session = await repo.get_session_async(chat_id, topic_id)
+            else:
+                session = repo.get_session(chat_id, topic_id)
+        except Exception:  # noqa: BLE001 — read failure is non-fatal here.
+            return False
+    task = session.current_task
+    if task is None or not task.jira_key or task.description:
+        return False
+    description = await _fetch_jira_description(http_session, task.jira_key)
+    if not description:
+        return False
+    task.description = description
+    task.touch()
+    try:
+        await repo.save_session(session)
+    except Exception:  # noqa: BLE001 — write failure is non-fatal here too.
+        return False
+    return True
+
+
 async def _fetch_jira_description(
     http_session: aiohttp.ClientSession,
     issue_key: str,
