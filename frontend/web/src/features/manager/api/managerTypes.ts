@@ -2,8 +2,8 @@ import type { Page } from "../../../shared/types/pagination";
 import type { JiraPreview, TaskItem } from "../../cms/api/cmsTypes";
 import type { WebSessionState } from "../../../hooks/useSession";
 
-/** Per-participant vote for one task. The manager sees real votes during
- *  the voting phase — participants see only `voted: true/false` until reveal. */
+/** Per-participant vote for one task. Live votes are visible to every
+ *  participant now — the manager-only Reveal stage was removed. */
 export interface NamedVote {
   name: string;
   value: string;

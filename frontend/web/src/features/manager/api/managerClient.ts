@@ -149,7 +149,6 @@ export const managerApi = {
     }),
 
   start: (chatId: number) => appFetch<ManagerSession>(`/sessions/${chatId}/start`, { method: "POST" }),
-  reveal: (chatId: number) => appFetch<ManagerSession>(`/sessions/${chatId}/reveal`, { method: "POST" }),
   generateAiSummary: (chatId: number) => appFetch<ManagerSession>(`/sessions/${chatId}/ai-summary`, { method: "POST" }),
   next: (chatId: number) => appFetch<ManagerSession>(`/sessions/${chatId}/next`, { method: "POST" }),
   skip: (chatId: number) => appFetch<ManagerSession>(`/sessions/${chatId}/skip`, { method: "POST" }),

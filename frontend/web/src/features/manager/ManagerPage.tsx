@@ -31,8 +31,8 @@ import type { CompletedTask, JiraPreview, ManagerSession, ManagerSessionRef, Nam
 
 const PHASE_META: Record<string, { label: string; tone: "info" | "success" | "warning" | "danger" | "neutral"; description: string }> = {
   waiting: { label: "Готовы к старту", tone: "warning",  description: "Очередь задач сформирована — ждём команду и жмём Start." },
-  voting:  { label: "Идёт голосование", tone: "info",     description: "Карты розданы. Голоса видны только вам до Reveal." },
-  results: { label: "Reveal — обсуждение", tone: "success", description: "Голоса раскрыты. Обсудите расхождения и зафиксируйте SP." },
+  voting:  { label: "Идёт голосование", tone: "info",     description: "Карты розданы. Голоса видны всем в лайве." },
+  results: { label: "Все проголосовали",  tone: "success", description: "Обсудите расхождения и зафиксируйте Story Points." },
   complete:{ label: "Сессия завершена", tone: "neutral", description: "Все задачи отыграны. Откройте отчёт или добавьте ещё задач." },
 };
 
@@ -330,10 +330,10 @@ function ManagerLogin({ onLogin }: { onLogin: (principal: CmsPrincipal) => void 
         <div>
           <p className="text-sm font-semibold text-blue">Planning Poker</p>
           <h1 className="mt-5 max-w-xl text-4xl font-bold leading-tight text-ink">Рабочая комната для фасилитации оценки</h1>
-          <p className="mt-4 max-w-lg text-base leading-7 text-ink3">Создайте сессию, соберите участников, подготовьте backlog и управляйте reveal/next без перехода в CMS.</p>
+          <p className="mt-4 max-w-lg text-base leading-7 text-ink3">Создайте сессию, соберите участников, подготовьте backlog и управляйте голосованием без перехода в CMS.</p>
         </div>
         <div className="grid max-w-xl grid-cols-3 gap-3 text-sm">
-          {["Lobby", "Queue", "Reveal"].map((item) => (
+          {["Lobby", "Queue", "Live votes"].map((item) => (
             <div key={item} className="rounded-lg border border-line bg-line2 px-3 py-3 font-semibold text-ink2">{item}</div>
           ))}
         </div>
@@ -884,7 +884,6 @@ function ManagerWorkspace({
         busy={busy}
         canStart={session.tasks_queue_count > 0 && phase === "waiting"}
         onStart={() => applyAction("start", () => managerApi.start(sessionRef.chatId))}
-        onReveal={() => applyAction("reveal", () => managerApi.reveal(sessionRef.chatId))}
         onGenerateAiSummary={() => applyAction("ai-summary", () => managerApi.generateAiSummary(sessionRef.chatId))}
         onNext={() => applyAction("next", () => managerApi.next(sessionRef.chatId))}
         onSkip={() => applyAction("skip", () => managerApi.skip(sessionRef.chatId))}
@@ -1344,7 +1343,6 @@ function ControlRoom({
   busy,
   canStart,
   onStart,
-  onReveal,
   onGenerateAiSummary,
   onNext,
   onSkip,
@@ -1368,7 +1366,6 @@ function ControlRoom({
   busy: string | null;
   canStart: boolean;
   onStart: () => void;
-  onReveal: () => void;
   onGenerateAiSummary: () => void;
   onNext: () => void;
   onSkip: () => void;
@@ -1380,8 +1377,10 @@ function ControlRoom({
   const totalVoters = participants.length;
   const progress = totalVoters > 0 ? votedCount / totalVoters : 0;
 
-  // After reveal we trust `results`; before reveal, the manager-only `liveVotes`
-  // is the source of truth (participants only see vote/not-voted booleans).
+  // Votes are live for everyone now (no manager-only Reveal stage). `results`
+  // arrives via the server once the auto-reveal threshold (all voted) flips
+  // `phase` to "results"; until then `liveVotes` (manager-only enrichment of
+  // `current_task_votes`) is the freshest source of per-name values.
   const revealedVotes = phase === "results" ? (results ?? []) : [];
 
   return (
@@ -1444,28 +1443,16 @@ function ControlRoom({
                 </Button>
               ) : null}
               {phase === "voting" ? (
-                <>
-                  <Button
-                    variant="primary"
-                    size="lg"
-                    disabled={!task || busy !== null}
-                    loading={busy === "reveal"}
-                    onClick={onReveal}
-                    title={!task ? "Текущей задачи нет — добавьте задачи в очередь" : undefined}
-                  >
-                    👁 Reveal — раскрыть голоса
-                  </Button>
-                  <Button
-                    variant={task?.ai_summary ? "secondary" : "success"}
-                    size="lg"
-                    disabled={!task || busy !== null}
-                    loading={busy === "ai-summary"}
-                    onClick={onGenerateAiSummary}
-                    title={!task ? "Сначала нужна текущая задача" : "Сгенерировать подсказку для оценки задачи"}
-                  >
-                    {task?.ai_summary ? "↻ Обновить AI summary" : "Generate AI summary"}
-                  </Button>
-                </>
+                <Button
+                  variant={task?.ai_summary ? "secondary" : "success"}
+                  size="lg"
+                  disabled={!task || busy !== null}
+                  loading={busy === "ai-summary"}
+                  onClick={onGenerateAiSummary}
+                  title={!task ? "Сначала нужна текущая задача" : "Сгенерировать подсказку для оценки задачи"}
+                >
+                  {task?.ai_summary ? "↻ Обновить AI summary" : "Generate AI summary"}
+                </Button>
               ) : null}
               {(phase === "voting" || phase === "results") ? (
                 <>

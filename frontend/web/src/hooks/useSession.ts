@@ -33,6 +33,10 @@ export interface ParticipantStatus {
   name: string;
   role?: ParticipantRole;
   voted: boolean;
+  /** Live vote value (null until the participant casts a vote). Was previously
+   *  hidden until the manager pressed Reveal — that stage has been removed,
+   *  so the server now always sends the real value. */
+  value?: string | null;
 }
 
 export interface VoteResult {
@@ -94,12 +98,17 @@ export function useSession(token: string): UseSessionReturn {
           setState(msg.state as WebSessionState);
           reconnectDelay.current = 1000;
         } else if (msg.type === "vote_cast") {
+          // Live vote — patch both the `voted` flag and the actual value so
+          // every participant (and the manager) sees the same picture.
+          // `voter_value` is optional for backward compat with older builds.
           setState((prev) => {
             if (!prev) return prev;
             return {
               ...prev,
               participants: prev.participants.map((p) =>
-                p.name === msg.voter_name ? { ...p, voted: true } : p
+                p.name === msg.voter_name
+                  ? { ...p, voted: true, value: msg.voter_value ?? p.value ?? null }
+                  : p,
               ),
             };
           });
@@ -116,7 +125,11 @@ export function useSession(token: string): UseSessionReturn {
             phase: "voting",
             task: msg.task as TaskInfo,
             results: undefined,
-            participants: (prev?.participants ?? []).map((p) => ({ ...p, voted: false })),
+            participants: (prev?.participants ?? []).map((p) => ({
+              ...p,
+              voted: false,
+              value: null,
+            })),
           }));
         } else if (msg.type === "batch_complete") {
           setState((prev) => ({

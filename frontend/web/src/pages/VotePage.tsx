@@ -144,7 +144,12 @@ export default function VotePage({ task, participants, onVote, error, onLogoClic
                 <p className="mb-2 text-2xs font-semibold uppercase tracking-widest text-ink3 md:mb-3">Участники</p>
                 <div className="flex flex-wrap gap-2">
                   {participants.map((p, i) => (
-                    <ParticipantChip key={`${p.name}-${i}`} name={p.name} voted={p.voted} />
+                    <ParticipantChip
+                      key={`${p.name}-${i}`}
+                      name={p.name}
+                      voted={p.voted}
+                      value={p.value ?? null}
+                    />
                   ))}
                 </div>
               </Surface>

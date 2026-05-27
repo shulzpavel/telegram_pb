@@ -852,28 +852,6 @@ async def app_start_session(
     return _manager_session_payload(session)
 
 
-@app_router.post("/app/sessions/{chat_id}/reveal")
-async def app_reveal_session(
-    chat_id: int,
-    request: Request,
-    topic_id: Optional[int] = None,
-    actor: CmsPrincipal = Depends(_manager_dep),
-) -> dict:
-    def mutate(session: Session) -> Optional[str]:
-        if not session.current_task or not session.current_batch_started_at:
-            return "No active task to reveal."
-        session.revealed_task_id = session.current_task.task_id
-        session.bump_tasks_version()
-        return None
-
-    session, error = await _mutate_repo_session(request.app.state.repository, chat_id, topic_id, mutate)
-    if error:
-        raise HTTPException(status_code=400, detail=error)
-    await _publish_state(request, session)
-    await _audit(request, "app.session.reveal", actor.username, "ok", {"chat_id": chat_id})
-    return _manager_session_payload(session)
-
-
 @app_router.post("/app/sessions/{chat_id}/ai-summary")
 async def app_generate_ai_summary(
     chat_id: int,

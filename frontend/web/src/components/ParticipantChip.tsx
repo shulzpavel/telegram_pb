@@ -4,6 +4,9 @@ import { LoadingDots } from "../design-system";
 interface ParticipantChipProps {
   name: string;
   voted: boolean;
+  /** Live vote value. When present, replaces the "ждёт…" indicator with
+   *  the actual pick — votes are no longer hidden behind a manager Reveal. */
+  value?: string | null;
 }
 
 const AVATAR_COLORS = [
@@ -29,9 +32,10 @@ function initials(name: string): string {
     .join("");
 }
 
-export default function ParticipantChip({ name, voted }: ParticipantChipProps) {
+export default function ParticipantChip({ name, voted, value }: ParticipantChipProps) {
   const color = colorForName(name);
   const reduceMotion = useReducedMotion();
+  const showValue = voted && value != null && value !== "";
 
   return (
     <div className="flex min-h-10 max-w-full min-w-0 items-center gap-2 rounded-lg border border-line bg-surface px-2.5 py-1.5 shadow-sm">
@@ -56,10 +60,15 @@ export default function ParticipantChip({ name, voted }: ParticipantChipProps) {
         {name}
       </span>
 
-      {/* Waiting indicator */}
-      {!voted && (
+      {/* Live vote value (shown to every participant now that Reveal is gone)
+          or a "waiting" loader if the person hasn't voted yet. */}
+      {showValue ? (
+        <span className="ml-auto shrink-0 rounded-md bg-blue px-1.5 py-0.5 text-2xs font-bold tabular-nums text-white">
+          {value}
+        </span>
+      ) : !voted ? (
         <LoadingDots className="ml-0.5 shrink-0 text-ink4" />
-      )}
+      ) : null}
     </div>
   );
 }
