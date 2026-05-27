@@ -229,6 +229,100 @@
     0%, 100% { transform: translateY(0); opacity: 0.7; }
     50% { transform: translateY(5px); opacity: 1; }
   }
+
+  /* === Apple-Intelligence-style AI surface ===
+     Used by the AI summary panel (manager + voter side panel). The visible
+     border is a thin conic-gradient ring that slowly rotates around the
+     card, with a faint sparkle glyph anchored at the top-right corner.
+     Stays calm: low chroma, long period (8s), small icon — does not
+     compete with the rest of the laconic UI.
+
+     Implementation:
+       1. `.ai-intelligence-surface` paints content over a normal Surface
+          background. A `::before` pseudo-element draws the gradient ring
+          using the standard "padding-mask trick" so the gradient is
+          visible only on the border, not behind the content.
+       2. Rotation is animated via a CSS custom property `--ai-angle`
+          registered through `@property`, which is required to make
+          `conic-gradient(from <angle>, …)` tweenable.
+       3. Browsers without `@property` (older Safari) fall back to a
+          static gradient — the panel still looks intentional.
+       4. `prefers-reduced-motion` rule above already nukes the keyframes.
+  */
+
+  @property --ai-angle {
+    syntax: "<angle>";
+    initial-value: 0deg;
+    inherits: false;
+  }
+
+  @keyframes ai-rotate-border {
+    to { --ai-angle: 360deg; }
+  }
+
+  @keyframes ai-sparkle-pulse {
+    0%, 100% { opacity: 0.85; transform: scale(1); }
+    50%      { opacity: 1;    transform: scale(1.08); }
+  }
+
+  .ai-intelligence-surface {
+    position: relative;
+    border-radius: var(--radius-lg);
+    background: rgb(var(--c-surface));
+    box-shadow: var(--shadow-card);
+    isolation: isolate;
+  }
+
+  .ai-intelligence-surface::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    padding: 1.5px;
+    background: conic-gradient(
+      from var(--ai-angle, 0deg),
+      rgb(var(--c-purple)) 0%,
+      rgb(var(--c-blue2)) 25%,
+      rgb(var(--c-blue)) 50%,
+      rgb(var(--c-purple)) 75%,
+      rgb(var(--c-blue2)) 100%
+    );
+    -webkit-mask:
+      linear-gradient(#000 0 0) content-box,
+      linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+            mask:
+      linear-gradient(#000 0 0) content-box,
+      linear-gradient(#000 0 0);
+            mask-composite: exclude;
+    animation: ai-rotate-border 8s linear infinite;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  /* Faint inner wash so content sits on a slightly tinted card, matching
+     the previous `bg-blue/5` aesthetic of the AI panel. */
+  .ai-intelligence-surface::after {
+    content: "";
+    position: absolute;
+    inset: 1.5px;
+    border-radius: calc(var(--radius-lg) - 1.5px);
+    background:
+      radial-gradient(120% 80% at 0% 0%, rgb(var(--c-purple) / 0.06), transparent 60%),
+      radial-gradient(120% 80% at 100% 100%, rgb(var(--c-blue) / 0.06), transparent 60%);
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .ai-intelligence-surface > * {
+    position: relative;
+    z-index: 1;
+  }
+
+  .ai-sparkle {
+    animation: ai-sparkle-pulse 2.6s var(--ease-out-soft) infinite;
+    transform-origin: center;
+  }
 }
 
 @layer utilities {
