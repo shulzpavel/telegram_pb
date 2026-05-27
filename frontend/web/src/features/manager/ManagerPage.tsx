@@ -983,7 +983,7 @@ function CockpitShell({
 
   return (
     <main className="flex min-h-screen-mobile flex-col app-gradient-bg max-md:overflow-visible md:h-screen-mobile md:overflow-hidden">
-      <div className="sticky top-0 z-30 shrink-0 bg-surface/95 backdrop-blur supports-[backdrop-filter]:bg-surface/80">
+      <div className="shrink-0">
         <AutoHideAppHeader className="border-b-0">
           <ManagerTopBar
             principal={principal}

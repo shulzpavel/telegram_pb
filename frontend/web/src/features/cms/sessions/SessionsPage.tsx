@@ -1018,18 +1018,19 @@ function TaskVirtualList({
   onRun: (action: string, mutation: () => Promise<unknown>) => Promise<void>;
 }) {
   const parentRef = useRef<HTMLDivElement | null>(null);
-  const [mobileDocScroll, setMobileDocScroll] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
   const queueMode = bucket === "tasks_queue";
 
   useEffect(() => {
     const media = window.matchMedia("(max-width: 767px)");
     function sync() {
-      setMobileDocScroll(media.matches);
+      setIsMobile(media.matches);
     }
     sync();
     media.addEventListener("change", sync);
     return () => media.removeEventListener("change", sync);
   }, []);
+
   const sortableTasks = tasks.filter((task) => task.task_uid);
   const sortableIds = sortableTasks.map((task) => task.task_uid);
   const sensors = useSensors(
@@ -1038,7 +1039,7 @@ function TaskVirtualList({
   );
   const rowVirtualizer = useVirtualizer({
     count: tasks.length,
-    getScrollElement: () => (mobileDocScroll ? document.documentElement : parentRef.current),
+    getScrollElement: () => parentRef.current,
     estimateSize: () => 128,
     overscan: 8,
   });
@@ -1069,7 +1070,43 @@ function TaskVirtualList({
     );
   }
 
-  const listBody = (
+  const renderTask = (item: TaskItem) => (
+    queueMode && canManage ? (
+      <SortableTaskRow
+        sessionId={sessionId}
+        detail={detail}
+        task={item}
+        canManage={canManage && item.bucket === "tasks_queue" && Boolean(item.task_uid)}
+        busy={busy}
+        reduceMotion={reduceMotion}
+        onRun={onRun}
+      />
+    ) : (
+      <TaskRow
+        sessionId={sessionId}
+        detail={detail}
+        task={item}
+        canManage={false}
+        busy={busy}
+        reduceMotion={reduceMotion}
+        onRun={onRun}
+      />
+    )
+  );
+
+  const mobileContent = (
+    <div className="space-y-2">
+      <AnimatePresence initial={false}>
+        {tasks.map((item) => (
+          <div key={`${item.bucket}:${item.task_uid || item.id}`}>
+            {renderTask(item)}
+          </div>
+        ))}
+      </AnimatePresence>
+    </div>
+  );
+
+  const virtualizedContent = (
     <div style={{ height: `${rowVirtualizer.getTotalSize()}px`, position: "relative" }}>
       <AnimatePresence initial={false}>
         {rowVirtualizer.getVirtualItems().map((virtualRow) => {
@@ -1087,27 +1124,7 @@ function TaskVirtualList({
                 transform: `translateY(${virtualRow.start}px)`,
               }}
             >
-              {queueMode && canManage ? (
-                <SortableTaskRow
-                  sessionId={sessionId}
-                  detail={detail}
-                  task={item}
-                  canManage={canManage && item.bucket === "tasks_queue" && Boolean(item.task_uid)}
-                  busy={busy}
-                  reduceMotion={reduceMotion}
-                  onRun={onRun}
-                />
-              ) : (
-                <TaskRow
-                  sessionId={sessionId}
-                  detail={detail}
-                  task={item}
-                  canManage={false}
-                  busy={busy}
-                  reduceMotion={reduceMotion}
-                  onRun={onRun}
-                />
-              )}
+              {renderTask(item)}
             </div>
           );
         })}
@@ -1115,8 +1132,8 @@ function TaskVirtualList({
     </div>
   );
 
-  const content = mobileDocScroll ? (
-    listBody
+  const content = isMobile ? (
+    mobileContent
   ) : (
     <ScrollArea
       className="max-h-[min(640px,70dvh)]"
@@ -1124,7 +1141,7 @@ function TaskVirtualList({
       viewportRef={parentRef}
       hint="Ещё задачи"
     >
-      {listBody}
+      {virtualizedContent}
     </ScrollArea>
   );
 

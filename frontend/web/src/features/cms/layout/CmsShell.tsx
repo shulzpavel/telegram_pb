@@ -87,9 +87,9 @@ export default function CmsShell({
 
   return (
     <main className="min-h-screen-mobile app-gradient-bg pb-safe">
-      <header className="sticky top-0 z-30 border-b border-line bg-surface/95 backdrop-blur supports-[backdrop-filter]:bg-surface/80">
+      <header className="z-30 md:sticky md:top-0 md:border-b md:border-line md:bg-surface/95 md:backdrop-blur md:supports-[backdrop-filter]:bg-surface/80">
         <AutoHideAppHeader className="border-b-0">
-        <div className="flex min-h-14 w-full items-center gap-2 px-3 py-2 sm:gap-3 sm:px-4 md:min-h-16 lg:px-6 pt-safe">
+          <div className="flex min-h-14 w-full items-center gap-2 px-3 py-2 pt-safe sm:gap-3 sm:px-4 md:min-h-16 lg:px-6">
           <BrandHomeLink size="sm" showWordmark={false} className="shrink-0" />
           <div className="min-w-0 flex-1">
             <h1 className="hidden break-words text-base font-bold leading-snug text-ink sm:block md:text-lg">
@@ -131,7 +131,7 @@ export default function CmsShell({
               <DotsIcon />
             </button>
           </div>
-        </div>
+          </div>
         </AutoHideAppHeader>
         {/* Desktop tab strip — horizontal scrollable on tablet, full
             row on laptop+. Mobile uses the bottom sheet instead so we
