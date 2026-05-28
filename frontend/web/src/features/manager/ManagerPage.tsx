@@ -350,7 +350,7 @@ function ManagerLogin({ onLogin }: { onLogin: (principal: CmsPrincipal) => void 
           <h2 className="text-xl font-bold text-ink">Вход менеджера</h2>
           <p className="mt-1 text-sm text-ink3">Используется тот же аккаунт, что и для CMS.</p>
           <div className="mt-6 space-y-4">
-            <TextField label="Username" value={username} onChange={(event) => setUsername(event.target.value)} />
+            <TextField autoFocus label="Username" value={username} onChange={(event) => setUsername(event.target.value)} />
             <TextField label="Password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} />
             {error ? <Alert tone="danger">{error}</Alert> : null}
             <Button type="submit" variant="primary" className="w-full" disabled={loading || !username || !password} loading={loading}>

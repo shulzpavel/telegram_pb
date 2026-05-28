@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useId, useRef, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useRef, type CSSProperties, type ReactNode } from "react";
+import { findPreferredFocusTarget, useMobileKeyboardInset } from "./mobileKeyboard";
 import { ScrollArea } from "./ScrollArea";
 import { cn } from "./utils";
 
@@ -36,6 +37,7 @@ export function BottomSheet({
   const sheetRef = useRef<HTMLDivElement | null>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
   const onCloseRef = useRef(onClose);
+  const keyboardInset = useMobileKeyboardInset(open);
 
   useEffect(() => {
     onCloseRef.current = onClose;
@@ -46,6 +48,9 @@ export function BottomSheet({
     previousFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const focusableSelector = "button, [href], input, select, textarea, [tabindex]:not([tabindex='-1'])";
     const focusFirst = () => {
+      const preferred = findPreferredFocusTarget(sheetRef.current);
+      preferred?.focus();
+      if (preferred) return;
       const focusables = Array.from(sheetRef.current?.querySelectorAll<HTMLElement>(focusableSelector) ?? [])
         .filter((el) => !el.hasAttribute("disabled") && el.tabIndex !== -1);
       (focusables[0] ?? sheetRef.current)?.focus();
@@ -104,6 +109,7 @@ export function BottomSheet({
   return (
     <div
       className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 backdrop-blur-sm motion-safe:animate-fade-up md:p-4"
+      style={{ "--keyboard-bottom-inset": `${keyboardInset}px` } as CSSProperties}
       role="presentation"
       onMouseDown={handleBackdrop}
       onTouchEnd={handleBackdrop}
@@ -124,9 +130,8 @@ export function BottomSheet({
           "relative w-full outline-none md:max-w-md",
           "rounded-t-2xl border border-line border-b-0 bg-surface shadow-card",
           "motion-safe:animate-scale-in",
-          // Cap height so long menus get an internal scroll area
-          // instead of pushing into the status bar.
-          "max-h-[88dvh] overflow-hidden",
+          // Keep the sheet above the on-screen keyboard on mobile.
+          "max-h-[calc(100dvh-var(--safe-top)-var(--keyboard-bottom-inset)-0.75rem)] overflow-hidden",
           className,
         )}
       >
@@ -145,7 +150,11 @@ export function BottomSheet({
           </div>
         ) : null}
 
-        <ScrollArea className="max-h-[60dvh]" viewportClassName="max-h-[60dvh] px-2 pb-2 pt-1" hint="Ещё пункты">
+        <ScrollArea
+          className="max-h-[calc(100dvh-var(--keyboard-bottom-inset)-11rem)]"
+          viewportClassName="max-h-[calc(100dvh-var(--keyboard-bottom-inset)-11rem)] px-2 pb-2 pt-1"
+          hint="Ещё пункты"
+        >
           {children}
         </ScrollArea>
 

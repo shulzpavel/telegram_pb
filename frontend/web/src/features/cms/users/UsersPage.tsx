@@ -185,6 +185,7 @@ export default function UsersPage({ principal }: { principal: CmsPrincipal }) {
             ) : null}
             <TextField
               label="Для подтверждения введите имя участника"
+              autoFocus
               value={deleteConfirmName}
               onChange={(event) => setDeleteConfirmName(event.target.value)}
               placeholder={deleteTarget?.name ?? ""}

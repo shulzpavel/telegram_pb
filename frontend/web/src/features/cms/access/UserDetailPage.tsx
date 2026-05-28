@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type CSSProperties } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import {
   Alert,
@@ -12,6 +12,7 @@ import {
   Surface,
   TextField,
 } from "../../../design-system";
+import { useMobileKeyboardInset } from "../../../design-system/mobileKeyboard";
 import { cmsAccessApi, cmsEventsApi } from "../api/cmsClient";
 import type { AuditEvent, CmsAdmin, CmsRole } from "../api/cmsTypes";
 import { HelpCallout, InlineError, Status } from "../components/CmsPrimitives";
@@ -484,31 +485,27 @@ function PasswordResetDialog({ open, username, onCancel, onConfirm }: PasswordRe
   const titleId = useId();
   const descriptionId = useId();
   const dialogRef = useRef<HTMLDivElement | null>(null);
-  const inputRef = useRef<HTMLInputElement | null>(null);
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const keyboardInset = useMobileKeyboardInset(open);
 
   useEffect(() => {
     if (!open) return;
     setPassword("");
     setError(null);
     setSubmitting(false);
-    const frame = window.requestAnimationFrame(() => {
-      inputRef.current?.focus();
-    });
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         event.preventDefault();
-        onCancel();
+        if (!submitting) onCancel();
       }
     };
     document.addEventListener("keydown", handleKeyDown);
     return () => {
-      window.cancelAnimationFrame(frame);
       document.removeEventListener("keydown", handleKeyDown);
     };
-  }, [onCancel, open]);
+  }, [onCancel, open, submitting]);
 
   if (!open) return null;
 
@@ -532,6 +529,7 @@ function PasswordResetDialog({ open, username, onCancel, onConfirm }: PasswordRe
     <div
       role="presentation"
       className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 px-4 pb-safe-4 pt-safe backdrop-blur-sm md:items-center md:py-4"
+      style={{ "--keyboard-bottom-inset": `${keyboardInset}px` } as CSSProperties}
       onMouseDown={(event) => {
         if (event.target === event.currentTarget && !submitting) onCancel();
       }}
@@ -542,7 +540,7 @@ function PasswordResetDialog({ open, username, onCancel, onConfirm }: PasswordRe
         aria-modal="true"
         aria-labelledby={titleId}
         aria-describedby={descriptionId}
-        className="w-full max-w-sm"
+        className="w-full max-w-sm max-h-[calc(100dvh-var(--safe-top)-var(--keyboard-bottom-inset)-0.75rem)] overflow-auto rounded-t-2xl md:rounded-xl"
       >
         <Surface className="rounded-b-none p-4 md:rounded-b-xl">
           <h2 id={titleId} className="text-base font-bold text-ink">Сбросить пароль</h2>
@@ -551,7 +549,7 @@ function PasswordResetDialog({ open, username, onCancel, onConfirm }: PasswordRe
           </p>
           <div className="mt-3">
             <TextField
-              ref={inputRef}
+              autoFocus
               type="password"
               label="Новый пароль"
               value={password}

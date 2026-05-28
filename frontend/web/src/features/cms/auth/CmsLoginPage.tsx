@@ -43,6 +43,7 @@ export default function CmsLoginPage({ onLogin }: { onLogin: (principal: CmsPrin
           <div className="space-y-4">
             <TextField
               label="Username"
+              autoFocus
               autoComplete="username"
               value={username}
               onChange={(event) => setUsername(event.target.value)}

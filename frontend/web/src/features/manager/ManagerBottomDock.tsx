@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { BottomSheet, Button, MobileBottomDock, SheetItem, ThemeMenuControl } from "../../design-system";
+import { keepFocusedFieldVisible } from "../../design-system/mobileKeyboard";
 import type { CmsPrincipal } from "../cms/api/cmsTypes";
 
 /**
@@ -138,6 +139,7 @@ export function ManagerBottomDock({
               value={renameValue}
               maxLength={120}
               onChange={(event) => setRenameValue(event.target.value)}
+              onFocus={(event) => keepFocusedFieldVisible(event.currentTarget)}
               aria-label="Название сессии"
               className="w-full rounded-md border border-line bg-surface px-3 py-2.5 text-base font-medium text-ink outline-none ring-blue/30 focus:ring-2"
             />

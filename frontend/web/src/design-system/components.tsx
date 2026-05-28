@@ -1,4 +1,5 @@
-import { forwardRef, type ButtonHTMLAttributes, type FocusEvent, type HTMLAttributes, type InputHTMLAttributes, type ReactNode, type Ref, type SelectHTMLAttributes, type TextareaHTMLAttributes, useEffect, useId, useRef } from "react";
+import { forwardRef, type ButtonHTMLAttributes, type CSSProperties, type FocusEvent, type HTMLAttributes, type InputHTMLAttributes, type ReactNode, type Ref, type SelectHTMLAttributes, type TextareaHTMLAttributes, useEffect, useId, useRef } from "react";
+import { findPreferredFocusTarget, keepFocusedFieldVisible, useMobileKeyboardInset } from "./mobileKeyboard";
 import { cn } from "./utils";
 
 type Tone = "neutral" | "info" | "success" | "warning" | "danger";
@@ -121,20 +122,6 @@ export function FieldLabel({ children, htmlFor }: { children: ReactNode; htmlFor
 
 const inputClassName =
   "min-h-11 w-full scroll-mt-24 scroll-mb-40 rounded-lg border border-line bg-surface px-3 py-2.5 text-base text-ink placeholder-ink4 shadow-none outline-none transition-[border-color,box-shadow] duration-150 focus:border-blue focus:ring-2 focus:ring-blue/20 disabled:cursor-not-allowed disabled:bg-line2 disabled:text-ink4 sm:min-h-10 sm:text-sm";
-
-function keepFocusedFieldVisible(element: HTMLElement) {
-  if (typeof window === "undefined" || !window.matchMedia("(max-width: 767px)").matches) return;
-  const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  const scroll = () => {
-    element.scrollIntoView({
-      block: "center",
-      inline: "nearest",
-      behavior: prefersReducedMotion ? "auto" : "smooth",
-    });
-  };
-  window.setTimeout(scroll, 80);
-  window.setTimeout(scroll, 320);
-}
 
 function handleMobileFieldFocus<T extends HTMLElement>(
   event: FocusEvent<T>,
@@ -594,6 +581,7 @@ export function ConfirmDialog({
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
   const onCancelRef = useRef(onCancel);
+  const keyboardInset = useMobileKeyboardInset(open);
 
   useEffect(() => {
     onCancelRef.current = onCancel;
@@ -604,6 +592,9 @@ export function ConfirmDialog({
     previousFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const focusableSelector = "button, [href], input, select, textarea, [tabindex]:not([tabindex='-1'])";
     const focusFirst = () => {
+      const preferred = findPreferredFocusTarget(dialogRef.current);
+      preferred?.focus();
+      if (preferred) return;
       const focusables = Array.from(dialogRef.current?.querySelectorAll<HTMLElement>(focusableSelector) ?? [])
         .filter((element) => !element.hasAttribute("disabled") && element.tabIndex !== -1);
       (focusables[0] ?? dialogRef.current)?.focus();
@@ -661,6 +652,7 @@ export function ConfirmDialog({
       // above the iOS home indicator), centered only on md+. Backdrop
       // catches both mouse and touch so taps outside always close it.
       className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 px-4 pb-safe-4 pt-safe backdrop-blur-sm motion-safe:animate-fade-up md:items-center md:py-6"
+      style={{ "--keyboard-bottom-inset": `${keyboardInset}px` } as CSSProperties}
       role="presentation"
       onMouseDown={(event) => {
         if (busy) return;
@@ -679,13 +671,14 @@ export function ConfirmDialog({
         aria-describedby={descriptionId}
         tabIndex={-1}
         className={cn(
-          "w-full max-w-sm outline-none",
+          "w-full max-w-sm outline-none rounded-t-2xl md:rounded-xl",
+          "max-h-[calc(100dvh-var(--safe-top)-var(--keyboard-bottom-inset)-0.75rem)] overflow-auto",
           // Subtle scale-in keeps the dialog from popping. Backdrop
           // fades alongside via animate-fade-up on the parent overlay.
           "motion-safe:animate-scale-in",
         )}
       >
-        <Surface className="p-5">
+        <Surface className="rounded-b-none p-5 md:rounded-b-xl">
           <h2 id={titleId} className="text-lg font-bold text-ink sm:text-base">{title}</h2>
           <div id={descriptionId} className="mt-2 text-base leading-snug text-ink3 sm:text-sm">{description}</div>
           {/* Keep actions thumb-friendly until the layout becomes a

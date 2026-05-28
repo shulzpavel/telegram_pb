@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type MouseEvent } from "react";
 import { Badge, BackLink, BrandHomeLink, Button, Spinner, ThemeToggle } from "../../design-system";
+import { keepFocusedFieldVisible } from "../../design-system/mobileKeyboard";
 import type { CmsPrincipal } from "../cms/api/cmsTypes";
 import { CMS_PERMISSIONS, hasPermission } from "../cms/navigation";
 
@@ -193,6 +194,7 @@ function SessionTitleEditor({
           ref={inputRef}
           value={draft}
           onChange={(event) => setDraft(event.target.value)}
+          onFocus={(event) => keepFocusedFieldVisible(event.currentTarget)}
           onBlur={() => { void commit(); }}
           onKeyDown={(event) => {
             if (event.key === "Escape") {
