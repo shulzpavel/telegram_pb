@@ -2,89 +2,74 @@ import { describe, expect, it } from "vitest";
 import {
   BOOTSTRAP_VELOCITY_SP,
   DEFAULT_BUFFER_PERCENT,
+  DEFAULT_TRACKS,
   computePlannerResult,
-  computeVelocity,
   summarizePlannerResult,
   type PlannerInputs,
+  type PlannerTrack,
 } from "./plannerCalc";
 
-describe("computeVelocity", () => {
-  it("falls back to 50 SP when history is empty", () => {
-    expect(computeVelocity([])).toEqual({
-      velocity: BOOTSTRAP_VELOCITY_SP,
-      velocityDev: 0,
-      velocityTest: 0,
-      usedBootstrap: true,
-    });
-  });
+function makeInputs(overrides: Partial<PlannerInputs> = {}): PlannerInputs {
+  const tracks: PlannerTrack[] = overrides.tracks ?? DEFAULT_TRACKS.map((t) => ({ ...t }));
+  return {
+    workingDays: 22,
+    bufferPercent: DEFAULT_BUFFER_PERCENT,
+    tracks,
+    roles: [
+      { name: "Backend", trackId: "back", headcount: 3, absences: 5 },
+      { name: "Frontend", trackId: "front", headcount: 3, absences: 0 },
+      { name: "QA", trackId: "qa", headcount: 3, absences: 0 },
+    ],
+    velocityHistory: [
+      {
+        label: "S1",
+        storyPointsByTrack: { back: 60, front: 40, qa: 30 },
+      },
+    ],
+    ...overrides,
+  };
+}
 
-  it("averages dev and test tracks independently and takes max for planning", () => {
-    const result = computeVelocity([
-      { label: "S1", storyPointsDev: 40, storyPointsTest: 30 },
-      { label: "S2", storyPointsDev: 50, storyPointsTest: 28 },
-      { label: "S3", storyPointsDev: 45, storyPointsTest: 32 },
-    ]);
-    expect(result.velocityDev).toBe(45);
-    expect(result.velocityTest).toBe(30);
-    expect(result.velocity).toBe(45);
-    expect(result.usedBootstrap).toBe(false);
-  });
-
-  it("picks the slower track as planning velocity when test exceeds dev", () => {
-    const result = computeVelocity([
-      { label: "S1", storyPointsDev: 30, storyPointsTest: 60 },
-    ]);
-    expect(result.velocity).toBe(60);
-  });
-
-  it("ignores zero and negative entries when averaging tracks", () => {
-    const result = computeVelocity([
-      { label: "S1", storyPointsDev: 60, storyPointsTest: 0 },
-      { label: "S2", storyPointsDev: 0, storyPointsTest: -10 },
-      { label: "S3", storyPointsDev: 0, storyPointsTest: 40 },
-    ]);
-    expect(result.velocityDev).toBe(60);
-    expect(result.velocityTest).toBe(40);
-    expect(result.velocity).toBe(60);
-    expect(result.usedBootstrap).toBe(false);
-  });
-});
-
-describe("computePlannerResult", () => {
-  function makeInputs(overrides: Partial<PlannerInputs> = {}): PlannerInputs {
-    return {
-      workingDays: 22,
-      averageCapacity: 198,
-      bufferPercent: DEFAULT_BUFFER_PERCENT,
-      velocityHistory: [{ label: "S1", storyPointsDev: 60, storyPointsTest: 50 }],
-      roles: [
-        { name: "Backend", headcount: 3, absences: 5 },
-        { name: "Frontend", headcount: 3, absences: 0 },
-        { name: "QA", headcount: 3, absences: 0 },
-      ],
-      ...overrides,
-    };
-  }
-
-  it("matches the team handbook simple example (60 SP, 198 → 193, plan 46.4)", () => {
+describe("computePlannerResult — per-track math", () => {
+  it("computes each track independently using only the roles pinned to it", () => {
     const result = computePlannerResult(makeInputs());
-    expect(result.velocity).toBe(60);
-    expect(result.totalBaseCapacity).toBe(198);
-    expect(result.totalNetCapacity).toBe(193);
-    expect(result.totalAbsences).toBe(5);
-    expect(result.adjustedVelocity).toBe(58.5);
-    expect(result.planLimit).toBe(46.8);
-    expect(result.reserveSp).toBe(11.7);
-    expect(result.bottleneckRole?.name).toBe("Backend");
+
+    expect(result.tracks).toHaveLength(3);
+    const [back, front, qa] = result.tracks;
+
+    expect(back.id).toBe("back");
+    expect(back.velocity).toBe(60);
+    expect(back.baseCapacity).toBe(66); // 3 × 22
+    expect(back.netCapacity).toBe(61); // 66 − 5 absences
+    expect(back.adjustedVelocity).toBe(55.5); // 60 × 61/66
+    expect(back.planLimit).toBe(44.4); // 55.5 × 0.8
+    expect(back.reserveSp).toBe(11.1);
+
+    expect(front.id).toBe("front");
+    expect(front.velocity).toBe(40);
+    expect(front.baseCapacity).toBe(66);
+    expect(front.netCapacity).toBe(66);
+    expect(front.adjustedVelocity).toBe(40); // no absences
+    expect(front.planLimit).toBe(32);
+
+    expect(qa.id).toBe("qa");
+    expect(qa.velocity).toBe(30);
+    expect(qa.planLimit).toBe(24);
   });
 
-  it("flags the smallest netCapacity role as the bottleneck", () => {
+  it("sums per-track plan limits into the headline numbers", () => {
+    const result = computePlannerResult(makeInputs());
+    const sum = result.tracks.reduce((acc, t) => acc + t.planLimit, 0);
+    expect(result.totalPlanLimit).toBe(Math.round(sum * 10) / 10);
+  });
+
+  it("auto-detects bottleneck role across all tracks", () => {
     const result = computePlannerResult(
       makeInputs({
         roles: [
-          { name: "Backend", headcount: 3, absences: 8 },
-          { name: "Frontend", headcount: 3, absences: 0 },
-          { name: "QA", headcount: 4, absences: 0 },
+          { name: "Backend", trackId: "back", headcount: 3, absences: 8 },
+          { name: "Frontend", trackId: "front", headcount: 3, absences: 0 },
+          { name: "QA", trackId: "qa", headcount: 4, absences: 0 },
         ],
       }),
     );
@@ -92,82 +77,157 @@ describe("computePlannerResult", () => {
     expect(result.bottleneckRole?.netCapacity).toBe(58);
   });
 
-  it("uses bootstrap velocity when history is empty", () => {
-    const result = computePlannerResult(
-      makeInputs({ velocityHistory: [], averageCapacity: 0, roles: [] }),
-    );
+  it("uses bootstrap velocity split across role-bearing tracks when history is empty", () => {
+    const result = computePlannerResult(makeInputs({ velocityHistory: [] }));
     expect(result.usedBootstrapVelocity).toBe(true);
-    expect(result.velocity).toBe(BOOTSTRAP_VELOCITY_SP);
-    expect(result.adjustedVelocity).toBe(BOOTSTRAP_VELOCITY_SP);
+    const perTrack = BOOTSTRAP_VELOCITY_SP / 3; // 3 tracks each have roles
+    expect(result.tracks[0].velocity).toBeCloseTo(perTrack, 1);
+    expect(result.tracks[0].usedBootstrap).toBe(true);
   });
 
-  it("surfaces per-track velocity alongside the planning velocity", () => {
+  it("does not bootstrap velocity for tracks without any roles", () => {
     const result = computePlannerResult(
       makeInputs({
-        velocityHistory: [
-          { label: "S1", storyPointsDev: 50, storyPointsTest: 30 },
-          { label: "S2", storyPointsDev: 70, storyPointsTest: 40 },
+        velocityHistory: [],
+        roles: [{ name: "Backend", trackId: "back", headcount: 2, absences: 0 }],
+      }),
+    );
+    expect(result.tracks.find((t) => t.id === "back")?.usedBootstrap).toBe(true);
+    expect(result.tracks.find((t) => t.id === "front")?.usedBootstrap).toBe(false);
+    expect(result.tracks.find((t) => t.id === "front")?.velocity).toBe(0);
+  });
+
+  it("scales each track separately when absences hit one track only", () => {
+    const result = computePlannerResult(
+      makeInputs({
+        roles: [
+          { name: "Backend", trackId: "back", headcount: 3, absences: 22 }, // 1 person fully out
+          { name: "Frontend", trackId: "front", headcount: 3, absences: 0 },
+          { name: "QA", trackId: "qa", headcount: 3, absences: 0 },
         ],
       }),
     );
-    expect(result.velocityDev).toBe(60);
-    expect(result.velocityTest).toBe(35);
-    expect(result.velocity).toBe(60);
-  });
-
-  it("computes independent dev / test plan budgets scaled by capacity", () => {
-    const result = computePlannerResult(
-      makeInputs({
-        velocityHistory: [{ label: "S1", storyPointsDev: 60, storyPointsTest: 40 }],
-      }),
-    );
-    expect(result.dev.velocity).toBe(60);
-    expect(result.dev.adjustedVelocity).toBe(58.5);
-    expect(result.dev.planLimit).toBe(46.8);
-
-    expect(result.test.velocity).toBe(40);
-    expect(result.test.adjustedVelocity).toBe(39);
-    expect(result.test.planLimit).toBe(31.2);
-  });
-
-  it("keeps adjusted velocity equal to raw when average capacity is zero", () => {
-    const result = computePlannerResult(
-      makeInputs({ averageCapacity: 0, roles: [{ name: "Backend", headcount: 3, absences: 0 }] }),
-    );
-    expect(result.adjustedVelocity).toBe(60);
-    expect(result.planLimit).toBe(48);
-  });
-
-  it("clamps buffer at 0..80 percent", () => {
-    const high = computePlannerResult(makeInputs({ bufferPercent: 200 }));
-    expect(high.planLimit).toBe(11.7);
-
-    const low = computePlannerResult(makeInputs({ bufferPercent: -10 }));
-    expect(low.planLimit).toBe(58.5);
+    const back = result.tracks.find((t) => t.id === "back")!;
+    const front = result.tracks.find((t) => t.id === "front")!;
+    // Back scale = 44/66 ≈ 0.667 → 60 × 0.667 = 40 SP
+    expect(back.adjustedVelocity).toBe(40);
+    expect(back.planLimit).toBe(32);
+    // Front not affected
+    expect(front.scale).toBe(1);
+    expect(front.adjustedVelocity).toBe(40);
   });
 
   it("never returns negative netCapacity for absences exceeding base", () => {
     const result = computePlannerResult(
       makeInputs({
-        roles: [{ name: "Solo", headcount: 1, absences: 999 }],
-        averageCapacity: 22,
+        roles: [{ name: "Solo", trackId: "back", headcount: 1, absences: 999 }],
+        velocityHistory: [{ label: "S1", storyPointsByTrack: { back: 30 } }],
       }),
     );
     expect(result.totalNetCapacity).toBe(0);
-    expect(result.bottleneckRole?.name).toBe("Solo");
+    const back = result.tracks.find((t) => t.id === "back")!;
+    expect(back.netCapacity).toBe(0);
+    expect(back.planLimit).toBe(0);
+  });
+
+  it("clamps buffer at 0..80 percent", () => {
+    const high = computePlannerResult(makeInputs({ bufferPercent: 200 }));
+    // Buffer clamped to 80 → planLimit per track = adjusted × 0.2
+    expect(high.tracks[0].planLimit).toBe(11.1); // 55.5 × 0.2
+
+    const low = computePlannerResult(makeInputs({ bufferPercent: -10 }));
+    expect(low.tracks[0].planLimit).toBe(55.5); // 0% buffer
+  });
+
+  it("re-homes roles whose track was deleted onto the first remaining track", () => {
+    const result = computePlannerResult(
+      makeInputs({
+        // No "front" track defined, but a role still references it.
+        tracks: [
+          { id: "back", label: "Backend" },
+          { id: "qa", label: "QA" },
+        ],
+        roles: [
+          { name: "Backend", trackId: "back", headcount: 2, absences: 0 },
+          { name: "Mobile", trackId: "front", headcount: 2, absences: 0 },
+          { name: "QA", trackId: "qa", headcount: 1, absences: 0 },
+        ],
+      }),
+    );
+    // Mobile re-homed onto "back" — back baseCapacity now covers 4 headcount × 22.
+    const back = result.tracks.find((t) => t.id === "back")!;
+    expect(back.baseCapacity).toBe(88);
+  });
+
+  it("falls back to default tracks for malformed inputs with no tracks at all", () => {
+    const result = computePlannerResult(
+      makeInputs({ tracks: [], roles: [], velocityHistory: [] }),
+    );
+    expect(result.tracks.map((t) => t.id)).toEqual(["back", "front", "qa"]);
+  });
+
+  it("supports custom tracks beyond back/front/qa", () => {
+    const result = computePlannerResult(
+      makeInputs({
+        tracks: [
+          { id: "back", label: "Backend" },
+          { id: "front", label: "Frontend" },
+          { id: "qa", label: "QA" },
+          { id: "design", label: "Design" },
+        ],
+        roles: [
+          { name: "Backend", trackId: "back", headcount: 2, absences: 0 },
+          { name: "Frontend", trackId: "front", headcount: 2, absences: 0 },
+          { name: "QA", trackId: "qa", headcount: 1, absences: 0 },
+          { name: "Designer", trackId: "design", headcount: 1, absences: 0 },
+        ],
+        velocityHistory: [
+          { label: "S1", storyPointsByTrack: { back: 30, front: 20, qa: 15, design: 8 } },
+        ],
+      }),
+    );
+    const design = result.tracks.find((t) => t.id === "design")!;
+    expect(design.label).toBe("Design");
+    expect(design.velocity).toBe(8);
+    expect(design.planLimit).toBe(6.4); // 8 × 1.0 × 0.8
   });
 });
 
 describe("summarizePlannerResult", () => {
-  it("produces a single-line summary used in the list view", () => {
-    const inputs: PlannerInputs = {
-      workingDays: 22,
-      averageCapacity: 198,
+  it("renders one segment per non-empty track with the global buffer", () => {
+    const result = computePlannerResult(makeInputs());
+    expect(summarizePlannerResult(result)).toBe(
+      "Backend 44.4 / Frontend 32 / QA 24 SP · буфер 25.1",
+    );
+  });
+
+  it("hides tracks with no roles and no velocity from the summary", () => {
+    const result = computePlannerResult(
+      makeInputs({
+        tracks: [
+          { id: "back", label: "Backend" },
+          { id: "front", label: "Frontend" },
+          { id: "qa", label: "QA" },
+          { id: "design", label: "Design" },
+        ],
+        roles: [
+          { name: "Backend", trackId: "back", headcount: 2, absences: 0 },
+          { name: "QA", trackId: "qa", headcount: 1, absences: 0 },
+        ],
+        velocityHistory: [{ label: "S1", storyPointsByTrack: { back: 30, qa: 15 } }],
+      }),
+    );
+    expect(summarizePlannerResult(result)).not.toMatch(/Frontend|Design/);
+  });
+
+  it("returns a friendly placeholder when nothing is defined", () => {
+    const result = computePlannerResult({
+      workingDays: 0,
       bufferPercent: DEFAULT_BUFFER_PERCENT,
-      velocityHistory: [{ label: "S1", storyPointsDev: 60, storyPointsTest: 40 }],
-      roles: [{ name: "Team", headcount: 9, absences: 5 }],
-    };
-    const result = computePlannerResult(inputs);
-    expect(summarizePlannerResult(result)).toBe("dev 46.8 / test 31.2 SP · буфер 11.7/7.8");
+      tracks: [],
+      roles: [],
+      velocityHistory: [],
+    });
+    expect(summarizePlannerResult(result)).toBe("Нет данных");
   });
 });

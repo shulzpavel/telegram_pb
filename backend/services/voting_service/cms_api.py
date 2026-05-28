@@ -161,29 +161,47 @@ class SessionRenameRequest(BaseModel):
     title: Optional[str] = Field(default=None, max_length=200)
 
 
+class SprintPlanTrack(BaseModel):
+    """One configurable planning track (e.g. back, front, qa, design).
+
+    The frontend planner is tag-driven: each role is pinned to a track and
+    velocity / capacity / plan limit are computed per track independently.
+    Backend just stores the user-declared tracks verbatim — no business
+    logic relies on the slug values.
+    """
+
+    id: str = Field(min_length=1, max_length=40)
+    label: str = Field(min_length=1, max_length=80)
+
+
 class SprintPlanRoleInput(BaseModel):
     """One role line inside the detailed capacity input."""
 
     name: str = Field(min_length=1, max_length=80)
     headcount: float = Field(ge=0, le=999)
     absences: float = Field(default=0, ge=0, le=99999)
+    # Tag-driven planner: which track this role belongs to. Optional for
+    # back-compat with payloads saved before the tag split.
+    track_id: Optional[str] = Field(default=None, max_length=40)
 
 
 class SprintPlanHistoryEntry(BaseModel):
     """One closed sprint inside the velocity history.
 
-    Stored separately for dev and test tracks so the planner can surface
-    the slower track as the planning velocity (per-task rule
-    ``final_sp = max(sp_dev, sp_test)``).
+    The tag-driven planner stores closed SP per track in ``by_track`` (a
+    map of track slug → SP). Earlier shapes are preserved so legacy plans
+    keep loading:
 
-    ``story_points`` is kept for read-back compatibility with plans saved
-    before the dev/test split; new payloads always carry the two fields.
+    * ``story_points``                     — pre-split single SP per sprint
+    * ``story_points_dev`` / ``..._test``  — dev/test split phase
     """
 
     label: str = Field(default="", max_length=120)
     story_points: Optional[float] = Field(default=None, ge=0, le=99999)
-    story_points_dev: float = Field(default=0, ge=0, le=99999)
-    story_points_test: float = Field(default=0, ge=0, le=99999)
+    story_points_dev: Optional[float] = Field(default=None, ge=0, le=99999)
+    story_points_test: Optional[float] = Field(default=None, ge=0, le=99999)
+    # New canonical field for the tag-driven planner.
+    by_track: Optional[dict[str, float]] = Field(default=None)
 
 
 class SprintPlanPayload(BaseModel):
@@ -192,11 +210,17 @@ class SprintPlanPayload(BaseModel):
     The result is recomputed on the frontend on every change for live preview
     and stored alongside the inputs so list views can show a one-line summary
     without recomputing.
+
+    ``tracks`` is optional so payloads saved before the tag-driven planner
+    keep deserialising; the frontend re-creates default tracks for those.
     """
 
     working_days: float = Field(ge=0, le=200)
+    # Deprecated — kept at zero for new payloads. Previously held the global
+    # baseline capacity; the tag-driven planner derives capacity per track.
     average_capacity: float = Field(default=0, ge=0, le=999999)
     buffer_percent: float = Field(default=20, ge=0, le=80)
+    tracks: Optional[list[SprintPlanTrack]] = Field(default=None, max_length=20)
     velocity_history: list[SprintPlanHistoryEntry] = Field(default_factory=list, max_length=20)
     roles: list[SprintPlanRoleInput] = Field(default_factory=list, max_length=30)
     notes: str = Field(default="", max_length=2000)

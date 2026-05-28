@@ -243,24 +243,39 @@ export const cmsTokensApi = {
     }),
 };
 
+export interface SprintPlanTrack {
+  /** Short slug used as the stable reference (e.g. "back", "front", "qa"). */
+  id: string;
+  /** Human-readable label. */
+  label: string;
+}
+
 export interface SprintPlanRoleInput {
   name: string;
   headcount: number;
   absences: number;
+  /** Tag-driven planner: which track this role belongs to. */
+  track_id?: string;
 }
 
 export interface SprintPlanHistoryEntry {
   label: string;
-  /** Legacy field — populated for plans saved before the dev/test split. */
+  /** Closed SP per track id. Tag-driven planner. */
+  by_track?: Record<string, number>;
+  /** Legacy field — populated for plans saved before the tag split. */
   story_points?: number;
+  /** Legacy field — populated for plans saved during the dev/test split phase. */
   story_points_dev?: number;
   story_points_test?: number;
 }
 
 export interface SprintPlanPayload {
   working_days: number;
+  /** Legacy / deprecated — kept for back-compat with older payloads. */
   average_capacity: number;
   buffer_percent: number;
+  /** Track definitions. Optional for back-compat with older payloads. */
+  tracks?: SprintPlanTrack[];
   velocity_history: SprintPlanHistoryEntry[];
   roles: SprintPlanRoleInput[];
   notes: string;

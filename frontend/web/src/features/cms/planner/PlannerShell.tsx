@@ -6,12 +6,19 @@ import {
   Button,
   ConfirmDialog,
   EmptyState,
+  SelectField,
   Spinner,
   TextField,
   TextareaField,
   useToast,
 } from "../../../design-system";
-import { cmsPlannerApi, type SprintPlanPayload, type SprintPlanRecord } from "../api/cmsClient";
+import {
+  cmsPlannerApi,
+  type SprintPlanHistoryEntry,
+  type SprintPlanPayload,
+  type SprintPlanRecord,
+  type SprintPlanRoleInput,
+} from "../api/cmsClient";
 import {
   HelpCallout,
   InlineError,
@@ -23,10 +30,15 @@ import {
 import {
   BOOTSTRAP_VELOCITY_SP,
   DEFAULT_BUFFER_PERCENT,
+  DEFAULT_TRACKS,
   computePlannerResult,
   summarizePlannerResult,
+  type PlannerHistoryEntry,
   type PlannerInputs,
   type PlannerResult,
+  type PlannerRoleInput,
+  type PlannerTrack,
+  type PlannerTrackResult,
 } from "./plannerCalc";
 
 interface PlannerShellProps {
@@ -107,9 +119,9 @@ function PlannerListPage({ canManage }: { canManage: boolean }) {
 
       <HelpCallout title="Кратко">
         <p>
-          Velocity = среднее закрытых SP за последние 3–5 спринтов. Capacity = человеко-дни команды
-          с учётом отпусков. План = Velocity × (Capacity новый / Capacity средний), затем минус
-          буфер (по умолчанию 20%) на незапланированные задачи.
+          Команда разбивается на треки (back / front / qa / любые свои). Velocity и Capacity считаются
+          для каждого трека отдельно. План каждого трека = Velocity × (Capacity спринта / Capacity база)
+          минус буфер (по умолчанию 20%) на незапланированные задачи.
         </p>
       </HelpCallout>
 
@@ -257,53 +269,122 @@ function formatDate(iso: string | null | undefined): string {
 }
 
 // ---------------------------------------------------------------------------
-// Editor view
+// Editor view — defaults, payload <-> input mapping, save flow
 // ---------------------------------------------------------------------------
 
-const DEFAULT_ROLES: PlannerInputs["roles"] = [
-  { name: "Backend", headcount: 3, absences: 0 },
-  { name: "Frontend", headcount: 3, absences: 0 },
-  { name: "QA", headcount: 3, absences: 0 },
-];
+function makeDefaultTracks(): PlannerTrack[] {
+  return DEFAULT_TRACKS.map((t) => ({ ...t }));
+}
 
-const DEFAULT_HISTORY: PlannerInputs["velocityHistory"] = [
-  { label: "Спринт −1", storyPointsDev: 0, storyPointsTest: 0 },
-  { label: "Спринт −2", storyPointsDev: 0, storyPointsTest: 0 },
-  { label: "Спринт −3", storyPointsDev: 0, storyPointsTest: 0 },
-];
+function makeDefaultRoles(): PlannerRoleInput[] {
+  return [
+    { name: "Backend", trackId: "back", headcount: 3, absences: 0 },
+    { name: "Frontend", trackId: "front", headcount: 3, absences: 0 },
+    { name: "QA", trackId: "qa", headcount: 3, absences: 0 },
+  ];
+}
+
+function makeDefaultHistory(): PlannerHistoryEntry[] {
+  const empty = (label: string): PlannerHistoryEntry => ({
+    label,
+    storyPointsByTrack: { back: 0, front: 0, qa: 0 },
+  });
+  return [empty("Спринт −1"), empty("Спринт −2"), empty("Спринт −3")];
+}
 
 function emptyInputs(): PlannerInputs {
   return {
     workingDays: 10,
-    averageCapacity: 0,
     bufferPercent: DEFAULT_BUFFER_PERCENT,
-    velocityHistory: DEFAULT_HISTORY.map((entry) => ({ ...entry })),
-    roles: DEFAULT_ROLES.map((entry) => ({ ...entry })),
+    tracks: makeDefaultTracks(),
+    roles: makeDefaultRoles(),
+    velocityHistory: makeDefaultHistory(),
   };
 }
 
+/**
+ * Convert a stored payload back into the editor's working state.
+ *
+ * Two legacy shapes are migrated transparently so old plans keep opening
+ * without surprises:
+ *
+ *   1. Plans saved before the tag-driven planner stored a single
+ *      `story_points` (and later `story_points_dev` / `story_points_test`).
+ *      We map those onto two synthetic tracks named "Dev" and "Test", and
+ *      pin every role to "dev" by default. The user can then reorganise.
+ *   2. Plans saved with the new tag-driven planner already carry `tracks` and
+ *      `by_track` — we just hydrate them as-is.
+ */
 function payloadToInputs(payload: SprintPlanPayload): PlannerInputs {
+  const legacyTracks = !payload.tracks || payload.tracks.length === 0;
+
+  let tracks: PlannerTrack[];
+  if (legacyTracks) {
+    const usesDevTest = payload.velocity_history.some(
+      (e) => e.story_points_dev != null || e.story_points_test != null,
+    );
+    if (usesDevTest) {
+      tracks = [
+        { id: "dev", label: "Dev" },
+        { id: "test", label: "Test" },
+      ];
+    } else if (payload.velocity_history.some((e) => e.story_points != null)) {
+      // Even older shape — single SP per sprint. Surface as one "Команда" track.
+      tracks = [{ id: "team", label: "Команда" }];
+    } else {
+      tracks = makeDefaultTracks();
+    }
+  } else {
+    tracks = payload.tracks!.map((t) => ({ id: t.id, label: t.label }));
+  }
+
+  const fallbackTrackId = tracks[0]?.id ?? "back";
+  const knownIds = new Set(tracks.map((t) => t.id));
+
   return {
     workingDays: payload.working_days,
-    averageCapacity: payload.average_capacity,
     bufferPercent: payload.buffer_percent,
-    velocityHistory: payload.velocity_history.map((entry) => {
-      // Backwards-compat: older plans stored a single `story_points` field
-      // before we split dev/test. Map it onto both tracks so the loaded plan
-      // produces the same velocity it did before the migration.
-      const legacy = entry.story_points;
-      return {
-        label: entry.label,
-        storyPointsDev: entry.story_points_dev ?? legacy ?? 0,
-        storyPointsTest: entry.story_points_test ?? legacy ?? 0,
-      };
-    }),
+    tracks,
+    velocityHistory: payload.velocity_history.map((entry) => ({
+      label: entry.label,
+      storyPointsByTrack: hydrateByTrack(entry, tracks),
+    })),
     roles: payload.roles.map((role) => ({
       name: role.name,
+      // Backend role with a track that no longer exists — re-home onto the
+      // first available track so its capacity stays in the calc.
+      trackId: role.track_id && knownIds.has(role.track_id) ? role.track_id : fallbackTrackId,
       headcount: role.headcount,
       absences: role.absences,
     })),
   };
+}
+
+function hydrateByTrack(
+  entry: SprintPlanHistoryEntry,
+  tracks: PlannerTrack[],
+): Record<string, number> {
+  const out: Record<string, number> = {};
+  // Prefer the explicit per-track map when present.
+  if (entry.by_track) {
+    for (const t of tracks) {
+      out[t.id] = nonNegativeNumber(entry.by_track[t.id]);
+    }
+    return out;
+  }
+  // Otherwise fall back to legacy fields, mapping them onto matching IDs.
+  for (const t of tracks) {
+    if (t.id === "dev") out[t.id] = nonNegativeNumber(entry.story_points_dev ?? entry.story_points);
+    else if (t.id === "test") out[t.id] = nonNegativeNumber(entry.story_points_test ?? entry.story_points);
+    else if (t.id === "team") out[t.id] = nonNegativeNumber(entry.story_points);
+    else out[t.id] = 0;
+  }
+  return out;
+}
+
+function nonNegativeNumber(value: number | null | undefined): number {
+  if (value == null || !Number.isFinite(value) || value < 0) return 0;
+  return value;
 }
 
 function inputsToPayload(
@@ -313,21 +394,36 @@ function inputsToPayload(
 ): SprintPlanPayload {
   return {
     working_days: inputs.workingDays,
-    average_capacity: inputs.averageCapacity,
+    // Deprecated field — kept at 0 for back-compat with the older schema
+    // which still includes it. Tag-driven capacity is computed per track.
+    average_capacity: 0,
     buffer_percent: inputs.bufferPercent,
-    velocity_history: inputs.velocityHistory.map((entry) => ({
-      label: entry.label,
-      // Legacy `story_points` is required by older backends (deployed before
-      // the dev/test split). Send max(dev, test) so old releases keep
-      // accepting the payload without changing the meaning for new ones.
-      story_points: Math.max(entry.storyPointsDev, entry.storyPointsTest),
-      story_points_dev: entry.storyPointsDev,
-      story_points_test: entry.storyPointsTest,
-    })),
-    roles: inputs.roles.map((role) => ({
+    tracks: inputs.tracks.map((t) => ({ id: t.id, label: t.label })),
+    velocity_history: inputs.velocityHistory.map((entry) => {
+      const byTrack: Record<string, number> = {};
+      for (const t of inputs.tracks) {
+        byTrack[t.id] = nonNegativeNumber(entry.storyPointsByTrack[t.id]);
+      }
+      // Legacy SP fields are still populated so older backends keep
+      // accepting the payload and so a downgrade does not lose data
+      // entirely. Mapping:
+      //   - story_points     = max across all tracks
+      //   - story_points_dev = byTrack.dev (or 0)
+      //   - story_points_test= byTrack.test (or 0)
+      const max = Object.values(byTrack).reduce((m, v) => (v > m ? v : m), 0);
+      return {
+        label: entry.label,
+        story_points: max,
+        story_points_dev: nonNegativeNumber(byTrack["dev"]),
+        story_points_test: nonNegativeNumber(byTrack["test"]),
+        by_track: byTrack,
+      };
+    }),
+    roles: inputs.roles.map<SprintPlanRoleInput>((role) => ({
       name: role.name,
       headcount: role.headcount,
       absences: role.absences,
+      track_id: role.trackId,
     })),
     notes,
     result_summary: summarizePlannerResult(result),
@@ -394,15 +490,19 @@ function PlannerEditorPage({
           ? await cmsPlannerApi.update(planId, { name: name.trim(), payload })
           : await cmsPlannerApi.create({ name: name.trim(), payload });
 
-      // Reflect what was actually persisted. If the deployed voting-service is
-      // older than the dev/test split it silently drops the new fields and
-      // only stores legacy `story_points`. Detect that and warn the user so
-      // they don't see their dev/test inputs "snap back" on next visit.
-      const lostDevTestSplit = saved.payload.velocity_history.some((entry) => {
-        const hasNew = entry.story_points_dev != null || entry.story_points_test != null;
-        return !hasNew && entry.story_points != null;
+      // Detect older voting-service deployments that silently strip the new
+      // `tracks` / `by_track` fields — surface a warning so the user knows
+      // why their tag-driven plan "snaps back" to the legacy dev/test shape.
+      const lostTracks =
+        (!saved.payload.tracks || saved.payload.tracks.length === 0) &&
+        inputs.tracks.length > 0;
+      const lostByTrack = saved.payload.velocity_history.some((entry, idx) => {
+        const original = inputs.velocityHistory[idx];
+        if (!original) return false;
+        const hadTrackedSp = Object.values(original.storyPointsByTrack).some((v) => (v ?? 0) > 0);
+        return hadTrackedSp && !entry.by_track;
       });
-      setLegacyBackendDetected(lostDevTestSplit);
+      setLegacyBackendDetected(lostTracks || lostByTrack);
 
       // For "create" the editor will navigate to the edit URL and re-fetch
       // from the server; refreshing local state here would just flicker.
@@ -414,8 +514,8 @@ function PlannerEditorPage({
 
       setSavedAt(Date.now());
       toast.success(
-        lostDevTestSplit
-          ? "Сохранено, но дорожки dev/test свёрнуты бэком"
+        lostTracks || lostByTrack
+          ? "Сохранено, но бэкенд свернул треки"
           : "План сохранён",
       );
 
@@ -473,9 +573,9 @@ function PlannerEditorPage({
       {error ? <InlineError text={error} /> : null}
       {legacyBackendDetected ? (
         <Alert tone="warning">
-          Бэкенд voting-service ещё не обновлён под разделение SP dev / SP test —
-          ваши значения свёрнуты в одно число <code>max(dev, test)</code>. Пересоберите
-          сервис, чтобы значения сохранялись по отдельности.
+          Бэкенд voting-service ещё не обновлён под теги треков — часть данных
+          свернута в legacy-поля и при следующей загрузке восстановится не полностью.
+          Пересоберите сервис, чтобы значения по тегам сохранялись отдельно.
         </Alert>
       ) : null}
 
@@ -491,7 +591,6 @@ function PlannerEditorPage({
             onNotes={setNotes}
             inputs={inputs}
             onInputs={setInputs}
-            totalBaseFromRoles={result.totalBaseCapacity}
           />
           <ResultPanel result={result} />
         </div>
@@ -545,6 +644,10 @@ function defaultPlanName(): string {
   return `Спринт ${year}-${month}-${day}`;
 }
 
+// ---------------------------------------------------------------------------
+// Editor form — tracks, roles, history, buffer
+// ---------------------------------------------------------------------------
+
 function PlannerForm({
   disabled,
   name,
@@ -553,7 +656,6 @@ function PlannerForm({
   onNotes,
   inputs,
   onInputs,
-  totalBaseFromRoles,
 }: {
   disabled: boolean;
   name: string;
@@ -562,22 +664,34 @@ function PlannerForm({
   onNotes: (next: string) => void;
   inputs: PlannerInputs;
   onInputs: (next: PlannerInputs) => void;
-  /** headcount × workingDays summed over all roles (no absences) — used as the
-   *  "take from current roles" shortcut for the base-capacity field. */
-  totalBaseFromRoles: number;
 }) {
-  function setVelocity(index: number, patch: Partial<PlannerInputs["velocityHistory"][number]>) {
+  // ----- velocity history mutators -----
+  function setVelocity(
+    index: number,
+    patch: Partial<PlannerHistoryEntry>,
+  ) {
     onInputs({
       ...inputs,
-      velocityHistory: inputs.velocityHistory.map((item, i) => (i === index ? { ...item, ...patch } : item)),
+      velocityHistory: inputs.velocityHistory.map((item, i) =>
+        i === index ? { ...item, ...patch } : item,
+      ),
+    });
+  }
+  function setVelocityTrackValue(index: number, trackId: string, value: number) {
+    const entry = inputs.velocityHistory[index];
+    if (!entry) return;
+    setVelocity(index, {
+      storyPointsByTrack: { ...entry.storyPointsByTrack, [trackId]: value },
     });
   }
   function addVelocity() {
+    const blank: Record<string, number> = {};
+    for (const t of inputs.tracks) blank[t.id] = 0;
     onInputs({
       ...inputs,
       velocityHistory: [
         ...inputs.velocityHistory,
-        { label: `Спринт −${inputs.velocityHistory.length + 1}`, storyPointsDev: 0, storyPointsTest: 0 },
+        { label: `Спринт −${inputs.velocityHistory.length + 1}`, storyPointsByTrack: blank },
       ],
     });
   }
@@ -588,21 +702,119 @@ function PlannerForm({
     });
   }
 
-  function setRole(index: number, patch: Partial<PlannerInputs["roles"][number]>) {
+  // ----- role mutators -----
+  function setRole(index: number, patch: Partial<PlannerRoleInput>) {
     onInputs({
       ...inputs,
       roles: inputs.roles.map((item, i) => (i === index ? { ...item, ...patch } : item)),
     });
   }
   function addRole() {
+    const trackId = inputs.tracks[0]?.id ?? "back";
     onInputs({
       ...inputs,
-      roles: [...inputs.roles, { name: "Новая роль", headcount: 1, absences: 0 }],
+      roles: [...inputs.roles, { name: "Новая роль", trackId, headcount: 1, absences: 0 }],
     });
   }
   function removeRole(index: number) {
     onInputs({ ...inputs, roles: inputs.roles.filter((_, i) => i !== index) });
   }
+
+  // ----- track mutators -----
+  function addTrack() {
+    const existing = new Set(inputs.tracks.map((t) => t.id));
+    const id = uniqueTrackId("track", existing);
+    const label = `Трек ${inputs.tracks.length + 1}`;
+    const nextTracks = [...inputs.tracks, { id, label }];
+    onInputs({
+      ...inputs,
+      tracks: nextTracks,
+      velocityHistory: inputs.velocityHistory.map((entry) => ({
+        ...entry,
+        storyPointsByTrack: { ...entry.storyPointsByTrack, [id]: 0 },
+      })),
+    });
+  }
+  function renameTrack(index: number, patch: { id?: string; label?: string }) {
+    const current = inputs.tracks[index];
+    if (!current) return;
+
+    let nextId = current.id;
+    if (patch.id !== undefined) {
+      // Sanitize: lowercase, replace whitespace, dedupe. Empty input falls
+      // back to the previous id to avoid orphaning roles.
+      const cleaned = patch.id
+        .toString()
+        .trim()
+        .toLowerCase()
+        .replace(/[^\p{Letter}\p{Number}_]+/gu, "_")
+        .replace(/^_+|_+$/g, "");
+      if (cleaned.length > 0) {
+        const taken = new Set(inputs.tracks.map((t, i) => (i === index ? "" : t.id)));
+        nextId = uniqueTrackId(cleaned, taken);
+      }
+    }
+    const nextLabel = patch.label !== undefined ? patch.label : current.label;
+
+    const nextTracks = inputs.tracks.map((t, i) =>
+      i === index ? { id: nextId, label: nextLabel } : t,
+    );
+
+    // Cascade-rename across roles + history so references stay valid.
+    const nextRoles =
+      nextId === current.id
+        ? inputs.roles
+        : inputs.roles.map((r) => (r.trackId === current.id ? { ...r, trackId: nextId } : r));
+
+    const nextHistory =
+      nextId === current.id
+        ? inputs.velocityHistory
+        : inputs.velocityHistory.map((entry) => {
+            const value = entry.storyPointsByTrack[current.id] ?? 0;
+            const { [current.id]: _removed, ...rest } = entry.storyPointsByTrack;
+            return {
+              ...entry,
+              storyPointsByTrack: { ...rest, [nextId]: value },
+            };
+          });
+
+    onInputs({ ...inputs, tracks: nextTracks, roles: nextRoles, velocityHistory: nextHistory });
+  }
+  function removeTrack(index: number) {
+    // Never allow zero tracks — the calc relies on at least one.
+    if (inputs.tracks.length <= 1) return;
+    const removed = inputs.tracks[index]!;
+    const remaining = inputs.tracks.filter((_, i) => i !== index);
+    const fallback = remaining[0]!.id;
+    onInputs({
+      ...inputs,
+      tracks: remaining,
+      // Re-home any roles that were pinned to the removed track so their
+      // capacity does not silently disappear.
+      roles: inputs.roles.map((r) =>
+        r.trackId === removed.id ? { ...r, trackId: fallback } : r,
+      ),
+      velocityHistory: inputs.velocityHistory.map((entry) => {
+        const { [removed.id]: _dropped, ...rest } = entry.storyPointsByTrack;
+        return { ...entry, storyPointsByTrack: rest };
+      }),
+    });
+  }
+
+  // Build the dynamic grid template for the velocity rows. Tailwind can't
+  // synthesize arbitrary `repeat(N, 1fr)` at runtime, so we inject the value
+  // through inline style instead.
+  const trackCount = inputs.tracks.length;
+  const velocityRowStyle = useMemo(
+    () => ({
+      gridTemplateColumns: `minmax(0,2fr) ${
+        trackCount > 0
+          ? `${Array(trackCount).fill("minmax(0,1fr)").join(" ")} `
+          : ""
+      }auto`,
+    }),
+    [trackCount],
+  );
 
   return (
     <div className="space-y-5">
@@ -618,10 +830,10 @@ function PlannerForm({
       </FormCard>
 
       <FormCard title="Спринт">
-        <div className="grid gap-3 sm:grid-cols-3">
+        <div className="grid gap-3 sm:grid-cols-2">
           <NumberCell
             label="Рабочие дни"
-            hint="Длина спринта"
+            hint="Длина спринта (одинаково для всех ролей). Пример: двухнедельный спринт = 10."
             value={inputs.workingDays}
             min={0}
             max={200}
@@ -629,30 +841,9 @@ function PlannerForm({
             disabled={disabled}
             onChange={(value) => onInputs({ ...inputs, workingDays: value })}
           />
-          <div className="space-y-1.5">
-            <NumberCell
-              label="Базовый Capacity, чел-дней"
-              hint={`Сколько чел-дней даёт команда в типичном спринте — без отпусков, на этом фоне получена Velocity. Пример: 9 чел × 22 дня = 198. Сейчас по ролям без отсутствий: ${formatBase(totalBaseFromRoles)}.`}
-              placeholder="Например, 198"
-              value={inputs.averageCapacity}
-              min={0}
-              step={1}
-              disabled={disabled}
-              onChange={(value) => onInputs({ ...inputs, averageCapacity: value })}
-            />
-            {!disabled && totalBaseFromRoles > 0 ? (
-              <button
-                type="button"
-                onClick={() => onInputs({ ...inputs, averageCapacity: totalBaseFromRoles })}
-                className="text-xs font-semibold text-blue hover:underline focus-visible:outline-none focus-visible:underline"
-              >
-                Взять из текущих ролей: {formatBase(totalBaseFromRoles)}
-              </button>
-            ) : null}
-          </div>
           <NumberCell
             label="Буфер, %"
-            hint="Доля Velocity под незапланированное"
+            hint="Доля Velocity под незапланированное (горящие баги, переключения)."
             value={inputs.bufferPercent}
             min={0}
             max={80}
@@ -664,8 +855,56 @@ function PlannerForm({
       </FormCard>
 
       <FormCard
+        title="Треки команды"
+        description="Раздели работу по тегам (back, front, qa или любым своим). Каждой роли в команде потом назначается один трек, и план считается по треку — это и есть универсальный калькулятор."
+        action={
+          !disabled ? (
+            <Button size="sm" variant="ghost" onClick={addTrack}>
+              + Добавить трек
+            </Button>
+          ) : null
+        }
+      >
+        <div className="space-y-2">
+          {inputs.tracks.map((track, index) => (
+            <div
+              key={`${index}-${track.id}`}
+              className="grid items-end gap-2 sm:grid-cols-[1fr_2fr_auto]"
+            >
+              <TextField
+                label={index === 0 ? "ID (тег)" : undefined}
+                value={track.id}
+                onChange={(event) => renameTrack(index, { id: event.target.value })}
+                maxLength={40}
+                disabled={disabled}
+                hint={index === 0 ? "Используется в данных, латиница" : undefined}
+                reserveMessageSpace={false}
+              />
+              <TextField
+                label={index === 0 ? "Название трека" : undefined}
+                value={track.label}
+                onChange={(event) => renameTrack(index, { label: event.target.value })}
+                maxLength={80}
+                disabled={disabled}
+                reserveMessageSpace={false}
+              />
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => removeTrack(index)}
+                disabled={disabled || inputs.tracks.length <= 1}
+                title={inputs.tracks.length <= 1 ? "Нужен хотя бы один трек" : "Удалить трек"}
+              >
+                ×
+              </Button>
+            </div>
+          ))}
+        </div>
+      </FormCard>
+
+      <FormCard
         title="История Velocity"
-        description="Закрытые SP за 3–5 последних спринтов, отдельно по dev и test. Планирующая Velocity = max(dev, test) — это соответствует правилу команды «итоговый SP задачи = max(SP dev, SP test)»."
+        description="Закрытые SP по каждому треку за 3–5 последних спринтов. Velocity трека = среднее по непустым значениям. Если истории нет — будет использовано стартовое значение 50 SP, распределённое между треками с командой."
         action={
           !disabled ? (
             <Button size="sm" variant="ghost" onClick={addVelocity}>
@@ -676,10 +915,16 @@ function PlannerForm({
       >
         <div className="space-y-2">
           {inputs.velocityHistory.length === 0 ? (
-            <p className="text-sm text-ink3">Нет данных — будет использовано {BOOTSTRAP_VELOCITY_SP} SP.</p>
+            <p className="text-sm text-ink3">
+              Нет данных — будет использовано {BOOTSTRAP_VELOCITY_SP} SP, разнесено по трекам.
+            </p>
           ) : null}
           {inputs.velocityHistory.map((entry, index) => (
-            <div key={index} className="grid items-end gap-2 sm:grid-cols-[2fr_1fr_1fr_auto]">
+            <div
+              key={index}
+              className="grid items-end gap-2"
+              style={velocityRowStyle}
+            >
               <TextField
                 label={index === 0 ? "Спринт" : undefined}
                 value={entry.label}
@@ -688,22 +933,17 @@ function PlannerForm({
                 disabled={disabled}
                 reserveMessageSpace={false}
               />
-              <NumberCell
-                label={index === 0 ? "SP dev" : undefined}
-                value={entry.storyPointsDev}
-                min={0}
-                step={1}
-                disabled={disabled}
-                onChange={(value) => setVelocity(index, { storyPointsDev: value })}
-              />
-              <NumberCell
-                label={index === 0 ? "SP test" : undefined}
-                value={entry.storyPointsTest}
-                min={0}
-                step={1}
-                disabled={disabled}
-                onChange={(value) => setVelocity(index, { storyPointsTest: value })}
-              />
+              {inputs.tracks.map((track) => (
+                <NumberCell
+                  key={track.id}
+                  label={index === 0 ? `SP ${track.label}` : undefined}
+                  value={entry.storyPointsByTrack[track.id] ?? 0}
+                  min={0}
+                  step={1}
+                  disabled={disabled}
+                  onChange={(value) => setVelocityTrackValue(index, track.id, value)}
+                />
+              ))}
               <Button
                 size="sm"
                 variant="ghost"
@@ -719,7 +959,7 @@ function PlannerForm({
 
       <FormCard
         title="Команда по ролям"
-        description="Detail-режим: считаем capacity отдельно по ролям, чтобы видеть узкое место."
+        description="Каждой роли — один трек. Capacity роли (человек × рабочие дни − отсутствия) пойдёт в план соответствующего трека."
         action={
           !disabled ? (
             <Button size="sm" variant="ghost" onClick={addRole}>
@@ -733,7 +973,10 @@ function PlannerForm({
             <p className="text-sm text-ink3">Добавьте хотя бы одну роль, чтобы посчитать Capacity.</p>
           ) : null}
           {inputs.roles.map((role, index) => (
-            <div key={index} className="grid items-end gap-2 sm:grid-cols-[2fr_1fr_1fr_auto]">
+            <div
+              key={index}
+              className="grid items-end gap-2 sm:grid-cols-[2fr_1.5fr_1fr_1fr_auto]"
+            >
               <TextField
                 label={index === 0 ? "Роль" : undefined}
                 value={role.name}
@@ -742,6 +985,19 @@ function PlannerForm({
                 disabled={disabled}
                 reserveMessageSpace={false}
               />
+              <SelectField
+                label={index === 0 ? "Трек" : undefined}
+                value={role.trackId}
+                onChange={(event) => setRole(index, { trackId: event.target.value })}
+                disabled={disabled}
+                reserveMessageSpace={false}
+              >
+                {inputs.tracks.map((track) => (
+                  <option key={track.id} value={track.id}>
+                    {track.label}
+                  </option>
+                ))}
+              </SelectField>
               <NumberCell
                 label={index === 0 ? "Человек" : undefined}
                 value={role.headcount}
@@ -853,51 +1109,132 @@ function NumberCell({
   );
 }
 
+// ---------------------------------------------------------------------------
+// Result panel — recommendation grid + breakdowns
+// ---------------------------------------------------------------------------
+
 function ResultPanel({ result }: { result: PlannerResult }) {
+  // Per-track visibility lives only in the UI layer — toggling a track does
+  // not change the underlying calc, just hides its card so the team can
+  // focus on the slice they care about ("SP FRONT", "SP BACK").
+  const [hidden, setHidden] = useState<Set<string>>(() => new Set());
+
+  // Drop entries for tracks that no longer exist (rename / delete).
+  useEffect(() => {
+    setHidden((prev) => {
+      const live = new Set(result.tracks.map((t) => t.id));
+      let changed = false;
+      const next = new Set<string>();
+      for (const id of prev) {
+        if (live.has(id)) next.add(id);
+        else changed = true;
+      }
+      return changed ? next : prev;
+    });
+  }, [result.tracks]);
+
+  const visibleTracks = result.tracks.filter((t) => !hidden.has(t.id));
+  const visiblePlanLimit = visibleTracks.reduce((acc, t) => acc + t.planLimit, 0);
+  const visibleReserve = visibleTracks.reduce((acc, t) => acc + t.reserveSp, 0);
+
+  function toggle(id: string) {
+    setHidden((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
   return (
     <aside className="space-y-4 lg:sticky lg:top-24">
       <div className="rounded-lg border border-blue/40 bg-blue/10 p-4 shadow-card">
-        <p className="text-[11px] font-bold uppercase tracking-wide text-ink3">Рекомендация в план</p>
-        <div className="mt-2 grid gap-3 sm:grid-cols-2">
-          <TrackCard label="Dev" planLimit={result.dev.planLimit} reserveSp={result.dev.reserveSp} />
-          <TrackCard label="Test" planLimit={result.test.planLimit} reserveSp={result.test.reserveSp} />
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <p className="text-[11px] font-bold uppercase tracking-wide text-ink3">Рекомендация в план</p>
+          <p className="text-[11px] text-ink3">
+            Σ {formatSp(visiblePlanLimit)} SP · буфер {formatSp(visibleReserve)} SP
+          </p>
         </div>
+
+        {result.tracks.length > 1 ? (
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {result.tracks.map((track) => {
+              const off = hidden.has(track.id);
+              return (
+                <button
+                  key={track.id}
+                  type="button"
+                  onClick={() => toggle(track.id)}
+                  aria-pressed={!off}
+                  className={
+                    "rounded-full border px-2.5 py-0.5 text-xs font-semibold transition-colors " +
+                    (off
+                      ? "border-line text-ink3 hover:border-ink3 hover:text-ink2"
+                      : "border-blue/50 bg-blue/15 text-blue")
+                  }
+                  title={off ? "Показать трек в плане" : "Скрыть трек из плана"}
+                >
+                  {track.label}
+                </button>
+              );
+            })}
+          </div>
+        ) : null}
+
+        <div className="mt-2 grid gap-3 sm:grid-cols-2">
+          {visibleTracks.length === 0 ? (
+            <p className="col-span-full text-xs text-ink3">
+              Все треки скрыты. Включите хотя бы один тег выше, чтобы увидеть план.
+            </p>
+          ) : (
+            visibleTracks.map((track) => <TrackCard key={track.id} track={track} />)
+          )}
+        </div>
+
         <p className="mt-3 text-xs text-ink3">
-          У задачи в спринте свои SP по dev и test. Берите задачи так, чтобы суммарно
-          {" "}<b>Σ SP dev ≤ {formatSp(result.dev.planLimit)}</b> и{" "}
-          <b>Σ SP test ≤ {formatSp(result.test.planLimit)}</b>. Буфер остаётся на незапланированные задачи.
+          У каждой задачи свои SP по каждому треку. Берите задачи так, чтобы по каждому треку
+          сумма не превышала его план. Буфер остаётся на незапланированные задачи.
         </p>
       </div>
 
       <div className="rounded-lg border border-line bg-surface p-4 shadow-card">
-        <h3 className="text-sm font-bold text-ink">Расчёт</h3>
-        <dl className="mt-3 space-y-2 text-sm">
-          <Row label="Velocity dev" value={`${formatSp(result.velocityDev)} SP`} />
-          <Row label="Velocity test" value={`${formatSp(result.velocityTest)} SP`} />
-          {result.usedBootstrapVelocity ? (
-            <Row
-              label="Velocity для шапки"
-              value={
-                <span>
-                  {formatSp(result.velocity)} SP <Badge tone="info">стартовая</Badge>
-                </span>
-              }
-            />
-          ) : null}
-          <Row label="Capacity база" value={`${formatSp(result.totalBaseCapacity)} чел-дней`} />
-          <Row
-            label="Capacity спринта"
-            value={`${formatSp(result.totalNetCapacity)} чел-дней${
-              result.totalAbsences > 0 ? ` (−${formatSp(result.totalAbsences)} отсутствия)` : ""
-            }`}
-          />
-          <Row label="Velocity спринта (dev)" value={`${formatSp(result.dev.adjustedVelocity)} SP`} />
-          <Row label="Velocity спринта (test)" value={`${formatSp(result.test.adjustedVelocity)} SP`} />
-        </dl>
+        <h3 className="text-sm font-bold text-ink">Расчёт по трекам</h3>
+        <div className="mt-3 overflow-x-auto">
+          <table className="w-full table-auto text-sm">
+            <thead className="text-xs uppercase text-ink3">
+              <tr>
+                <th className="px-2 py-1 text-left">Трек</th>
+                <th className="px-2 py-1 text-right">Velocity</th>
+                <th className="px-2 py-1 text-right">Capacity</th>
+                <th className="px-2 py-1 text-right">План</th>
+              </tr>
+            </thead>
+            <tbody>
+              {result.tracks.map((track) => (
+                <tr key={track.id} className="border-t border-line">
+                  <td className="px-2 py-1.5 text-ink">{track.label}</td>
+                  <td className="px-2 py-1.5 text-right text-ink2">
+                    {formatSp(track.velocity)}
+                    {track.usedBootstrap ? <Badge tone="info" className="ml-1">стартовая</Badge> : null}
+                  </td>
+                  <td className="px-2 py-1.5 text-right text-ink2">
+                    {formatSp(track.netCapacity)}
+                    {track.absences > 0 ? (
+                      <span className="ml-1 text-xs text-ink3">(−{formatSp(track.absences)})</span>
+                    ) : null}
+                  </td>
+                  <td className="px-2 py-1.5 text-right font-semibold text-ink">
+                    {formatSp(track.planLimit)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
         {result.bottleneckRole ? (
           <Alert tone="warning" className="mt-4">
-            Узкое место: <b>{result.bottleneckRole.name}</b> · {formatSp(result.bottleneckRole.netCapacity)} чел-дней.
-            Если задачи спринта в основном на эту роль — стоит пересмотреть набор.
+            Узкое место: <b>{result.bottleneckRole.name}</b> ({result.bottleneckRole.trackLabel}) ·{" "}
+            {formatSp(result.bottleneckRole.netCapacity)} чел-дней.
           </Alert>
         ) : null}
       </div>
@@ -908,6 +1245,7 @@ function ResultPanel({ result }: { result: PlannerResult }) {
           <thead className="text-xs uppercase text-ink3">
             <tr>
               <th className="px-2 py-1 text-left">Роль</th>
+              <th className="px-2 py-1 text-left">Трек</th>
               <th className="px-2 py-1 text-right">База</th>
               <th className="px-2 py-1 text-right">Минус</th>
               <th className="px-2 py-1 text-right">Итого</th>
@@ -916,14 +1254,15 @@ function ResultPanel({ result }: { result: PlannerResult }) {
           <tbody>
             {result.roles.length === 0 ? (
               <tr>
-                <td colSpan={4} className="px-2 py-2 text-sm text-ink3">
+                <td colSpan={5} className="px-2 py-2 text-sm text-ink3">
                   Добавьте роли, чтобы увидеть распределение.
                 </td>
               </tr>
             ) : (
-              result.roles.map((row) => (
-                <tr key={row.name} className="border-t border-line">
+              result.roles.map((row, idx) => (
+                <tr key={`${row.name}-${idx}`} className="border-t border-line">
                   <td className="px-2 py-1.5 text-ink">{row.name}</td>
+                  <td className="px-2 py-1.5 text-ink2">{row.trackLabel}</td>
                   <td className="px-2 py-1.5 text-right text-ink2">{formatSp(row.baseCapacity)}</td>
                   <td className="px-2 py-1.5 text-right text-ink2">{row.absences > 0 ? `−${formatSp(row.absences)}` : "—"}</td>
                   <td className="px-2 py-1.5 text-right font-semibold text-ink">{formatSp(row.netCapacity)}</td>
@@ -954,29 +1293,17 @@ function CheckIcon() {
   );
 }
 
-function TrackCard({
-  label,
-  planLimit,
-  reserveSp,
-}: {
-  label: string;
-  planLimit: number;
-  reserveSp: number;
-}) {
+function TrackCard({ track }: { track: PlannerTrackResult }) {
   return (
     <div className="rounded-md border border-line bg-surface px-3 py-2">
-      <p className="text-[11px] font-bold uppercase tracking-wide text-ink3">{label}</p>
-      <p className="mt-0.5 text-2xl font-bold text-ink leading-tight">{formatSp(planLimit)} SP</p>
-      <p className="mt-0.5 text-xs text-ink3">+ буфер {formatSp(reserveSp)} SP</p>
-    </div>
-  );
-}
-
-function Row({ label, value }: { label: string; value: React.ReactNode }) {
-  return (
-    <div className="flex items-baseline justify-between gap-3">
-      <dt className="text-ink3">{label}</dt>
-      <dd className="font-semibold text-ink">{value}</dd>
+      <p className="text-[11px] font-bold uppercase tracking-wide text-ink3">{track.label}</p>
+      <p className="mt-0.5 text-2xl font-bold leading-tight text-ink">{formatSp(track.planLimit)} SP</p>
+      <p className="mt-0.5 text-xs text-ink3">+ буфер {formatSp(track.reserveSp)} SP</p>
+      {!track.hasRoles ? (
+        <p className="mt-1 text-[11px] text-ink3">нет ролей</p>
+      ) : track.usedBootstrap ? (
+        <p className="mt-1 text-[11px] text-ink3">стартовая velocity</p>
+      ) : null}
     </div>
   );
 }
@@ -987,9 +1314,16 @@ function formatSp(value: number): string {
   return value.toFixed(1).replace(/\.0$/, "");
 }
 
-/** Same rounding rules as `formatSp` but used for capacity (people-days). */
-function formatBase(value: number): string {
-  return formatSp(value);
+function uniqueTrackId(base: string, taken: Set<string>): string {
+  const safe = base
+    .trim()
+    .toLowerCase()
+    .replace(/[^\p{Letter}\p{Number}_]+/gu, "_")
+    .replace(/^_+|_+$/g, "") || "track";
+  if (!taken.has(safe)) return safe;
+  let i = 2;
+  while (taken.has(`${safe}_${i}`)) i++;
+  return `${safe}_${i}`;
 }
 
 void Spinner; // re-export marker — keeps Spinner available for callers extending this shell

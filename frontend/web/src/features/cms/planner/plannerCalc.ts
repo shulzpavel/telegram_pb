@@ -2,14 +2,23 @@
  * Pure sprint-planner math. No UI, no I/O — everything else (form state,
  * persistence, presentation) sits on top of this module.
  *
- * Implements the team's planning rule:
- *   adjusted_velocity = velocity × (new_capacity / average_capacity)
- *   plan_limit         = adjusted_velocity × (1 − buffer_percent / 100)
+ * The planner is tag-driven: the team defines its own "tracks" (e.g. back,
+ * front, qa, design). Each role is pinned to one track. Velocity history
+ * records closed SP per track. The result is computed independently per
+ * track, then summed for the headline:
  *
- * Defaults that match the team handbook (Velocity / Capacity doc):
- *   - 20% buffer for unplanned work
- *   - first-time fallback velocity = 50 SP if no history exists
- *   - velocity averaged across the last 3–5 closed sprints (caller passes the slice)
+ *   for each track t:
+ *     velocity_t        = avg over positive history[*].byTrack[t] entries
+ *     base_capacity_t   = Σ role.headcount × workingDays  (roles on track t)
+ *     net_capacity_t    = Σ max(0, base − absences)
+ *     scale_t           = net_capacity_t / base_capacity_t  (or 1 if no roles)
+ *     adjusted_t        = velocity_t × scale_t
+ *     plan_limit_t      = adjusted_t × (1 − buffer_percent / 100)
+ *     reserve_t         = adjusted_t − plan_limit_t
+ *
+ * The team handbook's first-sprint fallback (50 SP) kicks in when the entire
+ * history is empty: it splits 50 SP evenly across tracks that have at least
+ * one role, so a 2-track team gets 25/25 and a 3-track team gets ~17/17/17.
  */
 
 /** Bootstrap velocity for teams that have not yet closed any sprints. */
@@ -18,9 +27,25 @@ export const BOOTSTRAP_VELOCITY_SP = 50;
 /** Default share of velocity reserved for unplanned / interrupt work. */
 export const DEFAULT_BUFFER_PERCENT = 20;
 
+/** Default tracks for a brand-new plan. Matches the user's "back/front/qa" example. */
+export const DEFAULT_TRACKS: PlannerTrack[] = [
+  { id: "back", label: "Backend" },
+  { id: "front", label: "Frontend" },
+  { id: "qa", label: "QA" },
+];
+
+export interface PlannerTrack {
+  /** Short slug used as the stable reference (e.g. "back", "front"). */
+  id: string;
+  /** Human-readable label rendered in the UI (e.g. "Backend"). */
+  label: string;
+}
+
 export interface PlannerRoleInput {
-  /** Role label — "Backend", "Frontend", "QA", etc. */
+  /** Role label — "Backend lead", "Mobile dev", "QA manual", etc. */
   name: string;
+  /** Which track this role belongs to. Must match one of the tracks[].id. */
+  trackId: string;
   /** People in this role. May be fractional for part-time members. */
   headcount: number;
   /** Total people-days lost in the upcoming sprint (vacation, sick days, holidays, planning ceremonies, …). */
@@ -30,31 +55,27 @@ export interface PlannerRoleInput {
 export interface PlannerHistoryEntry {
   /** Optional label — "Sprint 41". Empty values render as blanks in the UI. */
   label: string;
-  /** Story points closed by development in that sprint. */
-  storyPointsDev: number;
-  /** Story points closed by testing in that sprint. */
-  storyPointsTest: number;
+  /** Closed SP per track id, e.g. { back: 30, front: 20, qa: 25 }. */
+  storyPointsByTrack: Record<string, number>;
 }
 
 export interface PlannerInputs {
   /** Working days in the upcoming sprint (e.g. 10 for a two-week sprint). */
   workingDays: number;
-  /**
-   * Average team-day capacity historical sprints were achieved on. Used to
-   * scale velocity down/up when the new sprint has less/more availability.
-   * Set 0 to disable scaling (then adjusted velocity == raw velocity).
-   */
-  averageCapacity: number;
   /** Share of velocity reserved for unplanned work. 0–80. */
   bufferPercent: number;
+  /** Track definitions. Order is preserved for the UI. */
+  tracks: PlannerTrack[];
+  /** Roles in the upcoming sprint (each pinned to one track). */
+  roles: PlannerRoleInput[];
   /** Last 3–5 closed sprints. Average is taken across all entries with sp > 0. */
   velocityHistory: PlannerHistoryEntry[];
-  /** Roles in the upcoming sprint (detailed capacity by role). */
-  roles: PlannerRoleInput[];
 }
 
 export interface PlannerRoleBreakdown {
   name: string;
+  trackId: string;
+  trackLabel: string;
   /** headcount × workingDays */
   baseCapacity: number;
   /** baseCapacity − absences (never negative) */
@@ -63,47 +84,55 @@ export interface PlannerRoleBreakdown {
   absences: number;
 }
 
-/** Per-track planning numbers — same shape for dev and test. */
+/** Per-track planning numbers — same shape for every track. */
 export interface PlannerTrackResult {
+  id: string;
+  label: string;
+  /** Averaged SP across positive history entries. 0 when no history (and not bootstrapped). */
   velocity: number;
+  /** True when velocity came from the historical average (vs. zero / bootstrap). */
+  velocityKnown: boolean;
+  /** True when velocity was substituted by the first-sprint fallback. */
+  usedBootstrap: boolean;
+  /** Σ headcount × workingDays for roles on this track. */
+  baseCapacity: number;
+  /** Σ max(0, base − absences). */
+  netCapacity: number;
+  /** Σ role absences echoed back. */
+  absences: number;
+  /** netCapacity / baseCapacity (or 1 when no roles assigned). */
+  scale: number;
+  /** velocity × scale. */
   adjustedVelocity: number;
+  /** adjustedVelocity × (1 − bufferPercent / 100). What the team should commit to on this track. */
   planLimit: number;
+  /** Reserve set aside for unplanned work on this track. */
   reserveSp: number;
+  /** True when at least one role is pinned to this track. */
+  hasRoles: boolean;
 }
 
 export interface PlannerResult {
-  /** Working days × Σ headcount across all roles. */
+  /** Σ baseCapacity across roles. */
   totalBaseCapacity: number;
-  /** Sum of role.netCapacity. The actual people-day budget for the upcoming sprint. */
+  /** Σ netCapacity across roles. */
   totalNetCapacity: number;
-  /** Sum of role absences echoed back for the result summary. */
+  /** Σ role absences. */
   totalAbsences: number;
-  /**
-   * Planning velocity for headline math. Equals `max(velocityDev, velocityTest)`
-   * — matches the per-task rule `final_sp = max(sp_dev, sp_test)` from the team
-   * handbook. The dev/test breakdown lives in `dev` / `test`.
-   */
-  velocity: number;
-  /** Average closed SP on the development track. */
-  velocityDev: number;
-  /** Average closed SP on the testing track. */
-  velocityTest: number;
-  /** True when velocity was substituted from the bootstrap rule. */
-  usedBootstrapVelocity: boolean;
-  /** velocity × netCapacity / averageCapacity (or velocity if averageCapacity ≤ 0). */
-  adjustedVelocity: number;
-  /** adjustedVelocity × (1 − bufferPercent / 100). What the team should commit to. */
-  planLimit: number;
-  /** Reserve set aside for unplanned work: adjustedVelocity − planLimit. */
-  reserveSp: number;
-  /** Dev-track scaling (Σ SP_dev across sprint tasks ≤ dev.planLimit). */
-  dev: PlannerTrackResult;
-  /** Test-track scaling (Σ SP_test across sprint tasks ≤ test.planLimit). */
-  test: PlannerTrackResult;
+  /** Echoed back so the UI can show "buffer X%". */
+  bufferPercent: number;
+  /** Per-track results in the order tracks were declared. */
+  tracks: PlannerTrackResult[];
+  /** Σ planLimit across tracks — overall recommendation for the sprint. */
+  totalPlanLimit: number;
+  /** Σ reserveSp across tracks — overall buffer carved out. */
+  totalReserveSp: number;
   /** Per-role breakdown for the detailed-capacity table. */
   roles: PlannerRoleBreakdown[];
   /** Role with the smallest netCapacity. `null` when no roles defined. */
   bottleneckRole: PlannerRoleBreakdown | null;
+  /** True when no track had any historical SP at all and we used the first-sprint fallback. */
+  usedBootstrapVelocity: boolean;
 }
 
 /** Round to one decimal place. We never want to show "46.000000001". */
@@ -131,50 +160,37 @@ function averagePositive(values: number[]): number | null {
   return round1(valid.reduce((acc, sp) => acc + sp, 0) / valid.length);
 }
 
-/**
- * Computes per-track velocity (dev / test) and the planning velocity used for
- * scaling. The planning velocity follows the team handbook: a task's final SP
- * is `max(SP_dev, SP_test)`, so the slowest track sets the upper bound on
- * what the team can actually close.
- *
- * When neither dev nor test history is provided, falls back to the bootstrap
- * velocity (50 SP).
- */
-export function computeVelocity(history: PlannerHistoryEntry[]): {
-  velocity: number;
-  velocityDev: number;
-  velocityTest: number;
-  usedBootstrap: boolean;
-} {
-  const dev = averagePositive(history.map((entry) => entry.storyPointsDev));
-  const test = averagePositive(history.map((entry) => entry.storyPointsTest));
-
-  if (dev === null && test === null) {
-    return {
-      velocity: BOOTSTRAP_VELOCITY_SP,
-      velocityDev: 0,
-      velocityTest: 0,
-      usedBootstrap: true,
-    };
-  }
-  const devSafe = dev ?? 0;
-  const testSafe = test ?? 0;
-  return {
-    velocity: Math.max(devSafe, testSafe),
-    velocityDev: devSafe,
-    velocityTest: testSafe,
-    usedBootstrap: false,
-  };
+interface TrackAggregate {
+  baseCapacity: number;
+  netCapacity: number;
+  absences: number;
+  hasRoles: boolean;
 }
 
-/**
- * Detailed per-role breakdown. Each role contributes
- * `headcount × workingDays` people-days, minus the absences declared for that
- * role in the upcoming sprint.
- */
-function computeRoles(
+function aggregateRolesByTrack(
+  tracks: PlannerTrack[],
+  rolesBreakdown: PlannerRoleBreakdown[],
+): Map<string, TrackAggregate> {
+  const map = new Map<string, TrackAggregate>();
+  for (const track of tracks) {
+    map.set(track.id, { baseCapacity: 0, netCapacity: 0, absences: 0, hasRoles: false });
+  }
+  for (const role of rolesBreakdown) {
+    const agg = map.get(role.trackId);
+    if (!agg) continue;
+    agg.baseCapacity = round1(agg.baseCapacity + role.baseCapacity);
+    agg.netCapacity = round1(agg.netCapacity + role.netCapacity);
+    agg.absences = round1(agg.absences + role.absences);
+    agg.hasRoles = true;
+  }
+  return map;
+}
+
+function buildRoleBreakdowns(
   roles: PlannerRoleInput[],
   workingDays: number,
+  trackLabelById: Map<string, string>,
+  fallbackTrackId: string,
 ): {
   rows: PlannerRoleBreakdown[];
   totalBase: number;
@@ -196,8 +212,16 @@ function computeRoles(
     totalBase = round1(totalBase + baseCapacity);
     totalNet = round1(totalNet + netCapacity);
     totalAbsences = round1(totalAbsences + absences);
+
+    // Roles pointing at a deleted track get re-homed onto the fallback so
+    // their capacity is still counted somewhere (instead of silently leaking).
+    const trackId = trackLabelById.has(role.trackId) ? role.trackId : fallbackTrackId;
+    const trackLabel = trackLabelById.get(trackId) ?? trackId;
+
     const row: PlannerRoleBreakdown = {
       name: role.name.trim() || "Без названия",
+      trackId,
+      trackLabel,
       baseCapacity,
       netCapacity,
       absences,
@@ -211,53 +235,114 @@ function computeRoles(
   return { rows, totalBase, totalNet, totalAbsences, bottleneck };
 }
 
-function buildTrack(velocity: number, scale: number, bufferPercent: number): PlannerTrackResult {
-  const adjustedVelocity = round1(velocity * scale);
-  const planLimit = round1(adjustedVelocity * (1 - bufferPercent / 100));
-  const reserveSp = round1(Math.max(0, adjustedVelocity - planLimit));
-  return { velocity, adjustedVelocity, planLimit, reserveSp };
-}
-
 export function computePlannerResult(inputs: PlannerInputs): PlannerResult {
-  const { velocity, velocityDev, velocityTest, usedBootstrap } = computeVelocity(inputs.velocityHistory);
-  const roles = computeRoles(inputs.roles, inputs.workingDays);
-
-  const averageCapacity = nonNegative(inputs.averageCapacity);
   const buffer = clampPercent(inputs.bufferPercent);
 
-  // When the user has not entered an "average capacity" baseline we treat the
-  // capacity adjustment as no-op (scale = 1) rather than dividing by zero.
-  // Same fallback for the first-sprint case.
-  const scale = averageCapacity > 0 && roles.totalNet > 0 ? roles.totalNet / averageCapacity : 1;
+  // Ensure we always have at least one track to anchor calculations even
+  // for malformed payloads — falls back to the canonical defaults.
+  const tracks: PlannerTrack[] =
+    inputs.tracks.length > 0
+      ? inputs.tracks.map((t) => ({ id: t.id, label: t.label.trim() || t.id }))
+      : DEFAULT_TRACKS.map((t) => ({ ...t }));
 
-  const dev = buildTrack(velocityDev, scale, buffer);
-  const test = buildTrack(velocityTest, scale, buffer);
-  // Headline number uses the slower track (the team handbook's
-  // final_sp = max(sp_dev, sp_test) per-task rule).
-  const headline = buildTrack(velocity, scale, buffer);
+  const trackLabelById = new Map(tracks.map((t) => [t.id, t.label]));
+  const fallbackTrackId = tracks[0]!.id;
+
+  const roles = buildRoleBreakdowns(
+    inputs.roles,
+    inputs.workingDays,
+    trackLabelById,
+    fallbackTrackId,
+  );
+  const aggregates = aggregateRolesByTrack(tracks, roles.rows);
+
+  // Per-track velocity averaged across positive historical SP entries.
+  const trackVelocities = new Map<string, number | null>();
+  for (const track of tracks) {
+    const samples = inputs.velocityHistory.map((entry) => entry.storyPointsByTrack[track.id] ?? 0);
+    trackVelocities.set(track.id, averagePositive(samples));
+  }
+
+  const everyVelocityEmpty = Array.from(trackVelocities.values()).every((v) => v === null);
+
+  // First-sprint fallback: distribute the team's 50 SP guidance evenly
+  // across tracks that actually have a team behind them. Solo-bootstrap
+  // tracks without roles to avoid recommending work into thin air.
+  const tracksWithRoles = tracks.filter((t) => aggregates.get(t.id)?.hasRoles);
+  const bootstrapPerTrack =
+    everyVelocityEmpty && tracksWithRoles.length > 0
+      ? round1(BOOTSTRAP_VELOCITY_SP / tracksWithRoles.length)
+      : 0;
+
+  const trackResults: PlannerTrackResult[] = tracks.map((track) => {
+    const agg = aggregates.get(track.id) ?? {
+      baseCapacity: 0,
+      netCapacity: 0,
+      absences: 0,
+      hasRoles: false,
+    };
+    const rawVelocity = trackVelocities.get(track.id);
+    const velocityKnown = rawVelocity !== null;
+    const usedBootstrap = !velocityKnown && bootstrapPerTrack > 0 && agg.hasRoles;
+    const velocity = velocityKnown ? rawVelocity! : usedBootstrap ? bootstrapPerTrack : 0;
+
+    // When there are no roles on the track we can't really scale capacity —
+    // surface the raw velocity number untouched (mostly useful for QA-only
+    // teams scrolling through their old history).
+    const scale = agg.baseCapacity > 0 ? agg.netCapacity / agg.baseCapacity : 1;
+    const adjustedVelocity = round1(velocity * scale);
+    const planLimit = round1(adjustedVelocity * (1 - buffer / 100));
+    const reserveSp = round1(Math.max(0, adjustedVelocity - planLimit));
+
+    return {
+      id: track.id,
+      label: track.label,
+      velocity,
+      velocityKnown,
+      usedBootstrap,
+      baseCapacity: agg.baseCapacity,
+      netCapacity: agg.netCapacity,
+      absences: agg.absences,
+      scale: Number.isFinite(scale) ? round1(scale * 100) / 100 : 1,
+      adjustedVelocity,
+      planLimit,
+      reserveSp,
+      hasRoles: agg.hasRoles,
+    };
+  });
+
+  const totalPlanLimit = round1(trackResults.reduce((acc, t) => acc + t.planLimit, 0));
+  const totalReserveSp = round1(trackResults.reduce((acc, t) => acc + t.reserveSp, 0));
 
   return {
     totalBaseCapacity: roles.totalBase,
     totalNetCapacity: roles.totalNet,
     totalAbsences: roles.totalAbsences,
-    velocity,
-    velocityDev,
-    velocityTest,
-    usedBootstrapVelocity: usedBootstrap,
-    adjustedVelocity: headline.adjustedVelocity,
-    planLimit: headline.planLimit,
-    reserveSp: headline.reserveSp,
-    dev,
-    test,
+    bufferPercent: buffer,
+    tracks: trackResults,
+    totalPlanLimit,
+    totalReserveSp,
     roles: roles.rows,
     bottleneckRole: roles.bottleneck,
+    usedBootstrapVelocity: everyVelocityEmpty && tracksWithRoles.length > 0,
   };
 }
 
 /**
- * Short headline used in the list view: "dev 46.8 / test 31.2 SP · буфер 11.7".
- * Two numbers because the team plans against two independent budgets.
+ * Short headline used in the list view, e.g.:
+ *   "Backend 32 / Frontend 28 / QA 12 SP · буфер 18"
+ *
+ * Empty tracks are skipped so the summary stays readable for small teams.
  */
 export function summarizePlannerResult(result: PlannerResult): string {
-  return `dev ${result.dev.planLimit} / test ${result.test.planLimit} SP · буфер ${result.dev.reserveSp}/${result.test.reserveSp}`;
+  const visible = result.tracks.filter((t) => t.hasRoles || t.velocity > 0);
+  if (visible.length === 0) return "Нет данных";
+  const parts = visible.map((t) => `${t.label} ${formatNumber(t.planLimit)}`);
+  return `${parts.join(" / ")} SP · буфер ${formatNumber(result.totalReserveSp)}`;
+}
+
+function formatNumber(value: number): string {
+  if (!Number.isFinite(value)) return "0";
+  if (Math.abs(value - Math.round(value)) < 0.05) return String(Math.round(value));
+  return value.toFixed(1).replace(/\.0$/, "");
 }
