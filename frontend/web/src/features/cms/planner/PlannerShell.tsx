@@ -1198,15 +1198,47 @@ function ResultPanel({ result }: { result: PlannerResult }) {
       </div>
 
       <div className="rounded-lg border border-line bg-surface p-4 shadow-card">
+        <h3 className="text-sm font-bold text-ink">Capacity команды, чел-дней</h3>
+        <p className="mt-1 text-xs text-ink3">
+          База = Σ человек × рабочие дни. Считается автоматически из таблицы «Команда по ролям».
+        </p>
+        <dl className="mt-3 space-y-1.5 text-sm">
+          <Row
+            label="База (без отсутствий)"
+            value={`${formatSp(result.totalBaseCapacity)} чел-дней`}
+          />
+          {result.totalAbsences > 0 ? (
+            <Row
+              label="Минус отсутствия"
+              value={`−${formatSp(result.totalAbsences)} чел-дней`}
+            />
+          ) : null}
+          <Row
+            label="Итого на спринт"
+            value={
+              <span className="text-blue">
+                {formatSp(result.totalNetCapacity)} чел-дней
+              </span>
+            }
+          />
+        </dl>
+      </div>
+
+      <div className="rounded-lg border border-line bg-surface p-4 shadow-card">
         <h3 className="text-sm font-bold text-ink">Расчёт по трекам</h3>
+        <p className="mt-1 text-xs text-ink3">
+          Velocity усреднена по истории. Capacity = чел-дней по ролям трека.
+          Adjusted = Velocity × (Capacity итого / Capacity база).
+        </p>
         <div className="mt-3 overflow-x-auto">
           <table className="w-full table-auto text-sm">
             <thead className="text-xs uppercase text-ink3">
               <tr>
                 <th className="px-2 py-1 text-left">Трек</th>
-                <th className="px-2 py-1 text-right">Velocity</th>
-                <th className="px-2 py-1 text-right">Capacity</th>
-                <th className="px-2 py-1 text-right">План</th>
+                <th className="px-2 py-1 text-right">Velocity, SP</th>
+                <th className="px-2 py-1 text-right">База, чел-дней</th>
+                <th className="px-2 py-1 text-right">Итого, чел-дней</th>
+                <th className="px-2 py-1 text-right">План, SP</th>
               </tr>
             </thead>
             <tbody>
@@ -1217,6 +1249,7 @@ function ResultPanel({ result }: { result: PlannerResult }) {
                     {formatSp(track.velocity)}
                     {track.usedBootstrap ? <Badge tone="info" className="ml-1">стартовая</Badge> : null}
                   </td>
+                  <td className="px-2 py-1.5 text-right text-ink2">{formatSp(track.baseCapacity)}</td>
                   <td className="px-2 py-1.5 text-right text-ink2">
                     {formatSp(track.netCapacity)}
                     {track.absences > 0 ? (
@@ -1304,6 +1337,15 @@ function TrackCard({ track }: { track: PlannerTrackResult }) {
       ) : track.usedBootstrap ? (
         <p className="mt-1 text-[11px] text-ink3">стартовая velocity</p>
       ) : null}
+    </div>
+  );
+}
+
+function Row({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div className="flex items-baseline justify-between gap-3">
+      <dt className="text-ink3">{label}</dt>
+      <dd className="font-semibold text-ink">{value}</dd>
     </div>
   );
 }
