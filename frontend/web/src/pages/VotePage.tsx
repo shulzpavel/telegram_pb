@@ -245,6 +245,7 @@ export default function VotePage({ task, participants, onVote, error, onLogoClic
           {task.ai_summary ? (
             <CollapsibleSection
               className="rounded-lg border border-line bg-surface p-4 md:p-5 shadow-card"
+              bodyClassName="px-2 pb-2 pt-3"
               defaultOpenMobile={false}
               title={
                 <p className="text-2xs font-semibold uppercase tracking-widest text-ink3">
@@ -256,7 +257,7 @@ export default function VotePage({ task, participants, onVote, error, onLogoClic
                 summary={task.ai_summary}
                 helperText="для оценки"
                 sparkleLabel="AI-подсказка"
-                className="p-0"
+                className="p-4 md:p-5"
               />
             </CollapsibleSection>
           ) : null}

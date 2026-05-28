@@ -12,7 +12,7 @@ import os
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from services.jira_service.client import JiraServiceClient
 
@@ -57,6 +57,7 @@ class IssueContextResponse(BaseModel):
     # how the issue looks inside Jira when ADF is missing or v2 leaked
     # a flat string.
     description_html: Optional[str] = None
+    description_sources: list[dict] = Field(default_factory=list)
     issue_type: Optional[str] = None
     labels: list[str] = []
     components: list[str] = []
@@ -198,6 +199,7 @@ async def get_issue_context(
             description=context.get("description") or "",
             description_adf=context.get("description_adf"),
             description_html=context.get("description_html"),
+            description_sources=context.get("description_sources") or [],
             issue_type=context.get("issue_type"),
             labels=context.get("labels") or [],
             components=context.get("components") or [],

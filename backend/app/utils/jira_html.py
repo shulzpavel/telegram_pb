@@ -96,6 +96,45 @@ class _SanitizingParser(HTMLParser):
         return "".join(self._parts)
 
 
+class _PlainTextParser(HTMLParser):
+    _BLOCK_TAGS = {
+        "p",
+        "div",
+        "br",
+        "hr",
+        "h1",
+        "h2",
+        "h3",
+        "h4",
+        "h5",
+        "h6",
+        "li",
+        "tr",
+        "blockquote",
+        "pre",
+    }
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self._parts: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, Optional[str]]]) -> None:
+        if tag.lower() in {"br", "hr"}:
+            self._parts.append("\n")
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag.lower() in self._BLOCK_TAGS:
+            self._parts.append("\n")
+
+    def handle_data(self, data: str) -> None:
+        if data:
+            self._parts.append(data)
+
+    def get_text(self) -> str:
+        lines = [" ".join(line.split()) for line in "".join(self._parts).splitlines()]
+        return "\n".join(line for line in lines if line).strip()
+
+
 def _escape_text(text: str) -> str:
     return (
         text.replace("&", "&amp;")
@@ -121,4 +160,17 @@ def sanitize_jira_html(html: str, max_chars: int = 80_000) -> str:
     result = parser.get_html().strip()
     if max_chars > 0 and len(result) > max_chars:
         result = result[: max_chars - 1].rsplit("<", 1)[0] + "…"
+    return result
+
+
+def html_to_plain_text(html: str, max_chars: int = 20_000) -> str:
+    """Project sanitized HTML into readable plain text for AI/fallbacks."""
+    if not html or not str(html).strip():
+        return ""
+    parser = _PlainTextParser()
+    parser.feed(str(html))
+    parser.close()
+    result = parser.get_text()
+    if max_chars > 0 and len(result) > max_chars:
+        return result[: max_chars - 1].rstrip() + "…"
     return result

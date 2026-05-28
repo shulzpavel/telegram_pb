@@ -1,6 +1,6 @@
 """Tests for Jira rendered HTML sanitization."""
 
-from app.utils.jira_html import sanitize_jira_html
+from app.utils.jira_html import html_to_plain_text, sanitize_jira_html
 
 
 def test_sanitize_strips_script_and_keeps_paragraphs() -> None:
@@ -20,3 +20,9 @@ def test_sanitize_blocks_javascript_links() -> None:
     out = sanitize_jira_html(raw)
     assert "javascript:" not in out
     assert 'href="https://jira.example/x"' in out
+
+
+def test_html_to_plain_text_preserves_blocks() -> None:
+    raw = "<h1>Spec</h1><p>First <strong>paragraph</strong></p><ul><li>One</li><li>Two</li></ul>"
+
+    assert html_to_plain_text(raw) == "Spec\nFirst paragraph\nOne\nTwo"

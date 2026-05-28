@@ -1,19 +1,97 @@
 """HTTP adapter for Jira API client."""
 
 import asyncio
+import html
 import logging
 import os
 import re
 from typing import Any, Dict, Iterable, List, Optional
-from urllib.parse import quote
+from urllib.parse import parse_qs, quote, urljoin, urlparse
 
 import aiohttp
 
 from app.ports.jira_client import JiraClient
-from app.utils.jira_html import sanitize_jira_html
+from app.utils.jira_html import html_to_plain_text, sanitize_jira_html
 from app.utils.jira_text import adf_to_plain_text, truncate_text
 
 logger = logging.getLogger(__name__)
+
+_URL_RE = re.compile(r"https?://[^\s<>'\")]+", re.IGNORECASE)
+
+
+def _normalise_base_url(value: str) -> str:
+    return (value or "").strip().rstrip("/")
+
+
+def _default_confluence_base_url(jira_base_url: str) -> str:
+    parsed = urlparse(jira_base_url or "")
+    if not parsed.scheme or not parsed.netloc:
+        return ""
+    return f"{parsed.scheme}://{parsed.netloc}/wiki"
+
+
+def _confluence_page_id_from_url(url: str, confluence_base_url: str) -> Optional[str]:
+    parsed_url = urlparse(url)
+    parsed_base = urlparse(confluence_base_url)
+    if not parsed_url.scheme or not parsed_url.netloc or not parsed_base.netloc:
+        return None
+    if parsed_url.netloc.lower() != parsed_base.netloc.lower():
+        return None
+
+    query_page_id = (parse_qs(parsed_url.query).get("pageId") or [None])[0]
+    if query_page_id and query_page_id.isdigit():
+        return query_page_id
+
+    path = parsed_url.path
+    match = re.search(r"/pages/(\d+)(?:/|$)", path)
+    if match:
+        return match.group(1)
+    return None
+
+
+def _extract_urls_from_adf(node: Any) -> list[str]:
+    urls: list[str] = []
+    if isinstance(node, list):
+        for item in node:
+            urls.extend(_extract_urls_from_adf(item))
+        return urls
+    if not isinstance(node, dict):
+        return urls
+
+    for mark in node.get("marks") or []:
+        if isinstance(mark, dict):
+            attrs = mark.get("attrs") or {}
+            href = attrs.get("href")
+            if isinstance(href, str):
+                urls.append(href)
+    for child in node.get("content") or []:
+        urls.extend(_extract_urls_from_adf(child))
+    return urls
+
+
+def extract_confluence_page_ids(
+    *,
+    confluence_base_url: str,
+    description: str = "",
+    description_html: str = "",
+    description_adf: Any = None,
+) -> list[str]:
+    """Extract safe Confluence page ids from Jira text/html/ADF fields."""
+    if not confluence_base_url:
+        return []
+    candidates = []
+    candidates.extend(_URL_RE.findall(description or ""))
+    candidates.extend(_URL_RE.findall(description_html or ""))
+    candidates.extend(_extract_urls_from_adf(description_adf))
+
+    page_ids: list[str] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        page_id = _confluence_page_id_from_url(candidate.rstrip(".,;"), confluence_base_url)
+        if page_id and page_id not in seen:
+            page_ids.append(page_id)
+            seen.add(page_id)
+    return page_ids
 
 
 class JiraHttpClient(JiraClient):
@@ -36,6 +114,12 @@ class JiraHttpClient(JiraClient):
         self._session: Optional[aiohttp.ClientSession] = None
         self._timeout = aiohttp.ClientTimeout(total=timeout)
         self._retry_attempts = max(1, retry_attempts)
+        self.confluence_base_url = _normalise_base_url(
+            os.getenv("CONFLUENCE_BASE_URL") or _default_confluence_base_url(base_url)
+        )
+        self.confluence_username = os.getenv("CONFLUENCE_USERNAME") or username
+        self.confluence_api_token = os.getenv("CONFLUENCE_API_TOKEN") or api_token
+        self._confluence_max_pages = max(0, int(os.getenv("CONFLUENCE_MAX_PAGES_PER_ISSUE", "2")))
 
     async def _get_session(self) -> aiohttp.ClientSession:
         """Get or create aiohttp session."""
@@ -342,6 +426,111 @@ class JiraHttpClient(JiraClient):
             "story_points": story_points,
         }
 
+    def _confluence_configured(self) -> bool:
+        return bool(
+            self.confluence_base_url
+            and self.confluence_username
+            and self.confluence_api_token
+            and self._confluence_max_pages > 0
+        )
+
+    async def _fetch_confluence_page_context(self, page_id: str) -> Optional[Dict[str, Any]]:
+        """Fetch a Confluence page by id and return sanitized display context."""
+        if not self._confluence_configured() or not page_id.isdigit():
+            return None
+
+        session = await self._get_session()
+        auth = aiohttp.BasicAuth(self.confluence_username, self.confluence_api_token)
+        url = f"{self.confluence_base_url}/rest/api/content/{page_id}?expand=body.view,_links"
+        try:
+            async with session.get(
+                url,
+                auth=auth,
+                headers={"Accept": "application/json"},
+            ) as response:
+                if response.status in {401, 403, 404}:
+                    logger.warning("Confluence page fetch non-200 page_id=%s status=%s", page_id, response.status)
+                    return None
+                response.raise_for_status()
+                data = await response.json()
+        except Exception as error:
+            logger.warning("Confluence page fetch failed page_id=%s err=%r", page_id, error)
+            return None
+
+        if not isinstance(data, dict):
+            return None
+        title = str(data.get("title") or f"Confluence page {page_id}")
+        raw_html = ((data.get("body") or {}).get("view") or {}).get("value")
+        safe_html = sanitize_jira_html(raw_html or "")
+        text = truncate_text(html_to_plain_text(safe_html), int(os.getenv("ANTHROPIC_MAX_CONTEXT_CHARS", "6000")))
+        links = data.get("_links") if isinstance(data.get("_links"), dict) else {}
+        webui = links.get("webui") if isinstance(links.get("webui"), str) else ""
+        page_url = urljoin(f"{self.confluence_base_url}/", webui.lstrip("/")) if webui else f"{self.confluence_base_url}/pages/{page_id}"
+        if not safe_html and not text:
+            return None
+        return {
+            "type": "confluence",
+            "id": page_id,
+            "title": title,
+            "url": page_url,
+            "description": text,
+            "description_html": safe_html,
+        }
+
+    async def _augment_context_with_confluence(self, context: Dict[str, Any]) -> Dict[str, Any]:
+        """Append linked Confluence page content to Jira issue context."""
+        page_ids = extract_confluence_page_ids(
+            confluence_base_url=self.confluence_base_url,
+            description=context.get("description") or "",
+            description_html=context.get("description_html") or "",
+            description_adf=context.get("description_adf"),
+        )
+        if not page_ids:
+            context["description_sources"] = [
+                {"type": "jira", "url": context.get("url"), "title": context.get("key")}
+            ]
+            return context
+
+        pages: list[Dict[str, Any]] = []
+        for page_id in page_ids[: self._confluence_max_pages]:
+            page = await self._fetch_confluence_page_context(page_id)
+            if page:
+                pages.append(page)
+        if not pages:
+            context["description_sources"] = [
+                {"type": "jira", "url": context.get("url"), "title": context.get("key")}
+            ]
+            return context
+
+        jira_text = str(context.get("description") or "").strip()
+        confluence_text = "\n\n".join(
+            f"Confluence: {page['title']}\n{page['description']}"
+            for page in pages
+            if page.get("description")
+        )
+        context["description"] = truncate_text(
+            "\n\n".join(part for part in [jira_text, confluence_text] if part),
+            int(os.getenv("ANTHROPIC_MAX_CONTEXT_CHARS", "6000")),
+        )
+
+        jira_html = str(context.get("description_html") or "").strip()
+        if not jira_html and jira_text:
+            jira_html = "".join(f"<p>{html.escape(line)}</p>" for line in jira_text.splitlines() if line.strip())
+        confluence_html = "".join(
+            f'<hr /><h3>Confluence: <a href="{html.escape(str(page["url"]))}" target="_blank" rel="noreferrer">{html.escape(str(page["title"]))}</a></h3>{page["description_html"]}'
+            for page in pages
+            if page.get("description_html")
+        )
+        context["description_html"] = sanitize_jira_html("".join([jira_html, confluence_html]))
+        context["description_sources"] = [
+            {"type": "jira", "url": context.get("url"), "title": context.get("key")},
+            *[
+                {"type": "confluence", "url": page.get("url"), "title": page.get("title")}
+                for page in pages
+            ],
+        ]
+        return context
+
     async def fetch_issue_context(self, issue_key: str) -> Optional[Dict[str, Any]]:
         """Fetch issue fields used for LLM planning hints."""
         fields_list = quote(
@@ -361,8 +550,9 @@ class JiraHttpClient(JiraClient):
             return None
         fields = issue.get("fields") or {}
         rendered = issue.get("renderedFields")
-        return self._issue_context_from_fields(
+        context = self._issue_context_from_fields(
             issue_key,
             fields,
             rendered if isinstance(rendered, dict) else None,
         )
+        return await self._augment_context_with_confluence(context)
