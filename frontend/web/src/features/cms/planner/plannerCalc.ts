@@ -63,6 +63,14 @@ export interface PlannerRoleBreakdown {
   absences: number;
 }
 
+/** Per-track planning numbers — same shape for dev and test. */
+export interface PlannerTrackResult {
+  velocity: number;
+  adjustedVelocity: number;
+  planLimit: number;
+  reserveSp: number;
+}
+
 export interface PlannerResult {
   /** Working days × Σ headcount across all roles. */
   totalBaseCapacity: number;
@@ -71,9 +79,9 @@ export interface PlannerResult {
   /** Sum of role absences echoed back for the result summary. */
   totalAbsences: number;
   /**
-   * Velocity used for planning. Equals `max(velocityDev, velocityTest)` —
-   * matches the per-task rule `final_sp = max(sp_dev, sp_test)` from the team
-   * handbook and yields a safe lower-bound plan (the slower track wins).
+   * Planning velocity for headline math. Equals `max(velocityDev, velocityTest)`
+   * — matches the per-task rule `final_sp = max(sp_dev, sp_test)` from the team
+   * handbook. The dev/test breakdown lives in `dev` / `test`.
    */
   velocity: number;
   /** Average closed SP on the development track. */
@@ -88,6 +96,10 @@ export interface PlannerResult {
   planLimit: number;
   /** Reserve set aside for unplanned work: adjustedVelocity − planLimit. */
   reserveSp: number;
+  /** Dev-track scaling (Σ SP_dev across sprint tasks ≤ dev.planLimit). */
+  dev: PlannerTrackResult;
+  /** Test-track scaling (Σ SP_test across sprint tasks ≤ test.planLimit). */
+  test: PlannerTrackResult;
   /** Per-role breakdown for the detailed-capacity table. */
   roles: PlannerRoleBreakdown[];
   /** Role with the smallest netCapacity. `null` when no roles defined. */
@@ -199,6 +211,13 @@ function computeRoles(
   return { rows, totalBase, totalNet, totalAbsences, bottleneck };
 }
 
+function buildTrack(velocity: number, scale: number, bufferPercent: number): PlannerTrackResult {
+  const adjustedVelocity = round1(velocity * scale);
+  const planLimit = round1(adjustedVelocity * (1 - bufferPercent / 100));
+  const reserveSp = round1(Math.max(0, adjustedVelocity - planLimit));
+  return { velocity, adjustedVelocity, planLimit, reserveSp };
+}
+
 export function computePlannerResult(inputs: PlannerInputs): PlannerResult {
   const { velocity, velocityDev, velocityTest, usedBootstrap } = computeVelocity(inputs.velocityHistory);
   const roles = computeRoles(inputs.roles, inputs.workingDays);
@@ -206,16 +225,16 @@ export function computePlannerResult(inputs: PlannerInputs): PlannerResult {
   const averageCapacity = nonNegative(inputs.averageCapacity);
   const buffer = clampPercent(inputs.bufferPercent);
 
-  // When the user has not entered an "average capacity" baseline, treat the
-  // adjustment as no-op rather than dividing by zero. This is also how the
-  // first-sprint case is handled — the planner still produces a number.
-  const adjustedVelocity =
-    averageCapacity > 0 && roles.totalNet > 0
-      ? round1(velocity * (roles.totalNet / averageCapacity))
-      : round1(velocity);
+  // When the user has not entered an "average capacity" baseline we treat the
+  // capacity adjustment as no-op (scale = 1) rather than dividing by zero.
+  // Same fallback for the first-sprint case.
+  const scale = averageCapacity > 0 && roles.totalNet > 0 ? roles.totalNet / averageCapacity : 1;
 
-  const planLimit = round1(adjustedVelocity * (1 - buffer / 100));
-  const reserveSp = round1(Math.max(0, adjustedVelocity - planLimit));
+  const dev = buildTrack(velocityDev, scale, buffer);
+  const test = buildTrack(velocityTest, scale, buffer);
+  // Headline number uses the slower track (the team handbook's
+  // final_sp = max(sp_dev, sp_test) per-task rule).
+  const headline = buildTrack(velocity, scale, buffer);
 
   return {
     totalBaseCapacity: roles.totalBase,
@@ -225,18 +244,20 @@ export function computePlannerResult(inputs: PlannerInputs): PlannerResult {
     velocityDev,
     velocityTest,
     usedBootstrapVelocity: usedBootstrap,
-    adjustedVelocity,
-    planLimit,
-    reserveSp,
+    adjustedVelocity: headline.adjustedVelocity,
+    planLimit: headline.planLimit,
+    reserveSp: headline.reserveSp,
+    dev,
+    test,
     roles: roles.rows,
     bottleneckRole: roles.bottleneck,
   };
 }
 
 /**
- * Short headline used in the list view: "46 SP plan · 12 SP reserve".
- * Returns null when there is nothing meaningful to show.
+ * Short headline used in the list view: "dev 46.8 / test 31.2 SP · буфер 11.7".
+ * Two numbers because the team plans against two independent budgets.
  */
 export function summarizePlannerResult(result: PlannerResult): string {
-  return `${result.planLimit} SP в план · ${result.reserveSp} SP буфер`;
+  return `dev ${result.dev.planLimit} / test ${result.test.planLimit} SP · буфер ${result.dev.reserveSp}/${result.test.reserveSp}`;
 }

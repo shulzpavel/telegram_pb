@@ -439,6 +439,7 @@ function PlannerEditorPage({
             onNotes={setNotes}
             inputs={inputs}
             onInputs={setInputs}
+            totalBaseFromRoles={result.totalBaseCapacity}
           />
           <ResultPanel result={result} />
         </div>
@@ -491,6 +492,7 @@ function PlannerForm({
   onNotes,
   inputs,
   onInputs,
+  totalBaseFromRoles,
 }: {
   disabled: boolean;
   name: string;
@@ -499,6 +501,9 @@ function PlannerForm({
   onNotes: (next: string) => void;
   inputs: PlannerInputs;
   onInputs: (next: PlannerInputs) => void;
+  /** headcount × workingDays summed over all roles (no absences) — used as the
+   *  "take from current roles" shortcut for the base-capacity field. */
+  totalBaseFromRoles: number;
 }) {
   function setVelocity(index: number, patch: Partial<PlannerInputs["velocityHistory"][number]>) {
     onInputs({
@@ -563,15 +568,27 @@ function PlannerForm({
             disabled={disabled}
             onChange={(value) => onInputs({ ...inputs, workingDays: value })}
           />
-          <NumberCell
-            label="Средний Capacity, чел-дней"
-            hint="Среднее по прошлым спринтам, в чьих условиях получена эта Velocity"
-            value={inputs.averageCapacity}
-            min={0}
-            step={1}
-            disabled={disabled}
-            onChange={(value) => onInputs({ ...inputs, averageCapacity: value })}
-          />
+          <div className="space-y-1.5">
+            <NumberCell
+              label="Базовый Capacity, чел-дней"
+              hint={`Сколько чел-дней даёт команда в типичном спринте — без отпусков, на этом фоне получена Velocity. Пример: 9 чел × 22 дня = 198. Сейчас по ролям без отсутствий: ${formatBase(totalBaseFromRoles)}.`}
+              placeholder="Например, 198"
+              value={inputs.averageCapacity}
+              min={0}
+              step={1}
+              disabled={disabled}
+              onChange={(value) => onInputs({ ...inputs, averageCapacity: value })}
+            />
+            {!disabled && totalBaseFromRoles > 0 ? (
+              <button
+                type="button"
+                onClick={() => onInputs({ ...inputs, averageCapacity: totalBaseFromRoles })}
+                className="text-xs font-semibold text-blue hover:underline focus-visible:outline-none focus-visible:underline"
+              >
+                Взять из текущих ролей: {formatBase(totalBaseFromRoles)}
+              </button>
+            ) : null}
+          </div>
           <NumberCell
             label="Буфер, %"
             hint="Доля Velocity под незапланированное"
@@ -736,6 +753,7 @@ function FormCard({
 function NumberCell({
   label,
   hint,
+  placeholder,
   value,
   min,
   max,
@@ -745,6 +763,7 @@ function NumberCell({
 }: {
   label?: string;
   hint?: string;
+  placeholder?: string;
   value: number;
   min?: number;
   max?: number;
@@ -756,6 +775,7 @@ function NumberCell({
     <TextField
       label={label}
       hint={hint}
+      placeholder={placeholder}
       type="number"
       inputMode="decimal"
       value={Number.isFinite(value) ? String(value) : ""}
@@ -777,9 +797,14 @@ function ResultPanel({ result }: { result: PlannerResult }) {
     <aside className="space-y-4 lg:sticky lg:top-24">
       <div className="rounded-lg border border-blue/40 bg-blue/10 p-4 shadow-card">
         <p className="text-[11px] font-bold uppercase tracking-wide text-ink3">Рекомендация в план</p>
-        <p className="mt-1 text-3xl font-bold text-ink">{formatSp(result.planLimit)} SP</p>
-        <p className="mt-1 text-sm text-ink2">
-          + буфер {formatSp(result.reserveSp)} SP на незапланированное
+        <div className="mt-2 grid gap-3 sm:grid-cols-2">
+          <TrackCard label="Dev" planLimit={result.dev.planLimit} reserveSp={result.dev.reserveSp} />
+          <TrackCard label="Test" planLimit={result.test.planLimit} reserveSp={result.test.reserveSp} />
+        </div>
+        <p className="mt-3 text-xs text-ink3">
+          У задачи в спринте свои SP по dev и test. Берите задачи так, чтобы суммарно
+          {" "}<b>Σ SP dev ≤ {formatSp(result.dev.planLimit)}</b> и{" "}
+          <b>Σ SP test ≤ {formatSp(result.test.planLimit)}</b>. Буфер остаётся на незапланированные задачи.
         </p>
       </div>
 
@@ -788,19 +813,16 @@ function ResultPanel({ result }: { result: PlannerResult }) {
         <dl className="mt-3 space-y-2 text-sm">
           <Row label="Velocity dev" value={`${formatSp(result.velocityDev)} SP`} />
           <Row label="Velocity test" value={`${formatSp(result.velocityTest)} SP`} />
-          <Row
-            label="Velocity для плана"
-            value={
-              <span>
-                {formatSp(result.velocity)} SP{" "}
-                {result.usedBootstrapVelocity ? (
-                  <Badge tone="info">стартовая</Badge>
-                ) : (
-                  <Badge tone="neutral">max(dev, test)</Badge>
-                )}
-              </span>
-            }
-          />
+          {result.usedBootstrapVelocity ? (
+            <Row
+              label="Velocity для шапки"
+              value={
+                <span>
+                  {formatSp(result.velocity)} SP <Badge tone="info">стартовая</Badge>
+                </span>
+              }
+            />
+          ) : null}
           <Row label="Capacity база" value={`${formatSp(result.totalBaseCapacity)} чел-дней`} />
           <Row
             label="Capacity спринта"
@@ -808,7 +830,8 @@ function ResultPanel({ result }: { result: PlannerResult }) {
               result.totalAbsences > 0 ? ` (−${formatSp(result.totalAbsences)} отсутствия)` : ""
             }`}
           />
-          <Row label="Velocity спринта" value={`${formatSp(result.adjustedVelocity)} SP`} />
+          <Row label="Velocity спринта (dev)" value={`${formatSp(result.dev.adjustedVelocity)} SP`} />
+          <Row label="Velocity спринта (test)" value={`${formatSp(result.test.adjustedVelocity)} SP`} />
         </dl>
         {result.bottleneckRole ? (
           <Alert tone="warning" className="mt-4">
@@ -853,6 +876,24 @@ function ResultPanel({ result }: { result: PlannerResult }) {
   );
 }
 
+function TrackCard({
+  label,
+  planLimit,
+  reserveSp,
+}: {
+  label: string;
+  planLimit: number;
+  reserveSp: number;
+}) {
+  return (
+    <div className="rounded-md border border-line bg-surface px-3 py-2">
+      <p className="text-[11px] font-bold uppercase tracking-wide text-ink3">{label}</p>
+      <p className="mt-0.5 text-2xl font-bold text-ink leading-tight">{formatSp(planLimit)} SP</p>
+      <p className="mt-0.5 text-xs text-ink3">+ буфер {formatSp(reserveSp)} SP</p>
+    </div>
+  );
+}
+
 function Row({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div className="flex items-baseline justify-between gap-3">
@@ -866,6 +907,11 @@ function formatSp(value: number): string {
   if (!Number.isFinite(value)) return "0";
   if (Math.abs(value - Math.round(value)) < 0.05) return String(Math.round(value));
   return value.toFixed(1).replace(/\.0$/, "");
+}
+
+/** Same rounding rules as `formatSp` but used for capacity (people-days). */
+function formatBase(value: number): string {
+  return formatSp(value);
 }
 
 void Spinner; // re-export marker — keeps Spinner available for callers extending this shell

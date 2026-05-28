@@ -115,6 +115,21 @@ describe("computePlannerResult", () => {
     expect(result.velocity).toBe(60);
   });
 
+  it("computes independent dev / test plan budgets scaled by capacity", () => {
+    const result = computePlannerResult(
+      makeInputs({
+        velocityHistory: [{ label: "S1", storyPointsDev: 60, storyPointsTest: 40 }],
+      }),
+    );
+    expect(result.dev.velocity).toBe(60);
+    expect(result.dev.adjustedVelocity).toBe(58.5);
+    expect(result.dev.planLimit).toBe(46.8);
+
+    expect(result.test.velocity).toBe(40);
+    expect(result.test.adjustedVelocity).toBe(39);
+    expect(result.test.planLimit).toBe(31.2);
+  });
+
   it("keeps adjusted velocity equal to raw when average capacity is zero", () => {
     const result = computePlannerResult(
       makeInputs({ averageCapacity: 0, roles: [{ name: "Backend", headcount: 3, absences: 0 }] }),
@@ -153,6 +168,6 @@ describe("summarizePlannerResult", () => {
       roles: [{ name: "Team", headcount: 9, absences: 5 }],
     };
     const result = computePlannerResult(inputs);
-    expect(summarizePlannerResult(result)).toBe("46.8 SP в план · 11.7 SP буфер");
+    expect(summarizePlannerResult(result)).toBe("dev 46.8 / test 31.2 SP · буфер 11.7/7.8");
   });
 });
