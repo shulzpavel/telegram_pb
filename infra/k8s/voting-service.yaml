@@ -43,7 +43,7 @@ spec:
         - name: ANTHROPIC_TIMEOUT_SECONDS
           value: "20"
         - name: ANTHROPIC_MAX_CONTEXT_CHARS
-          value: "6000"
+          value: "16000"
         livenessProbe:
           httpGet:
             path: /health/live

@@ -18,6 +18,7 @@ logger = logging.getLogger(__name__)
 
 ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
 ANTHROPIC_VERSION = "2023-06-01"
+DEFAULT_MAX_CONTEXT_CHARS = 16000
 JSON_FENCE_RE = re.compile(r"^```(?:json)?\s*|\s*```$", re.IGNORECASE | re.MULTILINE)
 STORY_POINT_SCALE = (1, 2, 3, 5, 8, 13, 18)
 
@@ -45,7 +46,11 @@ def _anthropic_timeout() -> aiohttp.ClientTimeout:
 
 
 def _max_context_chars() -> int:
-    return max(500, int(os.getenv("ANTHROPIC_MAX_CONTEXT_CHARS", "6000")))
+    return max(500, int(os.getenv("ANTHROPIC_MAX_CONTEXT_CHARS", str(DEFAULT_MAX_CONTEXT_CHARS))))
+
+
+def _max_output_tokens() -> int:
+    return max(512, int(os.getenv("ANTHROPIC_MAX_OUTPUT_TOKENS", "1600")))
 
 
 def llm_configured() -> bool:
@@ -59,12 +64,49 @@ def _strip_json_fences(text: str) -> str:
     return stripped
 
 
+def _extract_json_object(text: str) -> str:
+    """Return the first complete JSON object from a model response."""
+    start = text.find("{")
+    if start < 0:
+        return text
+
+    depth = 0
+    in_string = False
+    escaped = False
+    for index in range(start, len(text)):
+        char = text[index]
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            continue
+
+        if char == '"':
+            in_string = True
+        elif char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start : index + 1]
+    return text
+
+
 def _parse_llm_json_payload(raw_text: str) -> dict[str, Any]:
     cleaned = _strip_json_fences(raw_text)
     try:
         payload = json.loads(cleaned)
     except json.JSONDecodeError as exc:
-        raise LlmSummaryError("LLM returned invalid JSON", status_code=502) from exc
+        extracted = _extract_json_object(cleaned)
+        if extracted == cleaned:
+            raise LlmSummaryError("LLM returned invalid JSON", status_code=502) from exc
+        try:
+            payload = json.loads(extracted)
+        except json.JSONDecodeError as extracted_exc:
+            raise LlmSummaryError("LLM returned invalid JSON", status_code=502) from extracted_exc
     if not isinstance(payload, dict):
         raise LlmSummaryError("LLM JSON must be an object", status_code=502)
     return payload
@@ -244,7 +286,9 @@ def _system_prompt() -> str:
         "- 18 SP — очень сложная: на грани разумной декомпозиции, кардинальные изменения архитектуры/инфраструктуры. Обязательно декомпозировать перед реализацией.\n"
         "\n"
         "Опирайся ТОЛЬКО на переданный контекст задачи. Не выдумывай дополнительный объём, который не упомянут. "
-        "Если контекст пуст или непонятен — confidence=low, sp_final=8, в assumptions напиши, что нужны уточнения."
+        "Если контекст пуст или непонятен — confidence=low, sp_final=8, в assumptions напиши, что нужны уточнения.\n"
+        "Даже если описание очень большое, короткое или неполное, всё равно оцени по доступному контексту. "
+        "Верни только компактный валидный JSON: без markdown, без комментариев, без текста до или после объекта."
     )
 
 
@@ -252,17 +296,37 @@ def _user_prompt(task_context: str) -> str:
     return f"Generate a planning-poker hint for this task:\n\n{task_context}"
 
 
-async def _call_anthropic(http_session: aiohttp.ClientSession, task_context: str) -> str:
+def _repair_user_prompt(task_context: str, error_message: str) -> str:
+    return (
+        "Previous answer was rejected by the JSON validator: "
+        f"{error_message}. Generate the planning-poker hint again.\n"
+        "Return one compact valid JSON object only, with all required fields. "
+        "Keep strings short enough to avoid truncation.\n\n"
+        f"Task context:\n{task_context}"
+    )
+
+
+async def _call_anthropic(
+    http_session: aiohttp.ClientSession,
+    task_context: str,
+    *,
+    repair_error: Optional[str] = None,
+) -> str:
     api_key = _anthropic_api_key()
     if not api_key:
         raise LlmSummaryError("LLM is not configured", status_code=503)
 
+    prefill = "{"
+    user_content = _repair_user_prompt(task_context, repair_error) if repair_error else _user_prompt(task_context)
     payload = {
         "model": _anthropic_model(),
-        "max_tokens": 1024,
+        "max_tokens": _max_output_tokens(),
         "temperature": 0.2,
         "system": _system_prompt(),
-        "messages": [{"role": "user", "content": _user_prompt(task_context)}],
+        "messages": [
+            {"role": "user", "content": user_content},
+            {"role": "assistant", "content": prefill},
+        ],
     }
     headers = {
         "x-api-key": api_key,
@@ -309,7 +373,14 @@ async def _call_anthropic(http_session: aiohttp.ClientSession, task_context: str
     combined = "\n".join(part for part in text_parts if part).strip()
     if not combined:
         raise LlmSummaryError("LLM response was empty", status_code=502)
+    if not combined.lstrip().startswith(prefill):
+        combined = f"{prefill}{combined}"
     return combined
+
+
+def _parse_and_validate_summary(raw_text: str) -> dict[str, Any]:
+    payload = _parse_llm_json_payload(raw_text)
+    return _validate_summary_payload(payload)
 
 
 async def generate_ai_summary_llm(
@@ -326,8 +397,12 @@ async def generate_ai_summary_llm(
     """
     task_context = _build_task_context(task, jira_context)
     raw = await _call_anthropic(http_session, task_context)
-    payload = _parse_llm_json_payload(raw)
-    return _validate_summary_payload(payload)
+    try:
+        return _parse_and_validate_summary(raw)
+    except LlmSummaryError as exc:
+        logger.warning("LLM summary response failed validation; retrying once: %s", exc.message)
+        retry_raw = await _call_anthropic(http_session, task_context, repair_error=exc.message)
+        return _parse_and_validate_summary(retry_raw)
 
 
 async def fetch_jira_issue_context(

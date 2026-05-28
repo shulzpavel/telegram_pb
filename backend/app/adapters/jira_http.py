@@ -16,6 +16,7 @@ from app.utils.jira_text import adf_to_plain_text, truncate_text
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_MAX_CONTEXT_CHARS = 16000
 _URL_RE = re.compile(r"https?://[^\s<>'\")]+", re.IGNORECASE)
 
 
@@ -397,7 +398,7 @@ class JiraHttpClient(JiraClient):
             if isinstance(raw_html, str) and raw_html.strip():
                 description_html = sanitize_jira_html(raw_html) or None
 
-        max_chars = max(500, int(os.getenv("ANTHROPIC_MAX_CONTEXT_CHARS", "6000")))
+        max_chars = max(500, int(os.getenv("ANTHROPIC_MAX_CONTEXT_CHARS", str(DEFAULT_MAX_CONTEXT_CHARS))))
         description = truncate_text(description, max_chars)
 
         issue_type_field = fields.get("issuetype") or {}
@@ -462,7 +463,10 @@ class JiraHttpClient(JiraClient):
         title = str(data.get("title") or f"Confluence page {page_id}")
         raw_html = ((data.get("body") or {}).get("view") or {}).get("value")
         safe_html = sanitize_jira_html(raw_html or "")
-        text = truncate_text(html_to_plain_text(safe_html), int(os.getenv("ANTHROPIC_MAX_CONTEXT_CHARS", "6000")))
+        text = truncate_text(
+            html_to_plain_text(safe_html),
+            max(500, int(os.getenv("ANTHROPIC_MAX_CONTEXT_CHARS", str(DEFAULT_MAX_CONTEXT_CHARS)))),
+        )
         links = data.get("_links") if isinstance(data.get("_links"), dict) else {}
         webui = links.get("webui") if isinstance(links.get("webui"), str) else ""
         page_url = urljoin(f"{self.confluence_base_url}/", webui.lstrip("/")) if webui else f"{self.confluence_base_url}/pages/{page_id}"
@@ -510,7 +514,7 @@ class JiraHttpClient(JiraClient):
         )
         context["description"] = truncate_text(
             "\n\n".join(part for part in [jira_text, confluence_text] if part),
-            int(os.getenv("ANTHROPIC_MAX_CONTEXT_CHARS", "6000")),
+            max(500, int(os.getenv("ANTHROPIC_MAX_CONTEXT_CHARS", str(DEFAULT_MAX_CONTEXT_CHARS)))),
         )
 
         jira_html = str(context.get("description_html") or "").strip()

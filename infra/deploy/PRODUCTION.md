@@ -244,7 +244,7 @@ Add to `.env`:
 ANTHROPIC_API_KEY=<anthropic-api-key>
 ANTHROPIC_MODEL=claude-haiku-4-5-20251001
 ANTHROPIC_TIMEOUT_SECONDS=20
-ANTHROPIC_MAX_CONTEXT_CHARS=6000
+ANTHROPIC_MAX_CONTEXT_CHARS=16000
 ```
 
 Restart `voting-service` after changing LLM env vars. Without `ANTHROPIC_API_KEY`, the manager **Generate AI summary** button returns an error and does not save a summary.

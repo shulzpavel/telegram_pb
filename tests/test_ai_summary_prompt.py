@@ -12,6 +12,7 @@ import pytest
 
 from services.voting_service.ai_summary_llm import (
     STORY_POINT_SCALE,
+    _parse_llm_json_payload,
     _system_prompt,
     _validate_summary_payload,
 )
@@ -59,6 +60,7 @@ def test_prompt_demands_strict_json_object() -> None:
     prompt = _system_prompt()
     assert "JSON" in prompt
     assert "schema" in prompt.lower() or "схеме" in prompt
+    assert "большое, короткое или неполное" in prompt
 
 
 def test_validator_still_accepts_well_formed_response() -> None:
@@ -80,6 +82,19 @@ def test_validator_still_accepts_well_formed_response() -> None:
     assert payload["sp_final"] == 5
     assert payload["estimation_model"] == "max(sp_dev, sp_test)"
     assert payload["confidence"] == "medium"
+
+
+def test_parser_accepts_json_object_with_extra_model_text() -> None:
+    """Claude occasionally wraps the object in a short sentence despite the
+    prompt. The backend should recover the object instead of surfacing
+    ``LLM returned invalid JSON`` to the facilitator."""
+    payload = _parse_llm_json_payload(
+        'Вот JSON:\n{"description": "Задача с URL {в тексте}", "methods": ["API"], '
+        '"complexity": "Средняя", "sp_dev": 5, "sp_test": 3, "sp_final": 5, '
+        '"scale_label": "5 SP", "confidence": "medium", "assumptions": []}\nГотово.'
+    )
+    assert payload["description"] == "Задача с URL {в тексте}"
+    assert payload["sp_final"] == 5
 
 
 def test_ensure_current_task_description_backfills_in_place() -> None:
@@ -255,6 +270,22 @@ def test_build_task_context_uses_stored_description_when_jira_context_missing() 
     )
     context = _build_task_context(task, jira_context=None)
     assert "Bonus tab spec captured from Jira at import time." in context
+
+
+def test_build_task_context_default_limit_keeps_large_confluence_specs(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The default prompt budget must fit large linked Confluence pages better
+    than the old 6k-char limit, while still allowing env override."""
+    from app.domain.task import Task
+    from services.voting_service.ai_summary_llm import _build_task_context
+
+    monkeypatch.delenv("ANTHROPIC_MAX_CONTEXT_CHARS", raising=False)
+    long_description = "A" * 7000 + "\nTAIL_REQUIREMENT_FROM_CONFLUENCE"
+    context = _build_task_context(
+        Task(jira_key="PROJ-10", summary="Large Confluence spec", description=long_description),
+        jira_context=None,
+    )
+    assert "TAIL_REQUIREMENT_FROM_CONFLUENCE" in context
+    assert len(context) > 7000
 
 
 def test_validator_corrects_sp_final_below_max() -> None:

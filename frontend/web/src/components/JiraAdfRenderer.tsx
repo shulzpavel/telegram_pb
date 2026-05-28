@@ -75,7 +75,7 @@ function renderMarks(node: AdfNode, keyPrefix: string): ReactNode {
             href={href}
             target="_blank"
             rel="noreferrer noopener"
-            className="text-blue underline underline-offset-2 hover:no-underline"
+            className="break-words text-blue underline underline-offset-2 [overflow-wrap:anywhere] hover:no-underline"
           >
             {el}
           </a>
@@ -152,7 +152,7 @@ function renderNode(node: AdfNode, keyPrefix: string): ReactNode {
         .join("");
       return (
         <pre className="my-2 overflow-x-auto rounded-md bg-line/30 p-3 text-[12px] leading-5 text-ink">
-          <code className="font-mono">{text}</code>
+          <code className="whitespace-pre-wrap break-words font-mono [overflow-wrap:anywhere]">{text}</code>
         </pre>
       );
     }
@@ -186,7 +186,7 @@ function renderNode(node: AdfNode, keyPrefix: string): ReactNode {
           href={href}
           target="_blank"
           rel="noreferrer noopener"
-          className="text-blue underline underline-offset-2 hover:no-underline"
+          className="break-words text-blue underline underline-offset-2 [overflow-wrap:anywhere] hover:no-underline"
         >
           {href}
         </a>
@@ -226,7 +226,7 @@ function renderNode(node: AdfNode, keyPrefix: string): ReactNode {
 
 export default function JiraAdfRenderer({ doc, className }: JiraAdfRendererProps) {
   return (
-    <div className={["text-sm leading-6 text-ink2", className ?? ""].join(" ")}>
+    <div className={["min-w-0 break-words text-sm leading-6 text-ink2 [overflow-wrap:anywhere]", className ?? ""].join(" ")}>
       {renderNode(doc, "adf")}
     </div>
   );
