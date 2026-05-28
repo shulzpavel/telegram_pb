@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Alert, BrandHomeLink, Button, Surface, TextField, ThemeToggle } from "../../../design-system";
+import { Alert, AutoHideAppHeader, BrandHomeLink, Button, Surface, TextField, ThemeToggle } from "../../../design-system";
 import { cmsAuthApi } from "../api/cmsClient";
 import type { CmsPrincipal } from "../api/cmsTypes";
 
@@ -25,19 +25,15 @@ export default function CmsLoginPage({ onLogin }: { onLogin: (principal: CmsPrin
   }
 
   return (
-    <main className="relative flex min-h-screen-mobile flex-col app-gradient-bg">
-      {/* Top bar shares the same brand mark + theme toggle pair as
-          all other entry points so the login experience doesn't feel
-          like a separate product. `pt-safe` keeps the brand below
-          the notch on iOS. */}
-      <header className="sticky top-0 z-10 border-b border-line bg-surface/85 pt-safe backdrop-blur">
-        <div className="flex min-h-14 w-full items-center gap-2 px-3 sm:px-4 lg:px-6">
+    <main className="flex min-h-screen-mobile flex-col app-gradient-bg">
+      <AutoHideAppHeader className="z-10 border-line/60 bg-surface/85">
+        <div className="flex min-h-14 w-full items-center gap-2 px-3 pt-safe sm:px-4 lg:px-6">
           <BrandHomeLink size="sm" />
-          <div className="ml-auto flex shrink-0 items-center gap-2">
+          <div className="ml-auto shrink-0">
             <ThemeToggle />
           </div>
         </div>
-      </header>
+      </AutoHideAppHeader>
       <div className="flex flex-1 items-center justify-center px-4 py-8 pb-safe-6">
         <Surface as="form" className="w-full max-w-sm p-5 sm:p-6" onSubmit={submit}>
           <div className="mb-6">
