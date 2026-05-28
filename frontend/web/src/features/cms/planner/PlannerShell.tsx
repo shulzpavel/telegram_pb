@@ -9,6 +9,7 @@ import {
   Spinner,
   TextField,
   TextareaField,
+  useToast,
 } from "../../../design-system";
 import { cmsPlannerApi, type SprintPlanPayload, type SprintPlanRecord } from "../api/cmsClient";
 import {
@@ -341,6 +342,7 @@ function PlannerEditorPage({
   mode: "create" | "edit";
 }) {
   const navigate = useNavigate();
+  const toast = useToast();
   const params = useParams<{ planId: string }>();
   const planId = mode === "edit" ? Number(params.planId) : null;
 
@@ -350,6 +352,8 @@ function PlannerEditorPage({
   const [loading, setLoading] = useState(mode === "edit");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [savedAt, setSavedAt] = useState<number | null>(null);
+  const [legacyBackendDetected, setLegacyBackendDetected] = useState(false);
   const [pendingDelete, setPendingDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
@@ -385,18 +389,55 @@ function PlannerEditorPage({
     setError(null);
     try {
       const payload = inputsToPayload(inputs, notes, result);
-      if (mode === "edit" && planId) {
-        await cmsPlannerApi.update(planId, { name: name.trim(), payload });
-      } else {
-        const created = await cmsPlannerApi.create({ name: name.trim(), payload });
-        navigate(`../${created.id}`, { replace: true });
+      const saved =
+        mode === "edit" && planId
+          ? await cmsPlannerApi.update(planId, { name: name.trim(), payload })
+          : await cmsPlannerApi.create({ name: name.trim(), payload });
+
+      // Reflect what was actually persisted. If the deployed voting-service is
+      // older than the dev/test split it silently drops the new fields and
+      // only stores legacy `story_points`. Detect that and warn the user so
+      // they don't see their dev/test inputs "snap back" on next visit.
+      const lostDevTestSplit = saved.payload.velocity_history.some((entry) => {
+        const hasNew = entry.story_points_dev != null || entry.story_points_test != null;
+        return !hasNew && entry.story_points != null;
+      });
+      setLegacyBackendDetected(lostDevTestSplit);
+
+      // For "create" the editor will navigate to the edit URL and re-fetch
+      // from the server; refreshing local state here would just flicker.
+      if (mode === "edit") {
+        setName(saved.name);
+        setNotes(saved.payload.notes ?? "");
+        setInputs(payloadToInputs(saved.payload));
+      }
+
+      setSavedAt(Date.now());
+      toast.success(
+        lostDevTestSplit
+          ? "Сохранено, но дорожки dev/test свёрнуты бэком"
+          : "План сохранён",
+      );
+
+      if (mode === "create") {
+        navigate(`../${saved.id}`, { replace: true });
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Не удалось сохранить план.");
+      const message = err instanceof Error ? err.message : "Не удалось сохранить план.";
+      setError(message);
+      toast.error(message, { title: "Сохранение не прошло" });
     } finally {
       setSaving(false);
     }
   }
+
+  // Fade the "Сохранено" pill out after a couple of seconds — the toast still
+  // gives a louder confirmation, this is the inline reassurance.
+  useEffect(() => {
+    if (!savedAt) return;
+    const id = window.setTimeout(() => setSavedAt(null), 2500);
+    return () => window.clearTimeout(id);
+  }, [savedAt]);
 
   async function confirmDelete() {
     if (!planId) return;
@@ -430,6 +471,13 @@ function PlannerEditorPage({
       />
 
       {error ? <InlineError text={error} /> : null}
+      {legacyBackendDetected ? (
+        <Alert tone="warning">
+          Бэкенд voting-service ещё не обновлён под разделение SP dev / SP test —
+          ваши значения свёрнуты в одно число <code>max(dev, test)</code>. Пересоберите
+          сервис, чтобы значения сохранялись по отдельности.
+        </Alert>
+      ) : null}
 
       {loading ? (
         <Skeleton height="h-72" />
@@ -451,6 +499,15 @@ function PlannerEditorPage({
 
       {!loading ? (
         <div className="flex flex-wrap items-center justify-end gap-2 border-t border-line pt-4">
+          {savedAt ? (
+            <span
+              className="motion-safe:animate-fade-up inline-flex items-center gap-1.5 text-xs font-semibold text-green"
+              aria-live="polite"
+            >
+              <CheckIcon />
+              Сохранено
+            </span>
+          ) : null}
           <Button variant="ghost" onClick={() => navigate("..")} disabled={saving}>Отмена</Button>
           {canManage ? (
             <Button
@@ -877,6 +934,23 @@ function ResultPanel({ result }: { result: PlannerResult }) {
         </table>
       </div>
     </aside>
+  );
+}
+
+function CheckIcon() {
+  return (
+    <svg
+      viewBox="0 0 20 20"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2.2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="h-4 w-4"
+      aria-hidden="true"
+    >
+      <path d="M4 10.5L8 14.5L16 6" />
+    </svg>
   );
 }
 
