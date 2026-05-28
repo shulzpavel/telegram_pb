@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { BottomSheet, Button, SheetItem, ThemeMenuControl } from "../../design-system";
+import { BottomSheet, Button, MobileBottomDock, SheetItem, ThemeMenuControl } from "../../design-system";
 import type { CmsPrincipal } from "../cms/api/cmsTypes";
 
 /**
@@ -58,15 +58,7 @@ export function ManagerBottomDock({
 
   return (
     <>
-      {/* Mobile dock lives in the shell flow. That keeps the scroll area ending
-          exactly above the actions instead of reserving overlay space that
-          shows up as a blank gap above the menu. */}
-      <div
-        className="sticky bottom-0 z-30 shrink-0 border-t border-line bg-surface/95 px-3 pb-safe-4 pt-2 backdrop-blur max-md:shadow-[0_-4px_24px_rgba(0,0,0,0.06)] md:hidden motion-safe:animate-fade-up"
-        role="toolbar"
-        aria-label="Действия сессии"
-      >
-        <div className="mx-auto flex max-w-[1440px] items-stretch gap-2">
+      <MobileBottomDock aria-label="Действия сессии" className="shrink-0" contentClassName="max-w-[1440px]">
           {inviteUrl ? (
             <Button
               variant={copied ? "success" : "primary"}
@@ -98,8 +90,7 @@ export function ManagerBottomDock({
           >
             <DotsIcon />
           </button>
-        </div>
-      </div>
+      </MobileBottomDock>
 
       <BottomSheet
         open={sheetMode !== null}

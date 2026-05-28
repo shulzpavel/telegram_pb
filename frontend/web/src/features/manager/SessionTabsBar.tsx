@@ -1,5 +1,5 @@
 import { NavLink } from "react-router-dom";
-import { cn } from "../../design-system";
+import { SubnavBar, cn } from "../../design-system";
 
 /**
  * Tabbed sub-navigation shown under the page header on every session
@@ -44,14 +44,7 @@ export function SessionTabsBar({
   ] as const;
 
   return (
-    <nav
-      aria-label="Разделы сессии"
-      className={cn(
-        "border-b border-line bg-surface/85 backdrop-blur",
-        className,
-      )}
-    >
-      <div className="flex w-full items-stretch gap-1 px-3 sm:px-4 lg:px-6">
+    <SubnavBar aria-label="Разделы сессии" className={className}>
         {tabs.map((tab) => (
           <NavLink
             key={tab.to}
@@ -83,7 +76,6 @@ export function SessionTabsBar({
             )}
           </NavLink>
         ))}
-      </div>
-    </nav>
+    </SubnavBar>
   );
 }

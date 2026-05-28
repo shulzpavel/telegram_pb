@@ -6,6 +6,7 @@ import {
   BackLink as DsBackLink,
   Button,
   Skeleton,
+  StickyActionFooter,
   Surface,
   TextField,
   TextareaField,
@@ -269,8 +270,7 @@ function RoleDetailContent({ role, isNew, canManage, permissions, onCreated, onU
         </div>
       </div>
 
-      <footer className="sticky bottom-0 z-10 flex justify-end py-3 pointer-events-none">
-        <div className="pointer-events-auto flex flex-wrap items-center justify-end gap-2 rounded-xl border border-line bg-surface/90 p-2 shadow-card backdrop-blur">
+      <StickyActionFooter>
           <Button variant="ghost" onClick={reset} disabled={!dirty || saving}>
             Сбросить изменения
           </Button>
@@ -289,8 +289,7 @@ function RoleDetailContent({ role, isNew, canManage, permissions, onCreated, onU
           >
             {isNew ? "Создать роль" : "Сохранить"}
           </Button>
-        </div>
-      </footer>
+      </StickyActionFooter>
     </section>
   );
 }

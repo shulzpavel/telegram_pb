@@ -8,6 +8,7 @@ import {
   CheckboxField,
   Skeleton,
   Spinner,
+  StickyActionFooter,
   Surface,
   TextField,
 } from "../../../design-system";
@@ -254,8 +255,7 @@ function NewUserView({ canManage, roles, onCreated }: NewUserViewProps) {
         </HelpCallout>
       </div>
 
-      <footer className="sticky bottom-0 z-10 flex justify-end py-3 pointer-events-none">
-        <div className="pointer-events-auto flex flex-wrap items-center justify-end gap-2 rounded-xl border border-line bg-surface/90 p-2 shadow-card backdrop-blur">
+      <StickyActionFooter>
           <Button variant="ghost" onClick={() => { setUsername(""); setPassword(""); setDisplayName(""); setRoleIds([]); }} disabled={saving}>
             Очистить
           </Button>
@@ -267,8 +267,7 @@ function NewUserView({ canManage, roles, onCreated }: NewUserViewProps) {
           >
             Создать пользователя
           </Button>
-        </div>
-      </footer>
+      </StickyActionFooter>
     </section>
   );
 }

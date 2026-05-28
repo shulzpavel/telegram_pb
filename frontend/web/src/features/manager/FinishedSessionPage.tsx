@@ -10,6 +10,7 @@ import {
   Button,
   EmptyState,
   ListSkeleton,
+  MobileBottomDock,
   SheetItem,
   Spinner,
   Surface,
@@ -302,12 +303,7 @@ export default function FinishedSessionPage() {
           report screen feels like part of the same family. Primary
           download stays the first thumb-reachable action; cockpit
           and overflow menu come next. */}
-      <div
-        className="sticky bottom-0 z-30 border-t border-line bg-surface/95 px-3 pb-safe-4 pt-2 backdrop-blur md:hidden motion-safe:animate-fade-up"
-        role="toolbar"
-        aria-label="Действия отчёта"
-      >
-        <div className="mx-auto flex max-w-6xl items-stretch gap-2">
+      <MobileBottomDock aria-label="Действия отчёта" contentClassName="max-w-6xl">
           <Button
             variant="secondary"
             className="min-h-12 shrink-0 px-3"
@@ -340,8 +336,7 @@ export default function FinishedSessionPage() {
           >
             <DotsIcon />
           </button>
-        </div>
-      </div>
+      </MobileBottomDock>
 
       <BottomSheet
         open={mobileMenuOpen}
