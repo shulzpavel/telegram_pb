@@ -9,8 +9,17 @@ import {
   type PlannerTrack,
 } from "./plannerCalc";
 
+// The granular "back/front/qa" split is used throughout these tests because
+// it exercises three independent tracks. The product default is dev/test —
+// see the dedicated test below for that.
+const TRIPLE_TRACKS: PlannerTrack[] = [
+  { id: "back", label: "Backend" },
+  { id: "front", label: "Frontend" },
+  { id: "qa", label: "QA" },
+];
+
 function makeInputs(overrides: Partial<PlannerInputs> = {}): PlannerInputs {
-  const tracks: PlannerTrack[] = overrides.tracks ?? DEFAULT_TRACKS.map((t) => ({ ...t }));
+  const tracks: PlannerTrack[] = overrides.tracks ?? TRIPLE_TRACKS.map((t) => ({ ...t }));
   return {
     workingDays: 22,
     bufferPercent: DEFAULT_BUFFER_PERCENT,
@@ -159,11 +168,12 @@ describe("computePlannerResult — per-track math", () => {
     expect(back.baseCapacity).toBe(88);
   });
 
-  it("falls back to default tracks for malformed inputs with no tracks at all", () => {
+  it("falls back to default dev/test tracks for malformed inputs with no tracks at all", () => {
     const result = computePlannerResult(
       makeInputs({ tracks: [], roles: [], velocityHistory: [] }),
     );
-    expect(result.tracks.map((t) => t.id)).toEqual(["back", "front", "qa"]);
+    expect(result.tracks.map((t) => t.id)).toEqual(DEFAULT_TRACKS.map((t) => t.id));
+    expect(result.tracks.map((t) => t.id)).toEqual(["dev", "test"]);
   });
 
   it("supports custom tracks beyond back/front/qa", () => {

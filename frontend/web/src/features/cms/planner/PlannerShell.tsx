@@ -277,17 +277,19 @@ function makeDefaultTracks(): PlannerTrack[] {
 }
 
 function makeDefaultRoles(): PlannerRoleInput[] {
+  // Dev/test split is the team's baseline. Sample roles match the canonical
+  // shape from the handbook: разработка → dev, QA → test.
   return [
-    { name: "Backend", trackId: "back", headcount: 3, absences: 0 },
-    { name: "Frontend", trackId: "front", headcount: 3, absences: 0 },
-    { name: "QA", trackId: "qa", headcount: 3, absences: 0 },
+    { name: "Backend", trackId: "dev", headcount: 3, absences: 0 },
+    { name: "Frontend", trackId: "dev", headcount: 3, absences: 0 },
+    { name: "QA", trackId: "test", headcount: 3, absences: 0 },
   ];
 }
 
 function makeDefaultHistory(): PlannerHistoryEntry[] {
   const empty = (label: string): PlannerHistoryEntry => ({
     label,
-    storyPointsByTrack: { back: 0, front: 0, qa: 0 },
+    storyPointsByTrack: { dev: 0, test: 0 },
   });
   return [empty("Спринт −1"), empty("Спринт −2"), empty("Спринт −3")];
 }
@@ -722,63 +724,25 @@ function PlannerForm({
 
   // ----- track mutators -----
   function addTrack() {
-    const existing = new Set(inputs.tracks.map((t) => t.id));
-    const id = uniqueTrackId("track", existing);
+    // Random opaque id keeps every keystroke in the label field stable —
+    // changing the visible name doesn't move references in roles / history.
+    const taken = new Set(inputs.tracks.map((t) => t.id));
+    const id = randomTrackId(taken);
     const label = `Трек ${inputs.tracks.length + 1}`;
-    const nextTracks = [...inputs.tracks, { id, label }];
     onInputs({
       ...inputs,
-      tracks: nextTracks,
+      tracks: [...inputs.tracks, { id, label }],
       velocityHistory: inputs.velocityHistory.map((entry) => ({
         ...entry,
         storyPointsByTrack: { ...entry.storyPointsByTrack, [id]: 0 },
       })),
     });
   }
-  function renameTrack(index: number, patch: { id?: string; label?: string }) {
-    const current = inputs.tracks[index];
-    if (!current) return;
-
-    let nextId = current.id;
-    if (patch.id !== undefined) {
-      // Sanitize: lowercase, replace whitespace, dedupe. Empty input falls
-      // back to the previous id to avoid orphaning roles.
-      const cleaned = patch.id
-        .toString()
-        .trim()
-        .toLowerCase()
-        .replace(/[^\p{Letter}\p{Number}_]+/gu, "_")
-        .replace(/^_+|_+$/g, "");
-      if (cleaned.length > 0) {
-        const taken = new Set(inputs.tracks.map((t, i) => (i === index ? "" : t.id)));
-        nextId = uniqueTrackId(cleaned, taken);
-      }
-    }
-    const nextLabel = patch.label !== undefined ? patch.label : current.label;
-
-    const nextTracks = inputs.tracks.map((t, i) =>
-      i === index ? { id: nextId, label: nextLabel } : t,
-    );
-
-    // Cascade-rename across roles + history so references stay valid.
-    const nextRoles =
-      nextId === current.id
-        ? inputs.roles
-        : inputs.roles.map((r) => (r.trackId === current.id ? { ...r, trackId: nextId } : r));
-
-    const nextHistory =
-      nextId === current.id
-        ? inputs.velocityHistory
-        : inputs.velocityHistory.map((entry) => {
-            const value = entry.storyPointsByTrack[current.id] ?? 0;
-            const { [current.id]: _removed, ...rest } = entry.storyPointsByTrack;
-            return {
-              ...entry,
-              storyPointsByTrack: { ...rest, [nextId]: value },
-            };
-          });
-
-    onInputs({ ...inputs, tracks: nextTracks, roles: nextRoles, velocityHistory: nextHistory });
+  function renameTrack(index: number, label: string) {
+    onInputs({
+      ...inputs,
+      tracks: inputs.tracks.map((t, i) => (i === index ? { ...t, label } : t)),
+    });
   }
   function removeTrack(index: number) {
     // Never allow zero tracks — the calc relies on at least one.
@@ -856,7 +820,7 @@ function PlannerForm({
 
       <FormCard
         title="Треки команды"
-        description="Раздели работу по тегам (back, front, qa или любым своим). Каждой роли в команде потом назначается один трек, и план считается по треку — это и есть универсальный калькулятор."
+        description="По умолчанию — Dev и Test (как в гайде). Хочешь гранулярнее (Backend, Frontend, QA, Design и т.д.) — переименуй и добавь свои. Каждой роли потом назначается один трек, план считается отдельно по каждому треку."
         action={
           !disabled ? (
             <Button size="sm" variant="ghost" onClick={addTrack}>
@@ -867,23 +831,11 @@ function PlannerForm({
       >
         <div className="space-y-2">
           {inputs.tracks.map((track, index) => (
-            <div
-              key={`${index}-${track.id}`}
-              className="grid items-end gap-2 sm:grid-cols-[1fr_2fr_auto]"
-            >
-              <TextField
-                label={index === 0 ? "ID (тег)" : undefined}
-                value={track.id}
-                onChange={(event) => renameTrack(index, { id: event.target.value })}
-                maxLength={40}
-                disabled={disabled}
-                hint={index === 0 ? "Используется в данных, латиница" : undefined}
-                reserveMessageSpace={false}
-              />
+            <div key={track.id} className="grid items-end gap-2 sm:grid-cols-[1fr_auto]">
               <TextField
                 label={index === 0 ? "Название трека" : undefined}
                 value={track.label}
-                onChange={(event) => renameTrack(index, { label: event.target.value })}
+                onChange={(event) => renameTrack(index, event.target.value)}
                 maxLength={80}
                 disabled={disabled}
                 reserveMessageSpace={false}
@@ -1356,16 +1308,19 @@ function formatSp(value: number): string {
   return value.toFixed(1).replace(/\.0$/, "");
 }
 
-function uniqueTrackId(base: string, taken: Set<string>): string {
-  const safe = base
-    .trim()
-    .toLowerCase()
-    .replace(/[^\p{Letter}\p{Number}_]+/gu, "_")
-    .replace(/^_+|_+$/g, "") || "track";
-  if (!taken.has(safe)) return safe;
-  let i = 2;
-  while (taken.has(`${safe}_${i}`)) i++;
-  return `${safe}_${i}`;
+/**
+ * Generate an opaque, stable id for a new track. We don't slugify the
+ * user-visible label so that editing the label later doesn't move the
+ * underlying key — that would invalidate role.trackId / history.byTrack
+ * references and (worse) cause React to remount the input on every
+ * keystroke.
+ */
+function randomTrackId(taken: Set<string>): string {
+  for (let i = 0; i < 5; i++) {
+    const id = `t_${Math.random().toString(36).slice(2, 8)}`;
+    if (!taken.has(id)) return id;
+  }
+  return `t_${Date.now().toString(36)}`;
 }
 
 void Spinner; // re-export marker — keeps Spinner available for callers extending this shell

@@ -27,11 +27,14 @@ export const BOOTSTRAP_VELOCITY_SP = 50;
 /** Default share of velocity reserved for unplanned / interrupt work. */
 export const DEFAULT_BUFFER_PERCENT = 20;
 
-/** Default tracks for a brand-new plan. Matches the user's "back/front/qa" example. */
+/**
+ * Default tracks for a brand-new plan. The team handbook splits work into
+ * Dev and Test budgets, so we start there. Users can add / rename / remove
+ * tracks freely (e.g. split Dev into Backend + Frontend, or add Design).
+ */
 export const DEFAULT_TRACKS: PlannerTrack[] = [
-  { id: "back", label: "Backend" },
-  { id: "front", label: "Frontend" },
-  { id: "qa", label: "QA" },
+  { id: "dev", label: "Dev" },
+  { id: "test", label: "Test" },
 ];
 
 export interface PlannerTrack {
