@@ -41,6 +41,21 @@ export function AiIntelligenceSurface({
   );
 }
 
+export function AiSparklePill({
+  children,
+  className,
+}: {
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <span className={cn("ai-sparkle-pill", className)}>
+      <AiSparkleIcon className="h-3.5 w-3.5 shrink-0" />
+      <span>{children}</span>
+    </span>
+  );
+}
+
 /**
  * Tiny gradient sparkle anchored at the top-right corner. Positioned so
  * it overlaps the animated border ring — same metaphor Apple uses for

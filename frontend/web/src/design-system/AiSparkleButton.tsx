@@ -5,9 +5,8 @@ import { cn } from "./utils";
 
 /**
  * Button variant for AI-driven actions (currently: Generate / Regenerate
- * AI summary). Uses the same purple→blue gradient as
- * `AiIntelligenceSurface` so the action and the artifact it produces
- * read as one product feature.
+ * AI summary). Uses the same Apple-Intelligence-style gradient ring as
+ * `AiIntelligenceSurface` while keeping the center transparent.
  *
  * Built on top of `Button`, not a parallel implementation — keeps focus
  * rings, disabled handling, loading state, and motion budget identical
@@ -31,9 +30,8 @@ export function AiSparkleButton({
 }) {
   return (
     <Button
-      // `secondary` is the most neutral variant we can pass; the gradient
-      // class overrides its background/border/color via `!important` so
-      // the choice here doesn't leak through.
+      // `secondary` gives us neutral sizing/focus behavior; the AI class
+      // owns the transparent center and gradient outline.
       variant="secondary"
       size={size}
       loading={loading}

@@ -25,5 +25,5 @@ export { BrandMark } from "./BrandMark";
 export { BrandHomeLink } from "./BrandHomeLink";
 export { BottomSheet, SheetItem } from "./BottomSheet";
 export { DeferredFallback, RouteTransition } from "./RouteTransition";
-export { AiIntelligenceSurface, AiSparkleIcon } from "./AiIntelligenceSurface";
+export { AiIntelligenceSurface, AiSparkleIcon, AiSparklePill } from "./AiIntelligenceSurface";
 export { AiSparkleButton } from "./AiSparkleButton";

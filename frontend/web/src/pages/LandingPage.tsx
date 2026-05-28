@@ -1,7 +1,7 @@
 import { motion, useReducedMotion } from "framer-motion";
 import { useEffect } from "react";
 import { Link } from "react-router-dom";
-import { AiSparkleIcon, AutoHideAppHeader, Badge, BrandHomeLink, Button, Surface, ThemeToggle } from "../design-system";
+import { AiSparklePill, AutoHideAppHeader, Badge, BrandHomeLink, Button, Surface, ThemeToggle } from "../design-system";
 
 interface HubAction {
   id: string;
@@ -189,18 +189,5 @@ function DetailChip({ label }: { label: string }) {
     );
   }
 
-  return (
-    <span
-      className="inline-flex items-center gap-1.5 rounded-full p-[1px] text-xs font-semibold shadow-card"
-      style={{
-        background:
-          "conic-gradient(from 0deg, rgb(var(--c-purple)), rgb(var(--c-blue2)), rgb(var(--c-blue)), rgb(var(--c-purple)))",
-      }}
-    >
-      <span className="inline-flex items-center gap-1.5 rounded-full bg-surface px-3 py-1 text-blue">
-        <AiSparkleIcon className="h-3.5 w-3.5" />
-        {label}
-      </span>
-    </span>
-  );
+  return <AiSparklePill>{label}</AiSparklePill>;
 }
