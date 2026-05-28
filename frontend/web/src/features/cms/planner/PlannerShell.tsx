@@ -316,6 +316,10 @@ function inputsToPayload(
     buffer_percent: inputs.bufferPercent,
     velocity_history: inputs.velocityHistory.map((entry) => ({
       label: entry.label,
+      // Legacy `story_points` is required by older backends (deployed before
+      // the dev/test split). Send max(dev, test) so old releases keep
+      // accepting the payload without changing the meaning for new ones.
+      story_points: Math.max(entry.storyPointsDev, entry.storyPointsTest),
       story_points_dev: entry.storyPointsDev,
       story_points_test: entry.storyPointsTest,
     })),
