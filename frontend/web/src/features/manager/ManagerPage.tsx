@@ -930,9 +930,9 @@ function ManagerWorkspace({
 }
 
 /**
- * Session cockpit shell. Below `md`, the document scrolls as one page (no nested
- * scroll areas); the primary header auto-hides on scroll down. From `md` up,
- * the shell locks to the viewport and columns scroll internally.
+ * Session cockpit shell. Below `lg`, the document scrolls as one page (no
+ * nested scroll areas); the primary header auto-hides on phone widths. From
+ * `lg` up, the shell locks to the viewport and columns scroll internally.
  */
 type MobileCockpitTab = "session" | "queue" | "more";
 
@@ -969,12 +969,12 @@ function CockpitShell({
   const childList = Children.toArray(children);
   const isWizard = childList.length === 1;
   const [mobileTab, setMobileTab] = useState<MobileCockpitTab>("session");
-  const [mobileDocScroll, setMobileDocScroll] = useState(false);
+  const [singleColumnDocScroll, setSingleColumnDocScroll] = useState(false);
 
   useEffect(() => {
-    const media = window.matchMedia("(max-width: 767px)");
+    const media = window.matchMedia("(max-width: 1023px)");
     function sync() {
-      setMobileDocScroll(media.matches);
+      setSingleColumnDocScroll(media.matches);
     }
     sync();
     media.addEventListener("change", sync);
@@ -982,7 +982,7 @@ function CockpitShell({
   }, []);
 
   return (
-    <main className="flex min-h-screen-mobile flex-col app-gradient-bg max-md:overflow-visible md:h-screen-mobile md:overflow-hidden">
+    <main className="flex min-h-screen-mobile flex-col app-gradient-bg max-lg:overflow-visible lg:h-screen-mobile lg:overflow-hidden">
       <div className="shrink-0">
         <AutoHideAppHeader className="border-b-0">
           <ManagerTopBar
@@ -1027,7 +1027,7 @@ function CockpitShell({
       </div>
 
       {isWizard ? (
-        mobileDocScroll ? (
+        singleColumnDocScroll ? (
           <div className="mx-auto w-full max-w-3xl px-4 py-4 pb-mobile-dock">
             {children}
           </div>
@@ -1038,7 +1038,7 @@ function CockpitShell({
         )
       ) : (
         <>
-          <div className="px-4 py-4 pb-mobile-dock max-md:block md:min-h-0 md:flex-1 md:overflow-y-auto md:overflow-x-hidden lg:hidden">
+          <div className="px-4 py-4 pb-mobile-dock lg:hidden">
             <div className="mx-auto w-full max-w-[1440px]">
               {mobileTab === "session" ? <div className="min-w-0">{childList[1]}</div> : null}
               {mobileTab === "queue" ? <div className="min-w-0">{childList[0]}</div> : null}

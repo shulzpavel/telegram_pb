@@ -531,7 +531,7 @@ function PasswordResetDialog({ open, username, onCancel, onConfirm }: PasswordRe
   return (
     <div
       role="presentation"
-      className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 px-4 py-4 backdrop-blur-sm sm:items-center"
+      className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 px-4 pb-safe-4 pt-safe backdrop-blur-sm md:items-center md:py-4"
       onMouseDown={(event) => {
         if (event.target === event.currentTarget && !submitting) onCancel();
       }}
@@ -544,7 +544,7 @@ function PasswordResetDialog({ open, username, onCancel, onConfirm }: PasswordRe
         aria-describedby={descriptionId}
         className="w-full max-w-sm"
       >
-        <Surface className="p-4">
+        <Surface className="rounded-b-none p-4 md:rounded-b-xl">
           <h2 id={titleId} className="text-base font-bold text-ink">Сбросить пароль</h2>
           <p id={descriptionId} className="mt-2 text-sm text-ink3">
             Введите новый пароль для <code className="font-mono">{username}</code>. Минимум {ADMIN_PASSWORD_MIN_LENGTH} символов.
@@ -568,9 +568,9 @@ function PasswordResetDialog({ open, username, onCancel, onConfirm }: PasswordRe
           {error ? (
             <div className="mt-3"><InlineError text={error} /></div>
           ) : null}
-          <div className="mt-4 flex justify-end gap-2">
-            <Button variant="ghost" onClick={onCancel} disabled={submitting}>Отмена</Button>
-            <Button variant="danger" onClick={submit} loading={submitting} disabled={!isValid || submitting}>
+          <div className="mt-4 flex flex-col-reverse gap-2 md:flex-row md:justify-end">
+            <Button variant="ghost" onClick={onCancel} disabled={submitting} className="w-full md:w-auto">Отмена</Button>
+            <Button variant="danger" onClick={submit} loading={submitting} disabled={!isValid || submitting} className="w-full md:w-auto">
               Сбросить пароль
             </Button>
           </div>

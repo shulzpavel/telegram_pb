@@ -421,10 +421,10 @@ export default function SessionsPage({ canManageTasks, canManageSessions }: Sess
  * applied server-side if the user submits an empty value, mirroring
  * the legacy `/manage` flow so behaviour stays predictable.
  *
- * Implemented as a focused dialog (backdrop + escape-to-close +
+ * Implemented as a focused sheet/dialog (backdrop + escape-to-close +
  * scroll-lock) rather than an inline panel because the user is about
  * to leave the list view — we want unambiguous attention on the
- * single decision being made.
+ * single decision being made. Below md this is always a bottom sheet.
  */
 function CreateSessionDialog({
   open,
@@ -463,14 +463,14 @@ function CreateSessionDialog({
       role="dialog"
       aria-modal="true"
       aria-labelledby="cms-create-session-title"
-      className="fixed inset-0 z-40 flex items-end justify-center overflow-y-auto overscroll-contain bg-canvas/70 px-4 pb-safe-6 pt-safe backdrop-blur sm:items-center"
+      className="fixed inset-0 z-40 flex items-end justify-center overflow-y-auto overscroll-contain bg-canvas/70 px-4 pb-safe-6 pt-safe backdrop-blur md:items-center"
       onClick={(event) => {
         if (event.target === event.currentTarget && !busy) onCancel();
       }}
     >
       <Surface
         as="form"
-        className="mb-4 max-h-[calc(100dvh-var(--safe-top)-var(--safe-bottom)-1.5rem)] w-full max-w-md overflow-y-auto overscroll-contain p-5 sm:mb-0 sm:p-6 motion-safe:animate-scale-in"
+        className="mb-4 max-h-[calc(100dvh-var(--safe-top)-var(--safe-bottom)-1.5rem)] w-full max-w-md overflow-y-auto overscroll-contain rounded-b-none p-5 md:mb-0 md:rounded-b-xl md:p-6 motion-safe:animate-scale-in"
         onSubmit={onSubmit}
       >
         <h2 id="cms-create-session-title" className="text-base font-bold text-ink">
@@ -492,14 +492,14 @@ function CreateSessionDialog({
           />
           {error ? <Alert tone="danger">{error}</Alert> : null}
         </div>
-        <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+        <div className="mt-5 flex flex-col-reverse gap-2 md:flex-row md:justify-end">
           <Button
             type="button"
             variant="ghost"
             size="md"
             disabled={busy}
             onClick={onCancel}
-            className="w-full sm:w-auto"
+            className="w-full md:w-auto"
           >
             Отмена
           </Button>
@@ -509,7 +509,7 @@ function CreateSessionDialog({
             size="md"
             loading={busy}
             disabled={busy}
-            className="w-full sm:w-auto"
+            className="w-full md:w-auto"
           >
             Создать и открыть
           </Button>

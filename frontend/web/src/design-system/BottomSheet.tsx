@@ -7,9 +7,9 @@ import { cn } from "./utils";
  *
  * Renders a card pinned to the bottom of the viewport with a grab
  * handle, safe-area-aware padding, focus trap, ESC-to-close, click
- * outside to close and body scroll lock. On `sm+` it widens to a max
- * of 28rem and centers — but is still anchored to the bottom so the
- * user keeps their thumb-friendly reading order.
+ * outside to close and body scroll lock. On `md+` it widens to a max
+ * of 28rem while staying anchored to the bottom, so mobile and tablet
+ * layouts keep their thumb-friendly reading order.
  *
  * Use for non-confirmation overflow menus (settings, info panels,
  * action lists). For destructive confirms keep using `ConfirmDialog`.
@@ -103,7 +103,7 @@ export function BottomSheet({
   if (!open) return null;
   return (
     <div
-      className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 backdrop-blur-sm motion-safe:animate-fade-up sm:items-end sm:p-4"
+      className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 backdrop-blur-sm motion-safe:animate-fade-up md:p-4"
       role="presentation"
       onMouseDown={handleBackdrop}
       onTouchEnd={handleBackdrop}
@@ -116,12 +116,12 @@ export function BottomSheet({
         aria-describedby={description ? descriptionId : undefined}
         tabIndex={-1}
         className={cn(
-          // Edge-to-edge on phones (looks broken otherwise — see the
+          // Edge-to-edge below md (looks broken otherwise — see the
           // narrow centered "rectangle in the middle of the screen"
-          // bug). On `sm+` we cap to 28rem so on iPad / desktop the
-          // sheet stays a comfortable reading width instead of
-          // stretching across a 1440px monitor.
-          "relative w-full outline-none sm:max-w-md",
+          // bug). On `md+` we cap to 28rem so desktop remains a
+          // comfortable reading width instead of stretching across a
+          // 1440px monitor.
+          "relative w-full outline-none md:max-w-md",
           "rounded-t-2xl border border-line border-b-0 bg-surface shadow-card",
           "motion-safe:animate-scale-in",
           // Cap height so long menus get an internal scroll area

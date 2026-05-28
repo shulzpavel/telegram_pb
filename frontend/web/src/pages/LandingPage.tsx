@@ -1,7 +1,7 @@
 import { motion, useReducedMotion } from "framer-motion";
 import { useEffect } from "react";
 import { Link } from "react-router-dom";
-import { AiSparkleIcon, Badge, BrandHomeLink, Button, Surface, ThemeToggle } from "../design-system";
+import { AiSparkleIcon, AutoHideAppHeader, Badge, BrandHomeLink, Button, Surface, ThemeToggle } from "../design-system";
 
 interface HubAction {
   id: string;
@@ -52,8 +52,8 @@ export default function LandingPage() {
 
   return (
     <main className="flex min-h-screen-mobile flex-col app-gradient-bg text-ink">
-      <header className="shrink-0 border-b border-line/70 bg-surface/70 pt-safe backdrop-blur-md">
-        <div className="flex min-h-14 w-full items-center gap-3 px-4 py-3 lg:px-6">
+      <AutoHideAppHeader className="z-10 border-line/70 bg-surface/70">
+        <div className="flex min-h-14 w-full items-center gap-3 px-4 py-3 pt-safe lg:px-6">
           <BrandHomeLink size="md" className="min-w-0 gap-3 text-ink" />
           <div className="ml-auto flex items-center gap-2">
             <ThemeToggle />
@@ -62,7 +62,7 @@ export default function LandingPage() {
             </Link>
           </div>
         </div>
-      </header>
+      </AutoHideAppHeader>
 
       <section className="flex flex-1 items-center px-4 py-8 pb-safe-6 lg:px-6">
         <div className="mx-auto grid w-full max-w-5xl gap-6 lg:grid-cols-[0.9fr_1.1fr] lg:items-center">

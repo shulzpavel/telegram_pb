@@ -657,10 +657,10 @@ export function ConfirmDialog({
   if (!open) return null;
   return (
     <div
-      // Bottom-sheet on mobile (items-end + pb-safe-4 keeps it above the
-      // iOS home indicator), centered on sm+. Backdrop catches both
-      // mouse and touch so taps outside the sheet always close it.
-      className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 px-4 pb-safe-4 pt-safe backdrop-blur-sm motion-safe:animate-fade-up sm:items-center sm:py-6"
+      // Bottom-sheet on mobile/tablet (items-end + pb-safe-4 keeps it
+      // above the iOS home indicator), centered only on md+. Backdrop
+      // catches both mouse and touch so taps outside always close it.
+      className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 px-4 pb-safe-4 pt-safe backdrop-blur-sm motion-safe:animate-fade-up md:items-center md:py-6"
       role="presentation"
       onMouseDown={(event) => {
         if (busy) return;
@@ -688,11 +688,10 @@ export function ConfirmDialog({
         <Surface className="p-5">
           <h2 id={titleId} className="text-lg font-bold text-ink sm:text-base">{title}</h2>
           <div id={descriptionId} className="mt-2 text-base leading-snug text-ink3 sm:text-sm">{description}</div>
-          {/* Stack buttons full-width on the smallest viewports so labels
-              never wrap or overflow; switch to inline on sm+ where the
-              dialog is centered and there's enough horizontal room. */}
-          <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-            <Button variant="ghost" onClick={onCancel} disabled={busy} className="sm:w-auto">
+          {/* Keep actions thumb-friendly until the layout becomes a
+              desktop-style centered dialog. */}
+          <div className="mt-5 flex flex-col-reverse gap-2 md:flex-row md:justify-end">
+            <Button variant="ghost" onClick={onCancel} disabled={busy} className="md:w-auto">
               {cancelLabel}
             </Button>
             <Button
@@ -700,7 +699,7 @@ export function ConfirmDialog({
               onClick={onConfirm}
               loading={busy}
               disabled={busy || confirmDisabled}
-              className="sm:w-auto"
+              className="md:w-auto"
             >
               {confirmLabel}
             </Button>
