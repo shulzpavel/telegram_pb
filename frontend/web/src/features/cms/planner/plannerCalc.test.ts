@@ -10,26 +10,41 @@ import {
 
 describe("computeVelocity", () => {
   it("falls back to 50 SP when history is empty", () => {
-    const result = computeVelocity([]);
-    expect(result).toEqual({ velocity: BOOTSTRAP_VELOCITY_SP, usedBootstrap: true });
+    expect(computeVelocity([])).toEqual({
+      velocity: BOOTSTRAP_VELOCITY_SP,
+      velocityDev: 0,
+      velocityTest: 0,
+      usedBootstrap: true,
+    });
   });
 
-  it("averages valid sprint entries, ignoring zeros", () => {
+  it("averages dev and test tracks independently and takes max for planning", () => {
     const result = computeVelocity([
-      { label: "S1", storyPoints: 42 },
-      { label: "S2", storyPoints: 38 },
-      { label: "S3", storyPoints: 45 },
-      { label: "S4", storyPoints: 40 },
+      { label: "S1", storyPointsDev: 40, storyPointsTest: 30 },
+      { label: "S2", storyPointsDev: 50, storyPointsTest: 28 },
+      { label: "S3", storyPointsDev: 45, storyPointsTest: 32 },
     ]);
-    expect(result).toEqual({ velocity: 41.3, usedBootstrap: false });
+    expect(result.velocityDev).toBe(45);
+    expect(result.velocityTest).toBe(30);
+    expect(result.velocity).toBe(45);
+    expect(result.usedBootstrap).toBe(false);
   });
 
-  it("ignores zero and negative entries when averaging", () => {
+  it("picks the slower track as planning velocity when test exceeds dev", () => {
     const result = computeVelocity([
-      { label: "S1", storyPoints: 60 },
-      { label: "S2", storyPoints: 0 },
-      { label: "S3", storyPoints: -5 },
+      { label: "S1", storyPointsDev: 30, storyPointsTest: 60 },
     ]);
+    expect(result.velocity).toBe(60);
+  });
+
+  it("ignores zero and negative entries when averaging tracks", () => {
+    const result = computeVelocity([
+      { label: "S1", storyPointsDev: 60, storyPointsTest: 0 },
+      { label: "S2", storyPointsDev: 0, storyPointsTest: -10 },
+      { label: "S3", storyPointsDev: 0, storyPointsTest: 40 },
+    ]);
+    expect(result.velocityDev).toBe(60);
+    expect(result.velocityTest).toBe(40);
     expect(result.velocity).toBe(60);
     expect(result.usedBootstrap).toBe(false);
   });
@@ -41,7 +56,7 @@ describe("computePlannerResult", () => {
       workingDays: 22,
       averageCapacity: 198,
       bufferPercent: DEFAULT_BUFFER_PERCENT,
-      velocityHistory: [{ label: "S1", storyPoints: 60 }],
+      velocityHistory: [{ label: "S1", storyPointsDev: 60, storyPointsTest: 50 }],
       roles: [
         { name: "Backend", headcount: 3, absences: 5 },
         { name: "Frontend", headcount: 3, absences: 0 },
@@ -86,6 +101,20 @@ describe("computePlannerResult", () => {
     expect(result.adjustedVelocity).toBe(BOOTSTRAP_VELOCITY_SP);
   });
 
+  it("surfaces per-track velocity alongside the planning velocity", () => {
+    const result = computePlannerResult(
+      makeInputs({
+        velocityHistory: [
+          { label: "S1", storyPointsDev: 50, storyPointsTest: 30 },
+          { label: "S2", storyPointsDev: 70, storyPointsTest: 40 },
+        ],
+      }),
+    );
+    expect(result.velocityDev).toBe(60);
+    expect(result.velocityTest).toBe(35);
+    expect(result.velocity).toBe(60);
+  });
+
   it("keeps adjusted velocity equal to raw when average capacity is zero", () => {
     const result = computePlannerResult(
       makeInputs({ averageCapacity: 0, roles: [{ name: "Backend", headcount: 3, absences: 0 }] }),
@@ -120,7 +149,7 @@ describe("summarizePlannerResult", () => {
       workingDays: 22,
       averageCapacity: 198,
       bufferPercent: DEFAULT_BUFFER_PERCENT,
-      velocityHistory: [{ label: "S1", storyPoints: 60 }],
+      velocityHistory: [{ label: "S1", storyPointsDev: 60, storyPointsTest: 40 }],
       roles: [{ name: "Team", headcount: 9, absences: 5 }],
     };
     const result = computePlannerResult(inputs);

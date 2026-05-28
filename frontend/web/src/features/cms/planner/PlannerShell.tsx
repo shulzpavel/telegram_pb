@@ -266,9 +266,9 @@ const DEFAULT_ROLES: PlannerInputs["roles"] = [
 ];
 
 const DEFAULT_HISTORY: PlannerInputs["velocityHistory"] = [
-  { label: "Спринт −1", storyPoints: 0 },
-  { label: "Спринт −2", storyPoints: 0 },
-  { label: "Спринт −3", storyPoints: 0 },
+  { label: "Спринт −1", storyPointsDev: 0, storyPointsTest: 0 },
+  { label: "Спринт −2", storyPointsDev: 0, storyPointsTest: 0 },
+  { label: "Спринт −3", storyPointsDev: 0, storyPointsTest: 0 },
 ];
 
 function emptyInputs(): PlannerInputs {
@@ -286,10 +286,17 @@ function payloadToInputs(payload: SprintPlanPayload): PlannerInputs {
     workingDays: payload.working_days,
     averageCapacity: payload.average_capacity,
     bufferPercent: payload.buffer_percent,
-    velocityHistory: payload.velocity_history.map((entry) => ({
-      label: entry.label,
-      storyPoints: entry.story_points,
-    })),
+    velocityHistory: payload.velocity_history.map((entry) => {
+      // Backwards-compat: older plans stored a single `story_points` field
+      // before we split dev/test. Map it onto both tracks so the loaded plan
+      // produces the same velocity it did before the migration.
+      const legacy = entry.story_points;
+      return {
+        label: entry.label,
+        storyPointsDev: entry.story_points_dev ?? legacy ?? 0,
+        storyPointsTest: entry.story_points_test ?? legacy ?? 0,
+      };
+    }),
     roles: payload.roles.map((role) => ({
       name: role.name,
       headcount: role.headcount,
@@ -309,7 +316,8 @@ function inputsToPayload(
     buffer_percent: inputs.bufferPercent,
     velocity_history: inputs.velocityHistory.map((entry) => ({
       label: entry.label,
-      story_points: entry.storyPoints,
+      story_points_dev: entry.storyPointsDev,
+      story_points_test: entry.storyPointsTest,
     })),
     roles: inputs.roles.map((role) => ({
       name: role.name,
@@ -501,7 +509,10 @@ function PlannerForm({
   function addVelocity() {
     onInputs({
       ...inputs,
-      velocityHistory: [...inputs.velocityHistory, { label: `Спринт −${inputs.velocityHistory.length + 1}`, storyPoints: 0 }],
+      velocityHistory: [
+        ...inputs.velocityHistory,
+        { label: `Спринт −${inputs.velocityHistory.length + 1}`, storyPointsDev: 0, storyPointsTest: 0 },
+      ],
     });
   }
   function removeVelocity(index: number) {
@@ -554,7 +565,7 @@ function PlannerForm({
           />
           <NumberCell
             label="Средний Capacity, чел-дней"
-            hint="Историческая база для масштабирования"
+            hint="Среднее по прошлым спринтам, в чьих условиях получена эта Velocity"
             value={inputs.averageCapacity}
             min={0}
             step={1}
@@ -576,7 +587,7 @@ function PlannerForm({
 
       <FormCard
         title="История Velocity"
-        description="Закрытые SP за 3–5 последних спринтов. Если пусто — берётся стартовый ориентир 50 SP."
+        description="Закрытые SP за 3–5 последних спринтов, отдельно по dev и test. Планирующая Velocity = max(dev, test) — это соответствует правилу команды «итоговый SP задачи = max(SP dev, SP test)»."
         action={
           !disabled ? (
             <Button size="sm" variant="ghost" onClick={addVelocity}>
@@ -590,7 +601,7 @@ function PlannerForm({
             <p className="text-sm text-ink3">Нет данных — будет использовано {BOOTSTRAP_VELOCITY_SP} SP.</p>
           ) : null}
           {inputs.velocityHistory.map((entry, index) => (
-            <div key={index} className="grid items-end gap-2 sm:grid-cols-[2fr_1fr_auto]">
+            <div key={index} className="grid items-end gap-2 sm:grid-cols-[2fr_1fr_1fr_auto]">
               <TextField
                 label={index === 0 ? "Спринт" : undefined}
                 value={entry.label}
@@ -600,12 +611,20 @@ function PlannerForm({
                 reserveMessageSpace={false}
               />
               <NumberCell
-                label={index === 0 ? "SP закрыто" : undefined}
-                value={entry.storyPoints}
+                label={index === 0 ? "SP dev" : undefined}
+                value={entry.storyPointsDev}
                 min={0}
                 step={1}
                 disabled={disabled}
-                onChange={(value) => setVelocity(index, { storyPoints: value })}
+                onChange={(value) => setVelocity(index, { storyPointsDev: value })}
+              />
+              <NumberCell
+                label={index === 0 ? "SP test" : undefined}
+                value={entry.storyPointsTest}
+                min={0}
+                step={1}
+                disabled={disabled}
+                onChange={(value) => setVelocity(index, { storyPointsTest: value })}
               />
               <Button
                 size="sm"
@@ -767,14 +786,21 @@ function ResultPanel({ result }: { result: PlannerResult }) {
       <div className="rounded-lg border border-line bg-surface p-4 shadow-card">
         <h3 className="text-sm font-bold text-ink">Расчёт</h3>
         <dl className="mt-3 space-y-2 text-sm">
-          <Row label="Velocity" value={
-            <span>
-              {formatSp(result.velocity)} SP{" "}
-              {result.usedBootstrapVelocity ? (
-                <Badge tone="info">стартовая</Badge>
-              ) : null}
-            </span>
-          } />
+          <Row label="Velocity dev" value={`${formatSp(result.velocityDev)} SP`} />
+          <Row label="Velocity test" value={`${formatSp(result.velocityTest)} SP`} />
+          <Row
+            label="Velocity для плана"
+            value={
+              <span>
+                {formatSp(result.velocity)} SP{" "}
+                {result.usedBootstrapVelocity ? (
+                  <Badge tone="info">стартовая</Badge>
+                ) : (
+                  <Badge tone="neutral">max(dev, test)</Badge>
+                )}
+              </span>
+            }
+          />
           <Row label="Capacity база" value={`${formatSp(result.totalBaseCapacity)} чел-дней`} />
           <Row
             label="Capacity спринта"

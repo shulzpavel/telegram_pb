@@ -30,8 +30,10 @@ export interface PlannerRoleInput {
 export interface PlannerHistoryEntry {
   /** Optional label — "Sprint 41". Empty values render as blanks in the UI. */
   label: string;
-  /** Story points the team actually closed in that sprint. */
-  storyPoints: number;
+  /** Story points closed by development in that sprint. */
+  storyPointsDev: number;
+  /** Story points closed by testing in that sprint. */
+  storyPointsTest: number;
 }
 
 export interface PlannerInputs {
@@ -68,8 +70,16 @@ export interface PlannerResult {
   totalNetCapacity: number;
   /** Sum of role absences echoed back for the result summary. */
   totalAbsences: number;
-  /** Velocity used (history average or bootstrap fallback). */
+  /**
+   * Velocity used for planning. Equals `max(velocityDev, velocityTest)` —
+   * matches the per-task rule `final_sp = max(sp_dev, sp_test)` from the team
+   * handbook and yields a safe lower-bound plan (the slower track wins).
+   */
   velocity: number;
+  /** Average closed SP on the development track. */
+  velocityDev: number;
+  /** Average closed SP on the testing track. */
+  velocityTest: number;
   /** True when velocity was substituted from the bootstrap rule. */
   usedBootstrapVelocity: boolean;
   /** velocity × netCapacity / averageCapacity (or velocity if averageCapacity ≤ 0). */
@@ -102,23 +112,47 @@ function clampPercent(value: number): number {
   return value;
 }
 
+/** Average across positive values; returns null when nothing usable was given. */
+function averagePositive(values: number[]): number | null {
+  const valid = values.map(nonNegative).filter((sp) => sp > 0);
+  if (valid.length === 0) return null;
+  return round1(valid.reduce((acc, sp) => acc + sp, 0) / valid.length);
+}
+
 /**
- * Velocity = average of provided sprint SP values, ignoring entries that are
- * zero or invalid. When nothing is provided we fall back to the bootstrap
- * velocity (50 SP) which is the team handbook's first-sprint anchor.
+ * Computes per-track velocity (dev / test) and the planning velocity used for
+ * scaling. The planning velocity follows the team handbook: a task's final SP
+ * is `max(SP_dev, SP_test)`, so the slowest track sets the upper bound on
+ * what the team can actually close.
+ *
+ * When neither dev nor test history is provided, falls back to the bootstrap
+ * velocity (50 SP).
  */
 export function computeVelocity(history: PlannerHistoryEntry[]): {
   velocity: number;
+  velocityDev: number;
+  velocityTest: number;
   usedBootstrap: boolean;
 } {
-  const validValues = history
-    .map((entry) => nonNegative(entry.storyPoints))
-    .filter((sp) => sp > 0);
-  if (validValues.length === 0) {
-    return { velocity: BOOTSTRAP_VELOCITY_SP, usedBootstrap: true };
+  const dev = averagePositive(history.map((entry) => entry.storyPointsDev));
+  const test = averagePositive(history.map((entry) => entry.storyPointsTest));
+
+  if (dev === null && test === null) {
+    return {
+      velocity: BOOTSTRAP_VELOCITY_SP,
+      velocityDev: 0,
+      velocityTest: 0,
+      usedBootstrap: true,
+    };
   }
-  const sum = validValues.reduce((acc, sp) => acc + sp, 0);
-  return { velocity: round1(sum / validValues.length), usedBootstrap: false };
+  const devSafe = dev ?? 0;
+  const testSafe = test ?? 0;
+  return {
+    velocity: Math.max(devSafe, testSafe),
+    velocityDev: devSafe,
+    velocityTest: testSafe,
+    usedBootstrap: false,
+  };
 }
 
 /**
@@ -166,7 +200,7 @@ function computeRoles(
 }
 
 export function computePlannerResult(inputs: PlannerInputs): PlannerResult {
-  const { velocity, usedBootstrap } = computeVelocity(inputs.velocityHistory);
+  const { velocity, velocityDev, velocityTest, usedBootstrap } = computeVelocity(inputs.velocityHistory);
   const roles = computeRoles(inputs.roles, inputs.workingDays);
 
   const averageCapacity = nonNegative(inputs.averageCapacity);
@@ -188,6 +222,8 @@ export function computePlannerResult(inputs: PlannerInputs): PlannerResult {
     totalNetCapacity: roles.totalNet,
     totalAbsences: roles.totalAbsences,
     velocity,
+    velocityDev,
+    velocityTest,
     usedBootstrapVelocity: usedBootstrap,
     adjustedVelocity,
     planLimit,

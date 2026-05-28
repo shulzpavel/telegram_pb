@@ -170,10 +170,20 @@ class SprintPlanRoleInput(BaseModel):
 
 
 class SprintPlanHistoryEntry(BaseModel):
-    """One closed sprint inside the velocity history."""
+    """One closed sprint inside the velocity history.
+
+    Stored separately for dev and test tracks so the planner can surface
+    the slower track as the planning velocity (per-task rule
+    ``final_sp = max(sp_dev, sp_test)``).
+
+    ``story_points`` is kept for read-back compatibility with plans saved
+    before the dev/test split; new payloads always carry the two fields.
+    """
 
     label: str = Field(default="", max_length=120)
-    story_points: float = Field(ge=0, le=99999)
+    story_points: Optional[float] = Field(default=None, ge=0, le=99999)
+    story_points_dev: float = Field(default=0, ge=0, le=99999)
+    story_points_test: float = Field(default=0, ge=0, le=99999)
 
 
 class SprintPlanPayload(BaseModel):

@@ -251,7 +251,10 @@ export interface SprintPlanRoleInput {
 
 export interface SprintPlanHistoryEntry {
   label: string;
-  story_points: number;
+  /** Legacy field — populated for plans saved before the dev/test split. */
+  story_points?: number;
+  story_points_dev?: number;
+  story_points_test?: number;
 }
 
 export interface SprintPlanPayload {
