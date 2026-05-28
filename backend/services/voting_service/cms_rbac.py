@@ -24,6 +24,7 @@ PERM_ACCESS_MANAGE = "cms.access.manage"
 PERM_TASKS_MANAGE = "cms.tasks.manage"
 PERM_APP_SESSIONS_MANAGE = "app.sessions.manage"
 PERM_WEB_PARTICIPANTS_DELETE = "cms.web_participants.delete"
+PERM_PLANNER_VIEW = "cms.planner.view"
 
 CMS_PERMISSION_DEFINITIONS: list[dict[str, str]] = [
     {
@@ -85,6 +86,11 @@ CMS_PERMISSION_DEFINITIONS: list[dict[str, str]] = [
         "key": PERM_APP_SESSIONS_MANAGE,
         "label": "Manage planning sessions",
         "description": "Can create and facilitate planning sessions in the main web app.",
+    },
+    {
+        "key": PERM_PLANNER_VIEW,
+        "label": "View sprint planner",
+        "description": "Can view and edit the sprint capacity/velocity planner.",
     },
 ]
 
@@ -150,6 +156,13 @@ CMS_PAGE_DEFINITIONS: list[dict[str, Any]] = [
         "permission_key": PERM_ACCESS_VIEW,
         "sort_order": 80,
     },
+    {
+        "key": "planner",
+        "label": "Sprint planner",
+        "path": "/cms/planner",
+        "permission_key": PERM_PLANNER_VIEW,
+        "sort_order": 35,
+    },
 ]
 
 OPERATIONAL_VIEW_PERMISSIONS = [
@@ -160,6 +173,7 @@ OPERATIONAL_VIEW_PERMISSIONS = [
     PERM_TOKENS_VIEW,
     PERM_WEB_VIEW,
     PERM_EVENTS_VIEW,
+    PERM_PLANNER_VIEW,
 ]
 
 ALL_PERMISSION_KEYS = [item["key"] for item in CMS_PERMISSION_DEFINITIONS]

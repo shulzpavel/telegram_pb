@@ -15,6 +15,7 @@ import {
 const AccessShell = lazy(() => import("../access/AccessShell"));
 const AuditEventsPage = lazy(() => import("../events/AuditEventsPage"));
 const OverviewPage = lazy(() => import("../overview/OverviewPage"));
+const PlannerShell = lazy(() => import("../planner/PlannerShell"));
 const SessionsPage = lazy(() => import("../sessions/SessionsPage"));
 const TokensPage = lazy(() => import("../tokens/TokensPage"));
 const UsersPage = lazy(() => import("../users/UsersPage"));
@@ -250,6 +251,9 @@ export default function CmsShell({
                   path="access/*"
                   element={<AccessShell canManage={canManageAccess} currentAdminId={principal.id} />}
                 />
+              ) : null}
+              {hasPermission(principal, CMS_PERMISSIONS.planner) ? (
+                <Route path="planner/*" element={<PlannerShell canManage />} />
               ) : null}
               {/* Deprecated routes from the Telegram-era console: route any
                   lingering bookmarks back to the active landing page. */}

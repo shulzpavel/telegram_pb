@@ -28,6 +28,7 @@ from services.voting_service.cms_rbac import (
     PERM_ACCESS_MANAGE,
     PERM_ACCESS_VIEW,
     PERM_APP_SESSIONS_MANAGE,
+    PERM_PLANNER_VIEW,
     PERM_SESSIONS_VIEW,
     PERM_TASKS_MANAGE,
     hash_password,
@@ -110,6 +111,29 @@ def _user_row_dict(row: asyncpg.Record) -> dict[str, Any]:
     data = _row_to_dict(row)
     data["user_id"] = str(data["user_id"])
     return data
+
+
+def _sprint_plan_row(row: asyncpg.Record) -> dict[str, Any]:
+    """Serialize a cms_sprint_plans row. Payload column is JSONB (asyncpg returns text)."""
+    raw_payload = row["payload"]
+    if isinstance(raw_payload, (bytes, bytearray)):
+        payload = json.loads(raw_payload.decode("utf-8"))
+    elif isinstance(raw_payload, str):
+        payload = json.loads(raw_payload)
+    else:
+        payload = raw_payload or {}
+    created_at = row["created_at"]
+    updated_at = row["updated_at"]
+    return {
+        "id": int(row["id"]),
+        "name": row["name"],
+        "payload": payload,
+        "created_by": int(row["created_by"]) if row["created_by"] is not None else None,
+        "created_by_username": row["created_by_username"] if "created_by_username" in row.keys() else None,
+        "created_by_display_name": row["created_by_display_name"] if "created_by_display_name" in row.keys() else None,
+        "created_at": created_at.isoformat() if isinstance(created_at, datetime) else created_at,
+        "updated_at": updated_at.isoformat() if isinstance(updated_at, datetime) else updated_at,
+    }
 
 
 def _serialize_session(session: Session) -> dict[str, Any]:
@@ -478,6 +502,17 @@ class PostgresCmsStore:
                 );
                 CREATE INDEX IF NOT EXISTS idx_cms_admin_roles_role_admin
                     ON cms_admin_roles(role_id, admin_id);
+
+                CREATE TABLE IF NOT EXISTS cms_sprint_plans (
+                    id BIGSERIAL PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    payload JSONB NOT NULL,
+                    created_by BIGINT REFERENCES cms_admin_accounts(id) ON DELETE SET NULL,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                );
+                CREATE INDEX IF NOT EXISTS idx_cms_sprint_plans_updated
+                    ON cms_sprint_plans(updated_at DESC, id DESC);
                 """
             )
 
@@ -553,7 +588,12 @@ class PostgresCmsStore:
                     "session_manager",
                     "Session manager",
                     "Can facilitate planning sessions and manage active task queues.",
-                    [PERM_SESSIONS_VIEW, PERM_TASKS_MANAGE, PERM_APP_SESSIONS_MANAGE],
+                    [
+                        PERM_SESSIONS_VIEW,
+                        PERM_TASKS_MANAGE,
+                        PERM_APP_SESSIONS_MANAGE,
+                        PERM_PLANNER_VIEW,
+                    ],
                 )
 
                 if bootstrap_username and bootstrap_password:
@@ -1443,6 +1483,86 @@ class PostgresCmsStore:
                 """,
                 [(admin_id, role_id) for role_id in sorted(set(role_ids))],
             )
+
+    async def list_sprint_plans(self) -> list[dict[str, Any]]:
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT p.id, p.name, p.payload, p.created_by, p.created_at, p.updated_at,
+                       a.username AS created_by_username,
+                       a.display_name AS created_by_display_name
+                FROM cms_sprint_plans p
+                LEFT JOIN cms_admin_accounts a ON a.id = p.created_by
+                ORDER BY p.updated_at DESC, p.id DESC
+                """
+            )
+        return [_sprint_plan_row(row) for row in rows]
+
+    async def get_sprint_plan(self, plan_id: int) -> Optional[dict[str, Any]]:
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT p.id, p.name, p.payload, p.created_by, p.created_at, p.updated_at,
+                       a.username AS created_by_username,
+                       a.display_name AS created_by_display_name
+                FROM cms_sprint_plans p
+                LEFT JOIN cms_admin_accounts a ON a.id = p.created_by
+                WHERE p.id = $1
+                """,
+                plan_id,
+            )
+        return _sprint_plan_row(row) if row else None
+
+    async def create_sprint_plan(
+        self,
+        name: str,
+        payload: dict[str, Any],
+        created_by: Optional[int],
+    ) -> dict[str, Any]:
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                INSERT INTO cms_sprint_plans (name, payload, created_by)
+                VALUES ($1, $2::jsonb, $3)
+                RETURNING id
+                """,
+                name.strip(),
+                json.dumps(payload),
+                created_by,
+            )
+        plan = await self.get_sprint_plan(int(row["id"]))
+        assert plan is not None
+        return plan
+
+    async def update_sprint_plan(
+        self,
+        plan_id: int,
+        name: str,
+        payload: dict[str, Any],
+    ) -> Optional[dict[str, Any]]:
+        async with self.pool.acquire() as conn:
+            updated = await conn.fetchrow(
+                """
+                UPDATE cms_sprint_plans
+                SET name = $2, payload = $3::jsonb, updated_at = NOW()
+                WHERE id = $1
+                RETURNING id
+                """,
+                plan_id,
+                name.strip(),
+                json.dumps(payload),
+            )
+        if not updated:
+            return None
+        return await self.get_sprint_plan(plan_id)
+
+    async def delete_sprint_plan(self, plan_id: int) -> bool:
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "DELETE FROM cms_sprint_plans WHERE id = $1 RETURNING id",
+                plan_id,
+            )
+        return row is not None
 
     async def overview(self) -> dict[str, Any]:
         async with self.pool.acquire() as conn:

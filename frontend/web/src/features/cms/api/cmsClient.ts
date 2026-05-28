@@ -243,6 +243,57 @@ export const cmsTokensApi = {
     }),
 };
 
+export interface SprintPlanRoleInput {
+  name: string;
+  headcount: number;
+  absences: number;
+}
+
+export interface SprintPlanHistoryEntry {
+  label: string;
+  story_points: number;
+}
+
+export interface SprintPlanPayload {
+  working_days: number;
+  average_capacity: number;
+  buffer_percent: number;
+  velocity_history: SprintPlanHistoryEntry[];
+  roles: SprintPlanRoleInput[];
+  notes: string;
+  result_summary?: string | null;
+}
+
+export interface SprintPlanRecord {
+  id: number;
+  name: string;
+  payload: SprintPlanPayload;
+  created_by: number | null;
+  created_by_username: string | null;
+  created_by_display_name: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export const cmsPlannerApi = {
+  list: () => cmsFetch<{ items: SprintPlanRecord[] }>("/sprint-plans"),
+  get: (planId: number) => cmsFetch<SprintPlanRecord>(`/sprint-plans/${planId}`),
+  create: (body: { name: string; payload: SprintPlanPayload }) =>
+    cmsFetch<SprintPlanRecord>("/sprint-plans", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  update: (planId: number, body: { name: string; payload: SprintPlanPayload }) =>
+    cmsFetch<SprintPlanRecord>(`/sprint-plans/${planId}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  delete: (planId: number) =>
+    cmsFetch<{ ok: boolean; id: number }>(`/sprint-plans/${planId}`, {
+      method: "DELETE",
+    }),
+};
+
 export const cmsTasksApi = {
   create: (sessionId: number, body: CmsTaskBody) =>
     cmsFetch<CmsTaskMutation>(`/sessions/${sessionId}/tasks`, {

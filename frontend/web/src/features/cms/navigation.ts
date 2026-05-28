@@ -11,6 +11,7 @@ export const CMS_PERMISSIONS = {
   tasksManage: "cms.tasks.manage",
   appSessionsManage: "app.sessions.manage",
   webParticipantsDelete: "cms.web_participants.delete",
+  planner: "cms.planner.view",
 } as const;
 
 /**
@@ -76,6 +77,15 @@ export const cmsTabs: CmsTab[] = [
     permission: CMS_PERMISSIONS.users,
     path: "/cms/users",
     routePath: "users",
+    group: "operations",
+  },
+  {
+    key: "planner",
+    label: "Планирование SP",
+    description: "Velocity и Capacity на следующий спринт: задаём команду и историю — получаем рекомендацию в SP.",
+    permission: CMS_PERMISSIONS.planner,
+    path: "/cms/planner",
+    routePath: "planner",
     group: "operations",
   },
   {

@@ -1,4 +1,13 @@
-export type TabKey = "overview" | "sessions" | "users" | "votes" | "tokens" | "web" | "events" | "access";
+export type TabKey =
+  | "overview"
+  | "sessions"
+  | "users"
+  | "votes"
+  | "tokens"
+  | "web"
+  | "events"
+  | "access"
+  | "planner";
 
 export type ThemeMode = "dark" | "light" | "system";
 

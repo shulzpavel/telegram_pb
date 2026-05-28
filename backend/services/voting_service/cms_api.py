@@ -42,6 +42,7 @@ from services.voting_service.cms_rbac import (
     PERM_APP_SESSIONS_MANAGE,
     PERM_EVENTS_VIEW,
     PERM_OVERVIEW_VIEW,
+    PERM_PLANNER_VIEW,
     PERM_SESSIONS_VIEW,
     PERM_TOKENS_VIEW,
     PERM_TASKS_MANAGE,
@@ -158,6 +159,48 @@ class SessionRenameRequest(BaseModel):
     callers fall back to the technical identifier."""
 
     title: Optional[str] = Field(default=None, max_length=200)
+
+
+class SprintPlanRoleInput(BaseModel):
+    """One role line inside the detailed capacity input."""
+
+    name: str = Field(min_length=1, max_length=80)
+    headcount: float = Field(ge=0, le=999)
+    absences: float = Field(default=0, ge=0, le=99999)
+
+
+class SprintPlanHistoryEntry(BaseModel):
+    """One closed sprint inside the velocity history."""
+
+    label: str = Field(default="", max_length=120)
+    story_points: float = Field(ge=0, le=99999)
+
+
+class SprintPlanPayload(BaseModel):
+    """User-editable inputs for the sprint planner.
+
+    The result is recomputed on the frontend on every change for live preview
+    and stored alongside the inputs so list views can show a one-line summary
+    without recomputing.
+    """
+
+    working_days: float = Field(ge=0, le=200)
+    average_capacity: float = Field(default=0, ge=0, le=999999)
+    buffer_percent: float = Field(default=20, ge=0, le=80)
+    velocity_history: list[SprintPlanHistoryEntry] = Field(default_factory=list, max_length=20)
+    roles: list[SprintPlanRoleInput] = Field(default_factory=list, max_length=30)
+    notes: str = Field(default="", max_length=2000)
+    result_summary: Optional[str] = Field(default=None, max_length=200)
+
+
+class SprintPlanCreateRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    payload: SprintPlanPayload
+
+
+class SprintPlanUpdateRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    payload: SprintPlanPayload
 
 
 async def _session_ref(request: Request, session_id: int) -> tuple[int, Optional[int]]:
@@ -1021,3 +1064,93 @@ async def cms_access_update_admin(
         raise HTTPException(status_code=404, detail="Admin not found")
     await _audit(request, "cms.access.admin.update", actor.username, "ok", {"admin_id": admin_id})
     return admin
+
+
+# ---------------------------------------------------------------------------
+# Sprint planner (velocity + capacity calculator with persistence).
+# ---------------------------------------------------------------------------
+
+
+@cms_router.get("/cms/sprint-plans")
+async def cms_list_sprint_plans(
+    request: Request,
+    _: CmsPrincipal = Depends(require_permission(PERM_PLANNER_VIEW)),
+) -> dict:
+    items = await _get_cms_store(request).list_sprint_plans()
+    return {"items": items}
+
+
+@cms_router.post("/cms/sprint-plans")
+async def cms_create_sprint_plan(
+    body: SprintPlanCreateRequest,
+    request: Request,
+    actor: CmsPrincipal = Depends(require_permission(PERM_PLANNER_VIEW)),
+) -> dict:
+    plan = await _get_cms_store(request).create_sprint_plan(
+        name=body.name,
+        payload=body.payload.model_dump(),
+        created_by=actor.id,
+    )
+    await _audit(
+        request,
+        "cms.sprint_plan.create",
+        actor.username,
+        "ok",
+        {"plan_id": plan["id"], "name": plan["name"]},
+    )
+    return plan
+
+
+@cms_router.get("/cms/sprint-plans/{plan_id}")
+async def cms_get_sprint_plan(
+    plan_id: int,
+    request: Request,
+    _: CmsPrincipal = Depends(require_permission(PERM_PLANNER_VIEW)),
+) -> dict:
+    plan = await _get_cms_store(request).get_sprint_plan(plan_id)
+    if not plan:
+        raise HTTPException(status_code=404, detail="Sprint plan not found")
+    return plan
+
+
+@cms_router.put("/cms/sprint-plans/{plan_id}")
+async def cms_update_sprint_plan(
+    plan_id: int,
+    body: SprintPlanUpdateRequest,
+    request: Request,
+    actor: CmsPrincipal = Depends(require_permission(PERM_PLANNER_VIEW)),
+) -> dict:
+    plan = await _get_cms_store(request).update_sprint_plan(
+        plan_id=plan_id,
+        name=body.name,
+        payload=body.payload.model_dump(),
+    )
+    if not plan:
+        raise HTTPException(status_code=404, detail="Sprint plan not found")
+    await _audit(
+        request,
+        "cms.sprint_plan.update",
+        actor.username,
+        "ok",
+        {"plan_id": plan_id, "name": plan["name"]},
+    )
+    return plan
+
+
+@cms_router.delete("/cms/sprint-plans/{plan_id}")
+async def cms_delete_sprint_plan(
+    plan_id: int,
+    request: Request,
+    actor: CmsPrincipal = Depends(require_permission(PERM_PLANNER_VIEW)),
+) -> dict:
+    deleted = await _get_cms_store(request).delete_sprint_plan(plan_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Sprint plan not found")
+    await _audit(
+        request,
+        "cms.sprint_plan.delete",
+        actor.username,
+        "ok",
+        {"plan_id": plan_id},
+    )
+    return {"ok": True, "id": plan_id}
