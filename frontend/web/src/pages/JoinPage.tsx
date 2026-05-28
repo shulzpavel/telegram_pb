@@ -2,7 +2,7 @@ import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { FormEvent, useState } from "react";
 import { Link } from "react-router-dom";
 import TaskTextBlock from "../components/TaskTextBlock";
-import { Alert, Badge, BrandHomeLink, Button, ProgressBar, Surface, TextField, ThemeToggle, cn } from "../design-system";
+import { Alert, AutoHideAppHeader, Badge, BrandHomeLink, Button, ProgressBar, Surface, TextField, ThemeToggle, cn } from "../design-system";
 import { ParticipantRole, TaskInfo } from "../hooks/useSession";
 import {
   PARTICIPANT_EMAIL_DOMAIN,
@@ -56,23 +56,23 @@ export default function JoinPage({ task, onJoin, error }: JoinPageProps) {
   const displayError = submitError ?? error;
 
   return (
-    <div className="relative flex min-h-screen-mobile flex-col app-gradient-bg px-4 pb-safe-6 pt-safe">
-      {/* Floating theme toggle — kept out of the form flow so the join
-          screen stays a single centered card on mobile. `safe-area`
-          padding is inherited from the parent's `pt-safe`. */}
-      <div className="absolute right-3 top-3 z-10 sm:right-4 sm:top-4">
-        <ThemeToggle />
-      </div>
+    <div className="flex min-h-screen-mobile flex-col app-gradient-bg">
+      <AutoHideAppHeader className="z-10 border-line/60 bg-surface/85">
+        <div className="flex min-h-14 w-full items-center gap-2 px-3 pt-safe sm:px-4 lg:px-6">
+          <BrandHomeLink size="sm" showWordmark={false} />
+          <span className="ml-2 text-sm font-semibold text-ink2">Вход в сессию</span>
+          <div className="ml-auto shrink-0">
+            <ThemeToggle />
+          </div>
+        </div>
+      </AutoHideAppHeader>
+
       <motion.div
-        className="mx-auto flex w-full max-w-md flex-1 flex-col justify-center py-6"
+        className="mx-auto flex w-full max-w-md flex-1 flex-col justify-center px-4 py-6 pb-safe-6"
         initial={{ opacity: 0, y: reduceMotion ? 0 : 12 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: reduceMotion ? 0 : 0.18, ease: [0.2, 0, 0, 1] }}
       >
-        <div className="mb-6 flex items-center justify-center md:mb-8">
-          <BrandHomeLink size="sm" />
-        </div>
-
         <Surface className="p-5 sm:p-6 md:p-8">
           <div className="space-y-5 md:space-y-6">
             {/* Task preview slot — reserves vertical space whether or not a
