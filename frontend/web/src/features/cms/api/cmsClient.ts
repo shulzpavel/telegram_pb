@@ -1,7 +1,29 @@
 import { CMS_PAGE_LIMIT, cmsUrl } from "../../../app/config";
-import { requestJson } from "../../../shared/api/http";
+import { ApiError, requestJson } from "../../../shared/api/http";
 import type { Page, ParamValue } from "../../../shared/types/pagination";
 import type { AuditEvent, CmsAdmin, CmsPageAccess, CmsPermission, CmsPrincipal, CmsRole, JiraPreview, TaskItem, ThemeMode } from "./cmsTypes";
+
+const CMS_AUTH_HINT_KEY = "planning_poker_cms_auth";
+
+function getStorage(): Storage | null {
+  try {
+    return typeof window === "undefined" ? null : window.localStorage;
+  } catch {
+    return null;
+  }
+}
+
+export function hasCmsAuthHint(): boolean {
+  return getStorage()?.getItem(CMS_AUTH_HINT_KEY) === "1";
+}
+
+function markCmsAuthHint() {
+  getStorage()?.setItem(CMS_AUTH_HINT_KEY, "1");
+}
+
+export function clearCmsAuthHint() {
+  getStorage()?.removeItem(CMS_AUTH_HINT_KEY);
+}
 
 export function buildQuery(
   params: Record<string, ParamValue>,
@@ -37,13 +59,40 @@ export async function cmsList<T>(
 }
 
 export const cmsAuthApi = {
-  me: () => cmsFetch<CmsPrincipal>("/auth/me"),
-  login: (username: string, password: string) =>
-    cmsFetch<{ ok: boolean; expires_in: number }>("/auth/login", {
-      method: "POST",
-      body: JSON.stringify({ username, password }),
-    }),
-  logout: () => cmsFetch<{ ok: boolean }>("/auth/logout", { method: "POST" }),
+  me: async () => {
+    try {
+      const principal = await cmsFetch<CmsPrincipal>("/auth/me");
+      markCmsAuthHint();
+      return principal;
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        clearCmsAuthHint();
+      }
+      throw err;
+    }
+  },
+  login: async (username: string, password: string) => {
+    try {
+      const result = await cmsFetch<{ ok: boolean; expires_in: number }>("/auth/login", {
+        method: "POST",
+        body: JSON.stringify({ username, password }),
+      });
+      markCmsAuthHint();
+      return result;
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        clearCmsAuthHint();
+      }
+      throw err;
+    }
+  },
+  logout: async () => {
+    try {
+      return await cmsFetch<{ ok: boolean }>("/auth/logout", { method: "POST" });
+    } finally {
+      clearCmsAuthHint();
+    }
+  },
   updatePreferences: (payload: { theme_preference: ThemeMode }) =>
     cmsFetch<{ ok: boolean }>("/auth/me/preferences", {
       method: "PATCH",

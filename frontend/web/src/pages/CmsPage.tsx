@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { cmsAuthApi } from "../features/cms/api/cmsClient";
+import { cmsAuthApi, hasCmsAuthHint } from "../features/cms/api/cmsClient";
 import type { CmsPrincipal } from "../features/cms/api/cmsTypes";
 import CmsLoginPage from "../features/cms/auth/CmsLoginPage";
 import { Centered } from "../features/cms/components/CmsPrimitives";
@@ -10,6 +10,11 @@ export default function CmsPage() {
   const [principal, setPrincipal] = useState<CmsPrincipal | null>(null);
 
   useEffect(() => {
+    if (!hasCmsAuthHint()) {
+      setPrincipal(null);
+      setAuthChecked(true);
+      return;
+    }
     cmsAuthApi
       .me()
       .then(setPrincipal)

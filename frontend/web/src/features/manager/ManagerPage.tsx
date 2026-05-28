@@ -21,7 +21,7 @@ import TaskTextBlock from "../../components/TaskTextBlock";
 import JiraDescriptionPanel from "../../components/JiraDescriptionPanel";
 import AiSummaryView from "../../components/AiSummaryView";
 import { AiSparkleButton, Alert, AutoHideAppHeader, Badge, Button, ConfirmDialog, EmptyState, ScrollArea, Spinner, Surface, TextField, TextareaField, ThemeToggle, cn, useTheme, useToast, type ThemeMode } from "../../design-system";
-import { cmsAuthApi } from "../cms/api/cmsClient";
+import { cmsAuthApi, hasCmsAuthHint } from "../cms/api/cmsClient";
 import type { CmsPrincipal } from "../cms/api/cmsTypes";
 import CmsLoginPage from "../cms/auth/CmsLoginPage";
 import { normalizeOptionalNumber, normalizeOptionalText } from "../cms/sessions/taskInput";
@@ -143,6 +143,11 @@ export default function ManagerPage() {
 
   useEffect(() => {
     let alive = true;
+    if (!hasCmsAuthHint()) {
+      setPrincipal(null);
+      setAuthLoading(false);
+      return () => { alive = false; };
+    }
     cmsAuthApi.me()
       .then((me) => { if (alive) setPrincipal(me); })
       .catch(() => { if (alive) setPrincipal(null); })

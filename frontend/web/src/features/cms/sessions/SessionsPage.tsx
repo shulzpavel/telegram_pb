@@ -30,7 +30,7 @@ import type {
   TaskItem,
   WebParticipantItem,
 } from "../api/cmsTypes";
-import { Alert, Badge, Button, ConfirmDialog, EmptyState, ScrollArea, SelectField, Surface, TextField } from "../../../design-system";
+import { Alert, Badge, BottomSheet, Button, ConfirmDialog, EmptyState, ScrollArea, SelectField, Surface, TextField } from "../../../design-system";
 import {
   CompactList,
   DataTable,
@@ -421,10 +421,8 @@ export default function SessionsPage({ canManageTasks, canManageSessions }: Sess
  * applied server-side if the user submits an empty value, mirroring
  * the legacy `/manage` flow so behaviour stays predictable.
  *
- * Implemented as a focused sheet/dialog (backdrop + escape-to-close +
- * scroll-lock) rather than an inline panel because the user is about
- * to leave the list view — we want unambiguous attention on the
- * single decision being made. Below md this is always a bottom sheet.
+ * Implemented as the shared bottom sheet rather than a custom modal so
+ * mobile session creation uses the same interaction pattern as menus.
  */
 function CreateSessionDialog({
   open,
@@ -443,56 +441,16 @@ function CreateSessionDialog({
   onCancel: () => void;
   onSubmit: (event: FormEvent) => void;
 }) {
-  useEffect(() => {
-    if (!open) return;
-    const previous = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && !busy) onCancel();
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.body.style.overflow = previous;
-      window.removeEventListener("keydown", onKeyDown);
-    };
-  }, [open, busy, onCancel]);
-
-  if (!open) return null;
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="cms-create-session-title"
-      className="fixed inset-0 z-40 flex items-end justify-center overflow-y-auto overscroll-contain bg-canvas/70 px-4 pb-safe-6 pt-safe backdrop-blur md:items-center"
-      onClick={(event) => {
-        if (event.target === event.currentTarget && !busy) onCancel();
+    <BottomSheet
+      open={open}
+      onClose={() => {
+        if (!busy) onCancel();
       }}
-    >
-      <Surface
-        as="form"
-        className="mb-4 max-h-[calc(100dvh-var(--safe-top)-var(--safe-bottom)-1.5rem)] w-full max-w-md overflow-y-auto overscroll-contain rounded-b-none p-5 md:mb-0 md:rounded-b-xl md:p-6 motion-safe:animate-scale-in"
-        onSubmit={onSubmit}
-      >
-        <h2 id="cms-create-session-title" className="text-base font-bold text-ink">
-          Новая сессия
-        </h2>
-        <p className="mt-1 text-sm text-ink3">
-          Создадим пустую сессию и сразу откроем cockpit, чтобы вы могли добавить задачи и пригласить участников.
-        </p>
-        <div className="mt-4 space-y-3">
-          <TextField
-            label="Название сессии"
-            placeholder="Planning Poker"
-            value={title}
-            maxLength={200}
-            autoFocus
-            disabled={busy}
-            onChange={(event) => onTitleChange(event.target.value)}
-            hint="Можно оставить пустым — подставим «Planning Poker»."
-          />
-          {error ? <Alert tone="danger">{error}</Alert> : null}
-        </div>
-        <div className="mt-5 flex flex-col-reverse gap-2 md:flex-row md:justify-end">
+      title="Новая сессия"
+      description="Создадим пустую сессию и сразу откроем cockpit, чтобы вы могли добавить задачи и пригласить участников."
+      footer={
+        <div className="flex flex-col-reverse gap-2 md:flex-row md:justify-end">
           <Button
             type="button"
             variant="ghost"
@@ -505,6 +463,7 @@ function CreateSessionDialog({
           </Button>
           <Button
             type="submit"
+            form="cms-create-session-form"
             variant="primary"
             size="md"
             loading={busy}
@@ -514,8 +473,26 @@ function CreateSessionDialog({
             Создать и открыть
           </Button>
         </div>
-      </Surface>
-    </div>
+      }
+    >
+      <form
+        id="cms-create-session-form"
+        className="space-y-3 px-3 pb-3 pt-1"
+        onSubmit={onSubmit}
+      >
+        <TextField
+          label="Название сессии"
+          placeholder="Planning Poker"
+          value={title}
+          maxLength={200}
+          autoFocus
+          disabled={busy}
+          onChange={(event) => onTitleChange(event.target.value)}
+          hint="Можно оставить пустым — подставим «Planning Poker»."
+        />
+        {error ? <Alert tone="danger">{error}</Alert> : null}
+      </form>
+    </BottomSheet>
   );
 }
 

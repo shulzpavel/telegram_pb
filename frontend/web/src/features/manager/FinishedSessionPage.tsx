@@ -20,7 +20,7 @@ import {
   type ThemeMode,
 } from "../../design-system";
 import { useProgressiveList } from "../../hooks/useProgressiveList";
-import { cmsAuthApi } from "../cms/api/cmsClient";
+import { cmsAuthApi, hasCmsAuthHint } from "../cms/api/cmsClient";
 import type { CmsPrincipal } from "../cms/api/cmsTypes";
 import { CMS_PERMISSIONS, hasPermission } from "../cms/navigation";
 import { managerApi } from "./api/managerClient";
@@ -121,6 +121,11 @@ export default function FinishedSessionPage() {
 
   useEffect(() => {
     let alive = true;
+    if (!hasCmsAuthHint()) {
+      setPrincipal(null);
+      setAuthLoading(false);
+      return () => { alive = false; };
+    }
     cmsAuthApi.me()
       .then((me) => { if (alive) setPrincipal(me); })
       .catch(() => { if (alive) setPrincipal(null); })
