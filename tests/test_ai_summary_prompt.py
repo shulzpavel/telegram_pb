@@ -150,6 +150,57 @@ def test_ensure_current_task_description_backfills_in_place() -> None:
     assert len(saved) == 1  # no extra write
 
 
+def test_ensure_current_task_description_replaces_confluence_link_stub() -> None:
+    """Existing Jira descriptions that are just Confluence links should be
+    upgraded once the resolved Jira+Confluence context is available."""
+    import asyncio
+    from types import SimpleNamespace
+
+    from app.domain.session import Session
+    from app.domain.task import Task
+    from services.voting_service import _http_shared
+    from services.voting_service._http_shared import JiraDescriptionFetch
+
+    task = Task(
+        jira_key="FLEX-2702",
+        summary="X",
+        description="Описание",
+        description_adf={
+            "type": "doc",
+            "content": [{"type": "paragraph", "content": [{"type": "text", "text": "Описание"}]}],
+        },
+        description_html='<p><a href="https://media-life.atlassian.net/wiki/spaces/SAC/pages/1049231367">Описание</a></p>',
+    )
+    session = Session(chat_id=1, topic_id=None)
+    session.tasks_queue = [task]
+    session.current_task_index = 0
+    saved: list[Session] = []
+
+    class _Repo:
+        async def save_session(self, s):
+            saved.append(s)
+
+    async def _fake_fetch(_http_session, _key):
+        return JiraDescriptionFetch(
+            text="Описание\n\nConfluence: Нотификации ОИ БР\nПолное описание из Confluence",
+            adf=None,
+            html="<p>Описание</p><hr /><h3>Confluence: Нотификации ОИ БР</h3><p>Полное описание из Confluence</p>",
+        )
+
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(repository=_Repo(), http_session=object())))
+    saved_fetch = _http_shared._fetch_jira_description
+    _http_shared._fetch_jira_description = _fake_fetch
+    try:
+        changed = asyncio.run(_http_shared._ensure_current_task_description(request, 1, None, session=session))
+    finally:
+        _http_shared._fetch_jira_description = saved_fetch
+
+    assert changed is True
+    assert "Полное описание из Confluence" in (task.description or "")
+    assert "Confluence" in (task.description_html or "")
+    assert saved and saved[0] is session
+
+
 def test_task_description_round_trips_through_serialization() -> None:
     """Imported Jira description must survive ``to_dict``/``from_dict``
     so it persists across reloads of the session file. Both the plain

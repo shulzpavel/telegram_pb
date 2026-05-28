@@ -24,6 +24,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 from dataclasses import dataclass
 from typing import Any, Optional
 
@@ -38,6 +39,7 @@ from app.usecases.manage_tasks import TaskMutationResult, TaskQueueError
 from services.voting_service.web_api import _build_web_session_state, _channel_name
 
 logger = logging.getLogger(__name__)
+_CONFLUENCE_LINK_RE = re.compile(r"https?://[^\s<>'\")]+/wiki/[^\s<>'\")]+", re.IGNORECASE)
 
 
 # ---------------------------------------------------------------------------
@@ -372,7 +374,16 @@ async def _ensure_current_task_description(
     # ``description_html`` landed may already have a flat plain string.
     if task is None or not task.jira_key:
         return False
-    if task.description and task.description_adf and task.description_html:
+    existing_text = task.description or ""
+    existing_html = task.description_html or ""
+    has_confluence_link = bool(
+        _CONFLUENCE_LINK_RE.search(" ".join([
+            task.description or "",
+            task.description_html or "",
+            json.dumps(task.description_adf, ensure_ascii=False) if task.description_adf else "",
+        ]))
+    )
+    if task.description and task.description_adf and task.description_html and not has_confluence_link:
         return False
     logger.info(
         "jira description backfill start chat=%s topic=%s task_id=%s key=%s has_text=%s has_adf=%s has_html=%s",
@@ -383,13 +394,13 @@ async def _ensure_current_task_description(
     if fetched.is_empty:
         return False
     changed = False
-    if not task.description and fetched.text:
+    if fetched.text and (not task.description or len(fetched.text) > len(existing_text) or has_confluence_link):
         task.description = fetched.text
         changed = True
     if not task.description_adf and fetched.adf:
         task.description_adf = fetched.adf
         changed = True
-    if not task.description_html and fetched.html:
+    if fetched.html and (not task.description_html or len(fetched.html) > len(existing_html) or has_confluence_link):
         task.description_html = fetched.html
         changed = True
     if not changed:
