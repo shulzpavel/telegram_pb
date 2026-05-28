@@ -68,15 +68,15 @@ export function ManagerTopBar({
   return (
     <>
       <header className="pt-safe">
-        <div className="flex min-h-14 w-full items-center gap-2 overflow-x-auto px-3 py-2 sm:gap-3 sm:px-4 lg:px-6">
-          <BackLink
-            to={backTo}
-            label={backLabel}
-            size="sm"
-            className="shrink-0"
-          />
+        <div className="flex flex-col gap-2 px-3 py-2 sm:px-4 lg:flex-row lg:items-center lg:gap-3 lg:px-6">
+          <div className="flex min-h-11 w-full min-w-0 items-center gap-2 sm:gap-3 lg:min-h-14 lg:flex-1">
+            <BackLink
+              to={backTo}
+              label={backLabel}
+              size="sm"
+              className="shrink-0"
+            />
 
-          <div className="flex min-w-0 flex-1 items-center gap-2 sm:gap-3">
             <div className="min-w-0 flex-1">
               <SessionTitleEditor
                 title={title}
@@ -84,45 +84,51 @@ export function ManagerTopBar({
                 busy={Boolean(renameBusy)}
               />
             </div>
+
             {showSessionTabs ? (
-              <SessionTabsSegment chatId={chatId} />
+              <SessionTabsSegment chatId={chatId} className="hidden lg:inline-flex" />
             ) : null}
+
+            <div className="flex shrink-0 items-center gap-1 sm:gap-1.5">
+              {trailingActions ? (
+                <div className="hidden items-center gap-1.5 md:flex">{trailingActions}</div>
+              ) : null}
+              {inviteUrl ? (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={copyInvite}
+                  className="hidden md:inline-flex"
+                >
+                  {copied ? "Скопировано" : "Invite"}
+                </Button>
+              ) : null}
+              {onFinishSession ? (
+                <Button
+                  size="sm"
+                  variant="danger"
+                  onClick={onFinishSession}
+                  loading={Boolean(finishBusy)}
+                  className="hidden md:inline-flex"
+                >
+                  Завершить
+                </Button>
+              ) : null}
+              <button
+                type="button"
+                onClick={() => setMenuOpen(true)}
+                aria-label="Меню сессии"
+                className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-line bg-surface text-ink transition-colors hover:bg-line2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue/40 active:scale-[0.96] motion-reduce:active:scale-100"
+              >
+                <DotsIcon />
+              </button>
+            </div>
           </div>
 
-          <div className="ml-auto flex shrink-0 items-center gap-1 sm:gap-1.5">
-            {trailingActions}
-            {inviteUrl ? (
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={copyInvite}
-                className="hidden md:inline-flex"
-              >
-                {copied ? "Скопировано" : "Invite"}
-              </Button>
-            ) : null}
-            {onFinishSession ? (
-              <Button
-                size="sm"
-                variant="danger"
-                onClick={onFinishSession}
-                loading={Boolean(finishBusy)}
-                className="hidden md:inline-flex"
-              >
-                Завершить
-              </Button>
-            ) : null}
-            <button
-              type="button"
-              onClick={() => setMenuOpen(true)}
-              aria-label="Меню сессии"
-              className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-line bg-surface text-ink transition-colors hover:bg-line2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue/40 active:scale-[0.96] motion-reduce:active:scale-100 md:inline-flex"
-            >
-              <DotsIcon />
-            </button>
-          </div>
+          {showSessionTabs ? (
+            <SessionTabsSegment chatId={chatId} stretch className="w-full lg:hidden" />
+          ) : null}
         </div>
-
       </header>
 
       <BottomSheet

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useId, useRef, type CSSProperties, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { findPreferredFocusTarget, useMobileKeyboardInset } from "./mobileKeyboard";
 import { ScrollArea } from "./ScrollArea";
 import { cn } from "./utils";
@@ -36,6 +37,14 @@ export function BottomSheet({
   const sheetRef = useRef<HTMLDivElement | null>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
   const onCloseRef = useRef(onClose);
+  const dragRef = useRef<{
+    pointerId: number;
+    startY: number;
+    lastY: number;
+    startTime: number;
+    moved: boolean;
+  } | null>(null);
+  const suppressHandleClickRef = useRef(false);
   const keyboardInset = useMobileKeyboardInset(open);
 
   useEffect(() => {
@@ -104,10 +113,92 @@ export function BottomSheet({
     if (event.target === event.currentTarget) onClose();
   }, [onClose]);
 
+  const resetSheetDrag = useCallback(() => {
+    const sheet = sheetRef.current;
+    if (!sheet) return;
+    sheet.style.transform = "";
+    sheet.style.transition = "";
+  }, []);
+
+  const handleDragPointerDown = useCallback((event: React.PointerEvent<HTMLButtonElement>) => {
+    if (window.matchMedia("(min-width: 768px)").matches) return;
+    const sheet = sheetRef.current;
+    if (!sheet) return;
+
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    dragRef.current = {
+      pointerId: event.pointerId,
+      startY: event.clientY,
+      lastY: event.clientY,
+      startTime: performance.now(),
+      moved: false,
+    };
+    sheet.style.transition = "none";
+  }, []);
+
+  const handleDragPointerMove = useCallback((event: React.PointerEvent<HTMLButtonElement>) => {
+    const drag = dragRef.current;
+    const sheet = sheetRef.current;
+    if (!drag || !sheet || drag.pointerId !== event.pointerId) return;
+
+    const offset = Math.max(0, event.clientY - drag.startY);
+    drag.lastY = event.clientY;
+    drag.moved = drag.moved || offset > 4;
+    sheet.style.transform = `translateY(${offset}px)`;
+  }, []);
+
+  const handleDragPointerEnd = useCallback((event: React.PointerEvent<HTMLButtonElement>) => {
+    const drag = dragRef.current;
+    const sheet = sheetRef.current;
+    if (!drag || !sheet || drag.pointerId !== event.pointerId) return;
+
+    dragRef.current = null;
+    suppressHandleClickRef.current = drag.moved;
+    event.currentTarget.releasePointerCapture(event.pointerId);
+
+    if (!drag.moved) {
+      onCloseRef.current();
+      return;
+    }
+
+    const offset = Math.max(0, drag.lastY - drag.startY);
+    const elapsed = Math.max(1, performance.now() - drag.startTime);
+    const velocity = offset / elapsed;
+    const closeDistance = Math.min(160, Math.max(72, sheet.offsetHeight * 0.22));
+
+    if (offset > closeDistance || (offset > 32 && velocity > 0.7)) {
+      onCloseRef.current();
+      return;
+    }
+
+    sheet.style.transition = "transform 160ms ease-out";
+    sheet.style.transform = "";
+    window.setTimeout(resetSheetDrag, 180);
+  }, [resetSheetDrag]);
+
+  const handleDragPointerCancel = useCallback((event: React.PointerEvent<HTMLButtonElement>) => {
+    if (dragRef.current?.pointerId !== event.pointerId) return;
+    dragRef.current = null;
+    suppressHandleClickRef.current = true;
+    resetSheetDrag();
+  }, [resetSheetDrag]);
+
+  const handleGrabberClick = useCallback(() => {
+    if (suppressHandleClickRef.current) {
+      suppressHandleClickRef.current = false;
+      return;
+    }
+    onClose();
+  }, [onClose]);
+
   if (!open) return null;
-  return (
+
+  // Portaled so ancestors with `backdrop-filter` / `transform` do not
+  // trap `position: fixed` inside a tiny header strip (empty blur bug).
+  return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 backdrop-blur-sm motion-safe:animate-fade-up md:items-center md:p-6"
+      className="fixed inset-0 z-[100] flex items-end justify-center bg-black/60 backdrop-blur-sm motion-safe:animate-fade-up md:items-center md:p-6"
       style={{ "--keyboard-bottom-inset": `${keyboardInset}px` } as CSSProperties}
       role="presentation"
       onMouseDown={handleBackdrop}
@@ -132,12 +223,20 @@ export function BottomSheet({
           className,
         )}
       >
-        {/* Drag handle — purely decorative, the sheet is dismissed by
-            tap-outside / Escape. We don't ship full drag-to-dismiss
-            because it would conflict with internal scroll on long
-            menus. */}
-        <div className="flex justify-center pt-2.5 md:hidden" aria-hidden="true">
-          <span className="h-1 w-10 rounded-full bg-line" />
+        <div className="flex justify-center px-5 pt-2.5 md:hidden">
+          <button
+            type="button"
+            aria-label="Закрыть меню"
+            title="Смахните вниз или нажмите, чтобы закрыть"
+            className="flex h-8 w-20 touch-none items-start justify-center rounded-full border border-blue/25 bg-blue/10 pt-1.5 shadow-sm transition-colors active:bg-blue/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue/40"
+            onClick={handleGrabberClick}
+            onPointerDown={handleDragPointerDown}
+            onPointerMove={handleDragPointerMove}
+            onPointerUp={handleDragPointerEnd}
+            onPointerCancel={handleDragPointerCancel}
+          >
+            <span className="h-1 w-10 rounded-full bg-blue/70" />
+          </button>
         </div>
 
         {(title || description) ? (
@@ -163,7 +262,8 @@ export function BottomSheet({
           <div className="pb-safe-4 md:pb-5" />
         )}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

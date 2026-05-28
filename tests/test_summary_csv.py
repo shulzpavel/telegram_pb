@@ -17,21 +17,35 @@ from services.voting_service.app_api import (
 
 
 def test_csv_ai_summary_fields_empty_when_missing() -> None:
-    assert _csv_ai_summary_fields(None) == ("", "", "")
-    assert _csv_ai_summary_fields({}) == ("", "", "")
+    assert _csv_ai_summary_fields(None) == ("", "", "", "", "", "", "", "", "")
+    assert _csv_ai_summary_fields({}) == ("", "", "", "", "", "", "", "", "")
 
 
-def test_csv_ai_summary_fields_flattens_payload() -> None:
-    description, complexity, methods = _csv_ai_summary_fields(
+def test_csv_ai_summary_fields_flattens_persisted_ai_result() -> None:
+    fields = _csv_ai_summary_fields(
         {
             "description": "Line one\nLine two",
             "complexity": "Medium",
             "methods": ["API", "DB"],
+            "sp_dev": 8,
+            "sp_test": 5,
+            "sp_final": 8,
+            "confidence": "medium",
+            "assumptions": ["Need fixtures", "Partner API stable"],
+            "estimation_model": "max(sp_dev, sp_test)",
         }
     )
-    assert description == "Line one Line two"
-    assert complexity == "Medium"
-    assert methods == "API; DB"
+    assert fields == (
+        "Line one Line two",
+        "Medium",
+        "API; DB",
+        "8",
+        "5",
+        "8",
+        "medium",
+        "Need fixtures; Partner API stable",
+        "max(sp_dev, sp_test)",
+    )
 
 
 def test_serialize_completed_task_includes_ai_summary() -> None:
@@ -94,7 +108,17 @@ def test_markdown_report_contains_confluence_summary() -> None:
         summary="Checkout flow",
         url="https://jira.example/browse/BB-1",
         story_points=8,
-        ai_summary={"description": "Payment rollout", "methods": ["API"], "complexity": "Medium"},
+        ai_summary={
+            "description": "Payment rollout",
+            "methods": ["API"],
+            "complexity": "Medium",
+            "sp_dev": 8,
+            "sp_test": 5,
+            "sp_final": 8,
+            "confidence": "medium",
+            "assumptions": ["Need PSP sandbox"],
+            "estimation_model": "max(sp_dev, sp_test)",
+        },
     )
     task.votes[1] = "8"
     session.batch_completed = True
@@ -106,6 +130,9 @@ def test_markdown_report_contains_confluence_summary() -> None:
     assert "**TOTAL SP:** 8" in report
     assert "[BB-1](https://jira.example/browse/BB-1)" in report
     assert "Payment rollout" in report
+    assert "**AI estimate:** dev 8 SP, test 5 SP, final 8 SP" in report
+    assert "**AI assumptions:** Need PSP sandbox" in report
+    assert "**AI estimation model:** max(sp_dev, sp_test)" in report
 
 
 def test_csv_report_is_sectioned_and_contains_total() -> None:
@@ -116,7 +143,17 @@ def test_csv_report_is_sectioned_and_contains_total() -> None:
         summary="Checkout flow",
         url="https://jira.example/browse/BB-1",
         story_points=8,
-        ai_summary={"description": "Payment rollout", "methods": ["API"], "complexity": "Medium"},
+        ai_summary={
+            "description": "Payment rollout",
+            "methods": ["API"],
+            "complexity": "Medium",
+            "sp_dev": 8,
+            "sp_test": 5,
+            "sp_final": 8,
+            "confidence": "medium",
+            "assumptions": ["Need PSP sandbox"],
+            "estimation_model": "max(sp_dev, sp_test)",
+        },
     )
     task.votes[1] = "8"
     session.batch_completed = True
@@ -137,6 +174,12 @@ def test_csv_report_is_sectioned_and_contains_total() -> None:
         "Payment rollout",
         "Medium",
         "API",
+        "8",
+        "5",
+        "8",
+        "medium",
+        "Need PSP sandbox",
+        "max(sp_dev, sp_test)",
         "https://jira.example/browse/BB-1",
         "",
     ] in rows

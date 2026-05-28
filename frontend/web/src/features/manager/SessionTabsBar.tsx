@@ -8,10 +8,13 @@ export function SessionTabsSegment({
   chatId,
   className,
   compact = false,
+  stretch = false,
 }: {
   chatId: number;
   className?: string;
   compact?: boolean;
+  /** Full-width tabs with equal columns — use on the mobile header row. */
+  stretch?: boolean;
 }) {
   const tabs = [
     {
@@ -31,6 +34,7 @@ export function SessionTabsSegment({
       aria-label="Разделы сессии"
       className={cn(
         "inline-flex shrink-0 rounded-md border border-line bg-line/40 p-0.5",
+        stretch && "flex w-full",
         compact && "scale-[0.96] origin-left",
         className,
       )}
@@ -44,6 +48,7 @@ export function SessionTabsSegment({
             cn(
               "rounded px-2 py-1 text-xs font-semibold transition-colors",
               "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue/40",
+              stretch && "flex flex-1 basis-0 justify-center text-center",
               compact ? "px-1.5" : "sm:px-2.5",
               isActive ? "bg-surface text-ink shadow-sm" : "text-ink3 hover:text-ink",
             )

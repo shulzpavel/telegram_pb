@@ -1312,20 +1312,35 @@ def _format_distribution(distribution: dict[str, int]) -> str:
     return ", ".join(f"{value}×{count}" for value, count in pairs)
 
 
-def _csv_ai_summary_fields(ai_summary: Optional[dict]) -> tuple[str, str, str]:
-    """Flatten AI summary for CSV cells (description, complexity, methods)."""
-    if not ai_summary or not isinstance(ai_summary, dict):
-        return "", "", ""
+def _normalise_cell_text(value: object) -> str:
+    return " ".join(str(value or "").strip().split())
 
-    description = " ".join(str(ai_summary.get("description") or "").strip().split())
-    complexity = " ".join(str(ai_summary.get("complexity") or "").strip().split())
-    methods_raw = ai_summary.get("methods")
-    if isinstance(methods_raw, list):
-        methods = "; ".join(str(item).strip() for item in methods_raw if str(item).strip())
-    else:
-        methods = ""
-    methods = " ".join(methods.split())
-    return description, complexity, methods
+
+def _join_summary_list(value: object) -> str:
+    if not isinstance(value, list):
+        return ""
+    return "; ".join(_normalise_cell_text(item) for item in value if _normalise_cell_text(item))
+
+
+def _csv_ai_summary_fields(ai_summary: Optional[dict]) -> tuple[str, str, str, str, str, str, str, str, str]:
+    """Flatten the persisted AI result for CSV cells.
+
+    Keep this tied to the stored ``Task.ai_summary`` schema, not to the prompt
+    text, so downloaded reports contain the actual model estimate.
+    """
+    if not ai_summary or not isinstance(ai_summary, dict):
+        return "", "", "", "", "", "", "", "", ""
+
+    description = _normalise_cell_text(ai_summary.get("description"))
+    complexity = _normalise_cell_text(ai_summary.get("complexity"))
+    methods = _normalise_cell_text(_join_summary_list(ai_summary.get("methods")))
+    sp_dev = _normalise_cell_text(ai_summary.get("sp_dev"))
+    sp_test = _normalise_cell_text(ai_summary.get("sp_test"))
+    sp_final = _normalise_cell_text(ai_summary.get("sp_final"))
+    confidence = _normalise_cell_text(ai_summary.get("confidence"))
+    assumptions = _normalise_cell_text(_join_summary_list(ai_summary.get("assumptions")))
+    estimation_model = _normalise_cell_text(ai_summary.get("estimation_model"))
+    return description, complexity, methods, sp_dev, sp_test, sp_final, confidence, assumptions, estimation_model
 
 
 def _download_filename(title: str, chat_id: int, extension: str) -> str:
@@ -1390,7 +1405,8 @@ def _markdown_report(summary: dict) -> str:
         task = _md_link(task_label, entry.get("url"))
         if entry["jira_key"]:
             task = f"{task}<br />{_md_escape(entry['summary'])}"
-        ai_description, _, _ = _csv_ai_summary_fields(entry.get("ai_summary"))
+        ai_description, _, _, _, _, ai_sp_final, _, _, _ = _csv_ai_summary_fields(entry.get("ai_summary"))
+        ai_table_value = " — ".join(part for part in [ai_sp_final and f"{ai_sp_final} SP", ai_description] if part)
         lines.append(
             "| "
             + " | ".join(
@@ -1400,7 +1416,7 @@ def _markdown_report(summary: dict) -> str:
                     str(entry["story_points"]) if entry["story_points"] is not None else "—",
                     _md_escape(_format_distribution(entry["distribution"]) or "—"),
                     "yes" if entry["consensus"] else "no",
-                    _md_escape(ai_description or "—"),
+                    _md_escape(ai_table_value or "—"),
                 ]
             )
             + " |"
@@ -1418,13 +1434,44 @@ def _markdown_report(summary: dict) -> str:
         if entry.get("url"):
             lines.append(f"- **Link:** {entry['url']}")
         if entry.get("ai_summary"):
-            ai_description, ai_complexity, ai_methods = _csv_ai_summary_fields(entry.get("ai_summary"))
+            (
+                ai_description,
+                ai_complexity,
+                ai_methods,
+                ai_sp_dev,
+                ai_sp_test,
+                ai_sp_final,
+                ai_confidence,
+                ai_assumptions,
+                ai_estimation_model,
+            ) = _csv_ai_summary_fields(entry.get("ai_summary"))
             if ai_description:
                 lines.append(f"- **AI description:** {_md_escape(ai_description)}")
             if ai_complexity:
                 lines.append(f"- **AI complexity:** {_md_escape(ai_complexity)}")
             if ai_methods:
                 lines.append(f"- **AI methods:** {_md_escape(ai_methods)}")
+            if ai_sp_dev or ai_sp_test or ai_sp_final:
+                lines.append(
+                    "- **AI estimate:** "
+                    + _md_escape(
+                        ", ".join(
+                            part
+                            for part in [
+                                ai_sp_dev and f"dev {ai_sp_dev} SP",
+                                ai_sp_test and f"test {ai_sp_test} SP",
+                                ai_sp_final and f"final {ai_sp_final} SP",
+                            ]
+                            if part
+                        )
+                    )
+                )
+            if ai_confidence:
+                lines.append(f"- **AI confidence:** {_md_escape(ai_confidence)}")
+            if ai_assumptions:
+                lines.append(f"- **AI assumptions:** {_md_escape(ai_assumptions)}")
+            if ai_estimation_model:
+                lines.append(f"- **AI estimation model:** {_md_escape(ai_estimation_model)}")
         lines.extend(["", "| Participant | Vote |", "|---|---|"])
         if entry["votes"]:
             for vote in entry["votes"]:
@@ -1481,11 +1528,27 @@ def _csv_report(summary: dict) -> str:
         "AI Description",
         "AI Complexity",
         "AI Methods",
+        "AI SP Dev",
+        "AI SP Test",
+        "AI SP Final",
+        "AI Confidence",
+        "AI Assumptions",
+        "AI Estimation Model",
         "URL",
         "Completed At",
     ])
     for idx, entry in enumerate(summary["completed_tasks"], start=1):
-        ai_description, ai_complexity, ai_methods = _csv_ai_summary_fields(entry.get("ai_summary"))
+        (
+            ai_description,
+            ai_complexity,
+            ai_methods,
+            ai_sp_dev,
+            ai_sp_test,
+            ai_sp_final,
+            ai_confidence,
+            ai_assumptions,
+            ai_estimation_model,
+        ) = _csv_ai_summary_fields(entry.get("ai_summary"))
         writer.writerow([
             idx,
             entry["jira_key"] or "",
@@ -1496,6 +1559,12 @@ def _csv_report(summary: dict) -> str:
             ai_description or "—",
             ai_complexity or "—",
             ai_methods or "—",
+            ai_sp_dev or "—",
+            ai_sp_test or "—",
+            ai_sp_final or "—",
+            ai_confidence or "—",
+            ai_assumptions or "—",
+            ai_estimation_model or "—",
             entry["url"] or "",
             entry["completed_at"] or "",
         ])

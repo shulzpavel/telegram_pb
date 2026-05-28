@@ -15,4 +15,13 @@ describe("SessionTabsSegment", () => {
     expect(markup).toContain("Управление");
     expect(markup).toContain("Отчёт");
   });
+
+  it("can stretch tabs to full width on mobile header row", () => {
+    const markup = renderToStaticMarkup(
+      <MemoryRouter initialEntries={["/cms/sessions/42/cockpit"]}>
+        <SessionTabsSegment chatId={42} stretch className="w-full" />
+      </MemoryRouter>,
+    );
+    expect(markup).toContain('class="inline-flex shrink-0 rounded-md border border-line bg-line/40 p-0.5 flex w-full w-full"');
+  });
 });
