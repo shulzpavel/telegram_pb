@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { Navigate, NavLink, Route, Routes, useLocation, useNavigate } from "react-router-dom";
-import { AutoHideAppHeader, BottomSheet, BrandHomeLink, Button, DeferredFallback, RouteTransition, SheetItem, ThemeToggle, useTheme, type ThemeMode } from "../../../design-system";
+import { AutoHideAppHeader, BottomSheet, BrandHomeLink, Button, DeferredFallback, RouteTransition, SheetItem, ThemeMenuControl, ThemeToggle, useTheme, type ThemeMode } from "../../../design-system";
 import { cmsAuthApi } from "../api/cmsClient";
 import type { CmsPrincipal } from "../api/cmsTypes";
 import { InlineError, Skeleton } from "../components/CmsPrimitives";
@@ -190,9 +190,7 @@ export default function CmsShell({
         }
       >
         <div className="space-y-3 px-1 pb-2">
-          <div className="flex justify-center px-3 py-2">
-            <ThemeToggle size="sm" tone="ghost" showTooltips={false} />
-          </div>
+          <ThemeMenuControl />
           {groupedTabs.map((section) => (
             <div key={section.group.key}>
               <h3 className="px-3 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wide text-ink3">

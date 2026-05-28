@@ -30,7 +30,8 @@ function pageScrollLocked(): boolean {
  */
 function isViewportLockedShell(pathname: string): boolean {
   return (
-    /\/cockpit$/.test(pathname)
+    pathname === "/"
+    || /\/cockpit$/.test(pathname)
     || /\/report$/.test(pathname)
     || pathname === "/manage"
     || pathname.startsWith("/manage/")

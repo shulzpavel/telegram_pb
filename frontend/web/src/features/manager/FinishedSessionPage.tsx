@@ -13,6 +13,7 @@ import {
   SheetItem,
   Spinner,
   Surface,
+  ThemeMenuControl,
   ThemeToggle,
   useTheme,
   type ThemeMode,
@@ -384,12 +385,7 @@ export default function FinishedSessionPage() {
               navigate("/manage");
             }}
           />
-          <div className="rounded-lg border border-line bg-canvas/40 px-3 py-2">
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-ink3">Тема интерфейса</p>
-            <div className="mt-1">
-                <ThemeToggle size="sm" tone="ghost" showTooltips={false} />
-            </div>
-          </div>
+          <ThemeMenuControl />
         </div>
       </BottomSheet>
     </main>

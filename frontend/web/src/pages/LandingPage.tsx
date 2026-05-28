@@ -56,7 +56,7 @@ export default function LandingPage() {
         <div className="flex min-h-14 w-full items-center gap-3 px-4 py-3 lg:px-6">
           <BrandHomeLink size="md" className="min-w-0 gap-3 text-ink" />
           <div className="ml-auto flex items-center gap-2">
-            <ThemeToggle size="sm" tone="ghost" />
+            <ThemeToggle />
             <Link to="/cms" className="hidden sm:inline-flex">
               <Button variant="ghost" size="sm">CMS</Button>
             </Link>

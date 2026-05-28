@@ -85,7 +85,7 @@ export default function VotePage({ task, participants, onVote, error, onLogoClic
             <span className="text-xs font-medium tabular-nums text-ink3">
               {task.index}&thinsp;/&thinsp;{task.total}
             </span>
-            <ThemeToggle size="sm" tone="ghost" />
+            <ThemeToggle />
           </div>
         </div>
       </AutoHideAppHeader>

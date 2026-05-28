@@ -3,6 +3,7 @@ export * from "./motion";
 export * from "./utils";
 export * from "./theme";
 export { ThemeToggle } from "./ThemeToggle";
+export { ThemeMenuControl } from "./ThemeMenuControl";
 export { PageLoader } from "./PageLoader";
 export { ScrollArea } from "./ScrollArea";
 export { ScrollHint } from "./ScrollHint";

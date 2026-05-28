@@ -142,7 +142,7 @@ function FullScreen({ children, onLogoClick }: { children: React.ReactNode; onLo
           <BrandHomeLink size="sm" showWordmark={false} onClick={onLogoClick} />
           <span className="ml-2 text-sm font-semibold text-ink2">Planning Poker</span>
           <div className="ml-auto">
-            <ThemeToggle size="sm" tone="ghost" />
+            <ThemeToggle />
           </div>
         </div>
       </AutoHideAppHeader>

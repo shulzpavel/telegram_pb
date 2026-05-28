@@ -61,7 +61,7 @@ export default function JoinPage({ task, onJoin, error }: JoinPageProps) {
           screen stays a single centered card on mobile. `safe-area`
           padding is inherited from the parent's `pt-safe`. */}
       <div className="absolute right-3 top-3 z-10 sm:right-4 sm:top-4">
-        <ThemeToggle size="sm" tone="ghost" />
+        <ThemeToggle />
       </div>
       <motion.div
         className="mx-auto flex w-full max-w-md flex-1 flex-col justify-center py-6"
