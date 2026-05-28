@@ -4,13 +4,12 @@ import { ScrollArea } from "./ScrollArea";
 import { cn } from "./utils";
 
 /**
- * Mobile-first bottom sheet modal.
+ * Responsive modal primitive: bottom sheet on mobile, centered dialog on desktop.
  *
- * Renders a card pinned to the bottom of the viewport with a grab
+ * Renders a card pinned to the bottom of the mobile viewport with a grab
  * handle, safe-area-aware padding, focus trap, ESC-to-close, click
- * outside to close and body scroll lock. On `md+` it widens to a max
- * of 28rem while staying anchored to the bottom, so mobile and tablet
- * layouts keep their thumb-friendly reading order.
+ * outside to close and body scroll lock. On `md+` it becomes a centered
+ * dialog because desktop users expect modal focus, not a bottom dock.
  *
  * Use for non-confirmation overflow menus (settings, info panels,
  * action lists). For destructive confirms keep using `ConfirmDialog`.
@@ -108,7 +107,7 @@ export function BottomSheet({
   if (!open) return null;
   return (
     <div
-      className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 backdrop-blur-sm motion-safe:animate-fade-up md:p-4"
+      className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 backdrop-blur-sm motion-safe:animate-fade-up md:items-center md:p-6"
       style={{ "--keyboard-bottom-inset": `${keyboardInset}px` } as CSSProperties}
       role="presentation"
       onMouseDown={handleBackdrop}
@@ -124,14 +123,12 @@ export function BottomSheet({
         className={cn(
           // Edge-to-edge below md (looks broken otherwise — see the
           // narrow centered "rectangle in the middle of the screen"
-          // bug). On `md+` we cap to 28rem so desktop remains a
-          // comfortable reading width instead of stretching across a
-          // 1440px monitor.
+          // bug). On md+ this becomes a normal centered dialog.
           "relative w-full outline-none md:max-w-md",
-          "rounded-t-2xl border border-line border-b-0 bg-surface shadow-card",
+          "rounded-t-2xl border border-line border-b-0 bg-surface shadow-card md:rounded-2xl md:border-b",
           "motion-safe:animate-scale-in",
           // Keep the sheet above the on-screen keyboard on mobile.
-          "max-h-[calc(100dvh-var(--safe-top)-var(--keyboard-bottom-inset)-0.75rem)] overflow-hidden",
+          "max-h-[calc(100dvh-var(--safe-top)-var(--keyboard-bottom-inset)-0.75rem)] overflow-hidden md:max-h-[min(760px,calc(100dvh-3rem))]",
           className,
         )}
       >
@@ -139,7 +136,7 @@ export function BottomSheet({
             tap-outside / Escape. We don't ship full drag-to-dismiss
             because it would conflict with internal scroll on long
             menus. */}
-        <div className="flex justify-center pt-2.5" aria-hidden="true">
+        <div className="flex justify-center pt-2.5 md:hidden" aria-hidden="true">
           <span className="h-1 w-10 rounded-full bg-line" />
         </div>
 
@@ -151,19 +148,19 @@ export function BottomSheet({
         ) : null}
 
         <ScrollArea
-          className="max-h-[calc(100dvh-var(--keyboard-bottom-inset)-11rem)]"
-          viewportClassName="max-h-[calc(100dvh-var(--keyboard-bottom-inset)-11rem)] px-2 pb-2 pt-1"
+          className="max-h-[calc(100dvh-var(--keyboard-bottom-inset)-11rem)] md:max-h-[min(520px,calc(100dvh-15rem))]"
+          viewportClassName="max-h-[calc(100dvh-var(--keyboard-bottom-inset)-11rem)] px-2 pb-2 pt-1 md:max-h-[min(520px,calc(100dvh-15rem))]"
           hint="Ещё пункты"
         >
           {children}
         </ScrollArea>
 
         {footer ? (
-          <div className="border-t border-line bg-surface px-5 pb-safe-4 pt-3">
+          <div className="border-t border-line bg-surface px-5 pb-safe-4 pt-3 md:pb-5">
             {footer}
           </div>
         ) : (
-          <div className="pb-safe-4" />
+          <div className="pb-safe-4 md:pb-5" />
         )}
       </div>
     </div>
