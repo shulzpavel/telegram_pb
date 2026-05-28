@@ -2,11 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   Alert,
-  AutoHideAppHeader,
   Badge,
-  BackLink,
   BottomSheet,
-  BrandHomeLink,
   Button,
   EmptyState,
   ListSkeleton,
@@ -15,17 +12,15 @@ import {
   Spinner,
   Surface,
   ThemeMenuControl,
-  ThemeToggle,
   useTheme,
   type ThemeMode,
 } from "../../design-system";
 import { useProgressiveList } from "../../hooks/useProgressiveList";
 import { cmsAuthApi, hasCmsAuthHint } from "../cms/api/cmsClient";
 import type { CmsPrincipal } from "../cms/api/cmsTypes";
-import { CMS_PERMISSIONS, hasPermission } from "../cms/navigation";
 import { managerApi } from "./api/managerClient";
 import type { CompletedTask, JiraStoryPointsSyncResult, SessionSummary } from "./api/managerTypes";
-import { SessionTabsBar } from "./SessionTabsBar";
+import { ManagerSessionChrome } from "./ManagerSessionChrome";
 
 /** Page size for the completed-tasks list. Mirrors backend default of 20. */
 const TASKS_PAGE_SIZE = 20;
@@ -216,27 +211,21 @@ export default function FinishedSessionPage() {
 
   return (
     <main className="min-h-screen-mobile app-gradient-bg md:pb-safe-6">
-      {/* Header: full-width app chrome. Back navigation lives in its own row
-          below so the menu line keeps a stable width and composition. */}
-      <AutoHideAppHeader className="z-10 border-line bg-surface/90">
-        <div className="flex min-h-14 w-full items-center gap-2 px-3 pt-safe sm:px-4 md:min-h-16 md:gap-3 lg:px-6">
-          <BrandHomeLink size="sm" showWordmark={false} className="shrink-0" />
-          <div className="min-w-0 flex-1">
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-ink3">Отчёт сессии</p>
-            <h1 className="break-words text-sm font-bold leading-snug text-ink md:text-base">
-              {summary?.title ?? title}
-            </h1>
-          </div>
-          <div className="ml-auto flex shrink-0 items-center gap-1.5 sm:gap-2">
+      <ManagerSessionChrome
+        principal={principal}
+        title={summary?.title ?? title}
+        chatId={Number.isFinite(chatId) ? chatId : undefined}
+        trailingActions={
+          <>
             <Button
               size="sm"
               variant="secondary"
               disabled={!canSyncJira || jiraSyncBusy}
               loading={jiraSyncBusy}
               onClick={() => { void syncJiraSp(); }}
-              className="hidden md:inline-flex"
+              className="hidden lg:inline-flex"
             >
-              Записать SP в Jira
+              Jira SP
             </Button>
             <Button
               size="sm"
@@ -245,7 +234,7 @@ export default function FinishedSessionPage() {
               onClick={downloadCsv}
               className="hidden md:inline-flex"
             >
-              Скачать CSV
+              CSV
             </Button>
             <Button
               size="sm"
@@ -254,38 +243,14 @@ export default function FinishedSessionPage() {
               onClick={downloadMarkdown}
               className="hidden md:inline-flex"
             >
-              Скачать MD
+              MD
             </Button>
             <Button size="sm" variant="ghost" onClick={() => navigate("/manage")} className="hidden md:inline-flex">
-              В cockpit
+              Cockpit
             </Button>
-            <ThemeToggle className="hidden md:inline-flex" />
-            <button
-              type="button"
-              onClick={() => setMobileMenuOpen(true)}
-              aria-label="Открыть меню"
-              className="md:hidden inline-flex h-10 w-10 items-center justify-center rounded-md border border-line bg-surface text-ink transition-colors hover:bg-line2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue/40 active:scale-[0.96] motion-reduce:active:scale-100"
-            >
-              <DotsIcon />
-            </button>
-          </div>
-        </div>
-        <div className="flex w-full border-t border-line/70 px-3 py-1.5 sm:px-4 lg:px-6">
-          <BackLink
-            to={hasPermission(principal, CMS_PERMISSIONS.sessions) ? "/cms/sessions" : "/cms"}
-            label={hasPermission(principal, CMS_PERMISSIONS.sessions) ? "К сессиям" : "В CMS"}
-            size="sm"
-            className="shrink-0"
-          />
-        </div>
-      </AutoHideAppHeader>
-
-      {/* Tabs strip stays directly under the sticky header to keep the
-          relationship between "Управление" and "Отчёт" visible at all
-          times — same affordance as on the cockpit screen. We only
-          render it when the chatId is a valid number; if the URL was
-          opened with garbage, we don't pretend there's a session. */}
-      {Number.isFinite(chatId) ? <SessionTabsBar chatId={chatId} /> : null}
+          </>
+        }
+      />
 
       <div className="mx-auto max-w-6xl px-4 py-6 lg:px-6">
         {error ? <Alert tone="danger" className="mb-4">{error}</Alert> : null}

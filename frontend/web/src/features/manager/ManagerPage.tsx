@@ -14,20 +14,20 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { Children, FormEvent, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react";
+import { Children, FormEvent, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
 import { apiUrl } from "../../app/config";
 import TaskTextBlock from "../../components/TaskTextBlock";
 import JiraDescriptionPanel from "../../components/JiraDescriptionPanel";
 import AiSummaryView from "../../components/AiSummaryView";
-import { AiSparkleButton, Alert, AutoHideAppHeader, Badge, Button, ConfirmDialog, EmptyState, ScrollArea, Spinner, Surface, TextField, TextareaField, ThemeToggle, cn, useTheme, useToast, type ThemeMode } from "../../design-system";
+import { AiSparkleButton, Alert, Badge, Button, ConfirmDialog, EmptyState, ScrollArea, Spinner, Surface, TextField, TextareaField, ThemeToggle, cn, useTheme, useToast, type ThemeMode } from "../../design-system";
 import { cmsAuthApi, hasCmsAuthHint } from "../cms/api/cmsClient";
 import type { CmsPrincipal } from "../cms/api/cmsTypes";
 import CmsLoginPage from "../cms/auth/CmsLoginPage";
 import { normalizeOptionalNumber, normalizeOptionalText } from "../cms/sessions/taskInput";
 import { ManagerTopBar } from "./ManagerTopBar";
 import { ManagerBottomDock } from "./ManagerBottomDock";
-import { SessionTabsBar } from "./SessionTabsBar";
+import { ManagerSessionChrome } from "./ManagerSessionChrome";
 import { managerApi } from "./api/managerClient";
 import type { CompletedTask, JiraPreview, ManagerSession, ManagerSessionRef, NamedVote, TaskItem, TaskMutation } from "./api/managerTypes";
 
@@ -422,7 +422,6 @@ function ManagerWorkspace({
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [leaveConfirmOpen, setLeaveConfirmOpen] = useState(false);
   const toast = useToast();
   const [historyLoadingMore, setHistoryLoadingMore] = useState(false);
   const [historyError, setHistoryError] = useState<string | null>(null);
@@ -699,24 +698,6 @@ function ManagerWorkspace({
   // Last-task case (no more tasks ahead) lands the session in phase=complete
   // and we stay put — the user explicitly hits "Open report" or adds more.
   const autoNextGuard = useRef<string | null>(null);
-  function requestLeaveCockpit(event: MouseEvent<HTMLAnchorElement>) {
-    event.preventDefault();
-    setLeaveConfirmOpen(true);
-  }
-
-  const leaveCockpitConfirm = (
-    <ConfirmDialog
-      open={leaveConfirmOpen}
-      title="Покинуть сессию?"
-      description="Вы точно хотите покинуть текущую сессию и перейти на главную страницу?"
-      confirmLabel="Перейти на главную"
-      cancelLabel="Остаться"
-      tone="primary"
-      onConfirm={() => navigate("/")}
-      onCancel={() => setLeaveConfirmOpen(false)}
-    />
-  );
-
   async function selectFinalEstimate(value: number) {
     if (!sessionRef || !session?.state.task) return;
     // Use the manager-only current_task_id (always present) as the dedup key
@@ -825,7 +806,6 @@ function ManagerWorkspace({
           finishBusy={busy === "finish"}
           onRename={renameSession}
           renameBusy={busy === "rename"}
-          onLogoClick={requestLeaveCockpit}
         >
           <BacklogWizard
             chatId={sessionRef.chatId}
@@ -836,7 +816,6 @@ function ManagerWorkspace({
             onAction={applyAction}
           />
         </CockpitShell>
-        {leaveCockpitConfirm}
       </>
     );
   }
@@ -923,13 +902,11 @@ function ManagerWorkspace({
         finishBusy={busy === "finish"}
         onRename={renameSession}
         renameBusy={busy === "rename"}
-        onLogoClick={requestLeaveCockpit}
       >
         {backlogColumn}
         {controlColumn}
         {settingsColumn}
       </CockpitShell>
-      {leaveCockpitConfirm}
     </>
   );
 }
@@ -956,7 +933,6 @@ function CockpitShell({
   finishBusy,
   onRename,
   renameBusy,
-  onLogoClick,
   children,
 }: {
   principal: CmsPrincipal;
@@ -967,7 +943,6 @@ function CockpitShell({
   finishBusy?: boolean;
   onRename?: (title: string) => Promise<boolean>;
   renameBusy?: boolean;
-  onLogoClick?: (event: MouseEvent<HTMLAnchorElement>) => void;
   /** Wizard: single child. Cockpit: three column fragments in order. */
   children: ReactNode;
 }) {
@@ -989,19 +964,16 @@ function CockpitShell({
   return (
     <main className="flex min-h-screen-mobile flex-col app-gradient-bg max-lg:overflow-visible lg:h-screen-mobile lg:overflow-hidden">
       <div className="shrink-0">
-        <AutoHideAppHeader className="border-b-0">
-          <ManagerTopBar
-            principal={principal}
-            title={title}
-            inviteUrl={inviteUrl}
-            onFinishSession={onFinishSession}
-            finishBusy={finishBusy}
-            onRename={onRename}
-            renameBusy={renameBusy}
-            onLogoClick={onLogoClick}
-          />
-        </AutoHideAppHeader>
-        <SessionTabsBar chatId={chatId} />
+        <ManagerSessionChrome
+          principal={principal}
+          title={title}
+          chatId={chatId}
+          inviteUrl={inviteUrl}
+          onFinishSession={onFinishSession}
+          finishBusy={finishBusy}
+          onRename={onRename}
+          renameBusy={renameBusy}
+        />
         {!isWizard ? (
           <div
             className="border-b border-line bg-surface px-3 lg:hidden"

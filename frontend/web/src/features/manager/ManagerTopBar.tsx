@@ -1,44 +1,53 @@
-import { useEffect, useRef, useState, type MouseEvent } from "react";
-import { Badge, BackLink, BrandHomeLink, Button, Spinner, ThemeToggle } from "../../design-system";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  BackLink,
+  BottomSheet,
+  Button,
+  SheetItem,
+  Spinner,
+  ThemeMenuControl,
+} from "../../design-system";
 import { keepFocusedFieldVisible } from "../../design-system/mobileKeyboard";
 import type { CmsPrincipal } from "../cms/api/cmsTypes";
 import { CMS_PERMISSIONS, hasPermission } from "../cms/navigation";
+import { SessionTabsSegment } from "./SessionTabsBar";
 
 /**
- * Manager cockpit header.
+ * Compact session command bar for cockpit and report screens.
  *
- * Two layouts, one component:
- *  - Mobile (< md): BrandMark icon · editable title · "•••" menu.
- *    All action buttons (copy invite, finish, theme, user) move to
- *    `ManagerBottomDock` / a bottom sheet.
- *  - Desktop (≥ md): the full action group is restored on the right.
- *
- * The mobile "•••" button calls `onOpenMenu` so the consumer can decide
- * what to render — this header doesn't own the sheet itself (keeps the
- * z-index/scroll-lock logic in one place at the page level).
+ * One row: back · editable session title · Управление/Отчёт · actions · ⋯
+ * Mobile keeps invite/finish in `ManagerBottomDock`; desktop shows them here.
  */
 export function ManagerTopBar({
   principal,
   title = "Planning Poker",
+  chatId,
   inviteUrl,
   onFinishSession,
   finishBusy,
   onRename,
   renameBusy,
-  onOpenMenu,
-  onLogoClick,
+  trailingActions,
 }: {
   principal: CmsPrincipal;
   title?: string;
+  chatId?: number;
   inviteUrl?: string;
   onFinishSession?: () => void;
   finishBusy?: boolean;
   onRename?: (title: string) => Promise<boolean>;
   renameBusy?: boolean;
-  onOpenMenu?: () => void;
-  onLogoClick?: (event: MouseEvent<HTMLAnchorElement>) => void;
+  trailingActions?: ReactNode;
 }) {
   const [copied, setCopied] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [renameOpen, setRenameOpen] = useState(false);
+  const [renameValue, setRenameValue] = useState(title);
+
+  useEffect(() => {
+    if (renameOpen) setRenameValue(title);
+  }, [renameOpen, title]);
+
   async function copyInvite() {
     if (!inviteUrl) return;
     try {
@@ -49,85 +58,178 @@ export function ManagerTopBar({
       /* clipboard rejected — ignored */
     }
   }
+
   const canSeeSessions = hasPermission(principal, CMS_PERMISSIONS.sessions);
   const backTo = canSeeSessions ? "/cms/sessions" : "/cms";
-  // Unified back-label across detail screens: "К <раздел>".
-  const backLabel = canSeeSessions ? "К сессиям" : "В CMS";
+  const backLabel = canSeeSessions ? "Сессии" : "CMS";
   const userLabel = principal.display_name ?? principal.username;
+  const showSessionTabs = typeof chatId === "number" && Number.isFinite(chatId);
+
   return (
-    <header className="pt-safe">
-      <div className="flex min-h-14 w-full items-center gap-2 px-3 py-2 sm:px-4 md:min-h-16 md:gap-3 lg:px-6">
-        {/* Brand is icon-only on mobile so the editable title has room to breathe. */}
-        <BrandHomeLink size="sm" showWordmark={false} className="shrink-0" onClick={onLogoClick} />
+    <>
+      <header className="pt-safe">
+        <div className="flex min-h-14 w-full items-center gap-2 overflow-x-auto px-3 py-2 sm:gap-3 sm:px-4 lg:px-6">
+          <BackLink
+            to={backTo}
+            label={backLabel}
+            size="sm"
+            className="shrink-0"
+          />
 
-        {/* Middle: editable title. Wraps instead of hiding the full
-            session name. Uses min-w-0 so flex children don't push the
-            cluster off-screen at 320px. */}
-        <div className="min-w-0 flex-1">
-          <SessionTitleEditor title={title} onRename={onRename} busy={Boolean(renameBusy)} />
-        </div>
+          <div className="flex min-w-0 flex-1 items-center gap-2 sm:gap-3">
+            <div className="min-w-0 flex-1">
+              <SessionTitleEditor
+                title={title}
+                onRename={onRename}
+                busy={Boolean(renameBusy)}
+              />
+            </div>
+            {showSessionTabs ? (
+              <SessionTabsSegment chatId={chatId} />
+            ) : null}
+          </div>
 
-        {/* Right cluster: desktop action group + a single mobile menu
-            button. We never render Finish or Copy-invite on mobile —
-            those live in the bottom dock so the header stays a
-            single, stable 56px row. */}
-        <div className="ml-auto flex shrink-0 items-center gap-1.5 sm:gap-2">
-          {inviteUrl ? (
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={copyInvite}
-              className="hidden md:inline-flex"
-            >
-              {copied ? "Скопировано" : "Скопировать invite"}
-            </Button>
-          ) : null}
-          {onFinishSession ? (
-            <Button
-              size="sm"
-              variant="danger"
-              onClick={onFinishSession}
-              loading={Boolean(finishBusy)}
-              className="hidden md:inline-flex"
-            >
-              Завершить
-            </Button>
-          ) : null}
-          <ThemeToggle className="hidden md:inline-flex" />
-          <Badge tone="info" className="hidden md:inline-flex">{userLabel}</Badge>
-
-          {/* Mobile-only overflow trigger. The same set of actions
-              appears here (rename, theme, leave) plus the user
-              identity row, so nothing is lost when the desktop
-              buttons hide. */}
-          {onOpenMenu ? (
+          <div className="ml-auto flex shrink-0 items-center gap-1 sm:gap-1.5">
+            {trailingActions}
+            {inviteUrl ? (
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={copyInvite}
+                className="hidden md:inline-flex"
+              >
+                {copied ? "Скопировано" : "Invite"}
+              </Button>
+            ) : null}
+            {onFinishSession ? (
+              <Button
+                size="sm"
+                variant="danger"
+                onClick={onFinishSession}
+                loading={Boolean(finishBusy)}
+                className="hidden md:inline-flex"
+              >
+                Завершить
+              </Button>
+            ) : null}
             <button
               type="button"
-              onClick={onOpenMenu}
-              aria-label="Открыть меню"
-              className="inline-flex h-10 w-10 items-center justify-center rounded-md border border-line bg-surface text-ink transition-colors hover:bg-line2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue/40 active:scale-[0.96] motion-reduce:active:scale-100 md:hidden"
+              onClick={() => setMenuOpen(true)}
+              aria-label="Меню сессии"
+              className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-line bg-surface text-ink transition-colors hover:bg-line2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue/40 active:scale-[0.96] motion-reduce:active:scale-100 md:inline-flex"
             >
               <DotsIcon />
             </button>
-          ) : null}
+          </div>
         </div>
-      </div>
-      <div className="flex w-full border-t border-line/70 px-3 py-1.5 sm:px-4 lg:px-6">
-        <BackLink to={backTo} label={backLabel} size="sm" className="shrink-0" />
-      </div>
-    </header>
+
+      </header>
+
+      <BottomSheet
+        open={menuOpen}
+        onClose={() => {
+          setMenuOpen(false);
+          setRenameOpen(false);
+        }}
+        title={renameOpen ? "Переименовать сессию" : "Меню сессии"}
+        description={
+          renameOpen
+            ? "Название видно участникам и в CMS"
+            : `Вы вошли как ${userLabel}`
+        }
+        footer={
+          renameOpen ? (
+            <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <Button variant="ghost" onClick={() => setRenameOpen(false)} disabled={Boolean(renameBusy)}>
+                Назад
+              </Button>
+              <Button
+                variant="primary"
+                disabled={!renameValue.trim() || renameValue.trim() === title || Boolean(renameBusy)}
+                loading={Boolean(renameBusy)}
+                onClick={() => {
+                  if (!onRename) return;
+                  void onRename(renameValue.trim()).then((ok) => {
+                    if (ok) {
+                      setMenuOpen(false);
+                      setRenameOpen(false);
+                    }
+                  });
+                }}
+              >
+                Сохранить
+              </Button>
+            </div>
+          ) : undefined
+        }
+      >
+        {renameOpen ? (
+          <form
+            className="px-3 pb-3 pt-1"
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (!onRename || !renameValue.trim() || renameValue.trim() === title || renameBusy) return;
+              void onRename(renameValue.trim()).then((ok) => {
+                if (ok) {
+                  setMenuOpen(false);
+                  setRenameOpen(false);
+                }
+              });
+            }}
+          >
+            <input
+              autoFocus
+              value={renameValue}
+              maxLength={120}
+              onChange={(event) => setRenameValue(event.target.value)}
+              onFocus={(event) => keepFocusedFieldVisible(event.currentTarget)}
+              aria-label="Название сессии"
+              className="w-full rounded-md border border-line bg-surface px-3 py-2.5 text-base font-medium text-ink outline-none ring-blue/30 focus:ring-2"
+            />
+            <p className="mt-2 text-xs text-ink3">Максимум 120 символов.</p>
+          </form>
+        ) : (
+          <div className="space-y-0.5 px-2 pb-2">
+            {onRename ? (
+              <SheetItem
+                icon={<PencilIcon />}
+                label="Переименовать сессию"
+                description={title || "Без названия"}
+                onClick={() => setRenameOpen(true)}
+              />
+            ) : null}
+            {inviteUrl ? (
+              <div className="md:hidden">
+                <SheetItem
+                  icon={<LinkIcon />}
+                  label={copied ? "Invite скопирован" : "Скопировать invite"}
+                  onClick={() => {
+                    void copyInvite();
+                  }}
+                />
+              </div>
+            ) : null}
+            {onFinishSession ? (
+              <div className="md:hidden">
+                <SheetItem
+                  icon={<StopIcon />}
+                  label="Завершить сессию"
+                  tone="danger"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    onFinishSession();
+                  }}
+                />
+              </div>
+            ) : null}
+            <ThemeMenuControl />
+          </div>
+        )}
+      </BottomSheet>
+    </>
   );
 }
 
-/**
- * Click-to-edit session title in the manager TopBar. Single-line input,
- * commits on Enter or blur (when value changed), cancels on Escape. The
- * resolved title is propagated upstream so it lands on `cms_sessions.title`
- * and the CMS shows the same friendly name.
- *
- * When no `onRename` is provided (e.g. legacy callers) the component falls
- * back to a static heading so the existing layout is unaffected.
- */
 function SessionTitleEditor({
   title,
   onRename,
@@ -146,18 +248,25 @@ function SessionTitleEditor({
   }, [title, editing]);
 
   useEffect(() => {
-    if (editing) {
-      const id = window.setTimeout(() => {
-        inputRef.current?.focus();
-        inputRef.current?.select();
-      }, 0);
-      return () => window.clearTimeout(id);
-    }
-    return undefined;
+    if (!editing) return undefined;
+    const id = window.setTimeout(() => {
+      inputRef.current?.focus();
+      inputRef.current?.select();
+    }, 0);
+    return () => window.clearTimeout(id);
   }, [editing]);
 
   if (!onRename) {
-    return <h1 className="break-words text-sm font-bold leading-snug text-ink md:text-base">{title}</h1>;
+    return (
+      <div className="min-w-0">
+        <h1
+          className="truncate text-sm font-bold text-ink md:text-base"
+          title={`Название сессии: ${title}`}
+        >
+          {title}
+        </h1>
+      </div>
+    );
   }
 
   async function commit() {
@@ -184,44 +293,59 @@ function SessionTitleEditor({
   if (editing) {
     return (
       <form
-        className="flex min-w-0 items-center gap-2"
+        className="min-w-0"
         onSubmit={(event) => {
           event.preventDefault();
           void commit();
         }}
       >
-        <input
-          ref={inputRef}
-          value={draft}
-          onChange={(event) => setDraft(event.target.value)}
-          onFocus={(event) => keepFocusedFieldVisible(event.currentTarget)}
-          onBlur={() => { void commit(); }}
-          onKeyDown={(event) => {
-            if (event.key === "Escape") {
-              event.preventDefault();
-              cancel();
-            }
-          }}
-          disabled={busy}
-          maxLength={120}
-          aria-label="Название сессии"
-          className="min-w-0 flex-1 rounded-md border border-line bg-surface px-2 py-1 text-sm font-bold text-ink outline-none ring-blue/30 focus:ring-2 md:text-base"
-        />
-        {busy ? <Spinner size="sm" /> : null}
+        <div className="flex min-w-0 items-center gap-2">
+          <input
+            ref={inputRef}
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            onFocus={(event) => keepFocusedFieldVisible(event.currentTarget)}
+            onBlur={() => { void commit(); }}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                event.preventDefault();
+                cancel();
+              }
+            }}
+            disabled={busy}
+            maxLength={120}
+            aria-label="Название сессии"
+            title="Название сессии"
+            className="min-w-0 flex-1 rounded-md border border-line bg-surface px-2 py-1 text-sm font-bold text-ink outline-none ring-blue/30 focus:ring-2 md:text-base"
+          />
+          {busy ? <Spinner size="sm" /> : null}
+        </div>
       </form>
     );
   }
 
   return (
-    <button
-      type="button"
-      onClick={() => setEditing(true)}
-      title="Кликните, чтобы переименовать"
-      className="group flex min-w-0 max-w-full items-start gap-1.5 rounded-md -mx-1 px-1 text-left transition hover:bg-line2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue/40"
-    >
-      <span className="min-w-0 whitespace-normal break-words text-sm font-bold leading-snug text-ink md:text-base">{title}</span>
-      <PencilIcon className="mt-0.5 hidden h-3.5 w-3.5 shrink-0 text-ink3 opacity-0 transition group-hover:opacity-100 group-focus-visible:opacity-100 md:inline-block" />
-    </button>
+    <div className="min-w-0">
+      <button
+        type="button"
+        onClick={() => setEditing(true)}
+        title="Название сессии. Нажмите, чтобы переименовать"
+        className="group flex min-w-0 max-w-full items-center gap-1 rounded-md px-0.5 text-left transition hover:bg-line2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue/40"
+      >
+        <span className="hidden shrink-0 text-[11px] font-semibold uppercase tracking-wide text-ink3 sm:inline">
+          Название
+        </span>
+        <span
+          className="min-w-0 truncate text-sm font-bold text-ink md:text-base"
+          title={title}
+        >
+          {title}
+        </span>
+        <PencilIcon
+          className="h-3.5 w-3.5 shrink-0 text-ink3 opacity-70 group-hover:opacity-100"
+        />
+      </button>
+    </div>
   );
 }
 
@@ -249,6 +373,23 @@ function DotsIcon() {
       <circle cx="4.5" cy="10" r="1.5" />
       <circle cx="10" cy="10" r="1.5" />
       <circle cx="15.5" cy="10" r="1.5" />
+    </svg>
+  );
+}
+
+function LinkIcon() {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4" aria-hidden="true">
+      <path d="M8.5 11.5a3 3 0 0 0 4.243 0l2-2a3 3 0 1 0-4.243-4.243L9.5 6.25" />
+      <path d="M11.5 8.5a3 3 0 0 0-4.243 0l-2 2a3 3 0 0 0 4.243 4.243L10.5 13.75" />
+    </svg>
+  );
+}
+
+function StopIcon() {
+  return (
+    <svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4" aria-hidden="true">
+      <rect x="5" y="5" width="10" height="10" rx="1.5" />
     </svg>
   );
 }
