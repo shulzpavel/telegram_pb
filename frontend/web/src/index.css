@@ -325,41 +325,37 @@
   }
 
   /* === AI-styled button ===
-     Used for the Generate / Regenerate AI summary action. Visually
-     matches the AiIntelligenceSurface (purple → blue gradient) so users
-     understand that pressing the button produces output destined for
-     that same panel.
-       - Uses `!important` to override Button's variant background
-         without forcing a new Button variant into the design-system
-         enum (this button is too niche to deserve its own variant).
-       - Hover/disabled tuned via filter so the gradient stays intact.
-       - The leading AiSparkleIcon (inserted by AiSparkleButton) inherits
-         the white text colour for crisp contrast on the gradient.
+     Used for Generate / Regenerate AI summary actions. Keep it airy:
+     no filled pill, just an AI-accent border, label colour and sparkle
+     glyph so it reads as "AI" without competing with primary actions.
   */
   .ai-sparkle-button {
-    background-image: linear-gradient(
-      135deg,
-      rgb(var(--c-purple)),
-      rgb(var(--c-blue2)) 50%,
-      rgb(var(--c-blue))
-    ) !important;
+    background-image: none !important;
     background-color: transparent !important;
-    border-color: transparent !important;
-    color: #ffffff !important;
-    box-shadow: 0 1px 2px rgba(0, 0, 0, .12), 0 8px 20px rgba(125, 90, 245, .25);
+    border-color: rgba(var(--c-purple), .45) !important;
+    color: rgb(var(--c-purple)) !important;
+    box-shadow: inset 0 0 0 1px rgba(var(--c-blue2), .18);
   }
 
   .ai-sparkle-button:hover:not(:disabled):not([aria-disabled="true"]) {
-    filter: brightness(1.08);
+    background-color: rgba(var(--c-purple), .06) !important;
+    border-color: rgba(var(--c-blue2), .65) !important;
+    color: rgb(var(--c-blue2)) !important;
+    box-shadow: inset 0 0 0 1px rgba(var(--c-blue2), .28);
+    filter: none;
   }
 
   .ai-sparkle-button:active:not(:disabled):not([aria-disabled="true"]) {
-    filter: brightness(0.96);
+    background-color: rgba(var(--c-blue2), .09) !important;
+    filter: none;
   }
 
   .ai-sparkle-button:disabled,
   .ai-sparkle-button[aria-disabled="true"] {
-    filter: saturate(0.5) brightness(0.9);
+    border-color: rgba(var(--c-purple), .25) !important;
+    color: rgba(var(--c-purple), .55) !important;
+    box-shadow: none;
+    filter: saturate(0.5);
   }
 }
 
