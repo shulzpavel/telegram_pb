@@ -23,7 +23,7 @@ interface UseRetroReturn {
   votesRemaining: number;
   join: (name: string, role: ParticipantRole) => Promise<void>;
   addCard: (sectionId: string, text: string) => Promise<boolean>;
-  toggleVote: (cardId: string) => Promise<boolean>;
+  toggleVote: (targetId: string, targetType?: "card" | "group") => Promise<boolean>;
   error: string | null;
 }
 
@@ -268,7 +268,7 @@ export function useRetro(
   );
 
   const toggleVote = useCallback(
-    async (cardId: string): Promise<boolean> => {
+    async (targetId: string, targetType: "card" | "group" = "card"): Promise<boolean> => {
       const pid = participantIdRef.current;
       if (!pid) return false;
       setError(null);
@@ -277,25 +277,34 @@ export function useRetro(
         setState((prev) => {
           if (!prev || prev.phase !== "voting") return prev;
           const currentVotes = new Set(prev.my_votes ?? []);
-          const hasVote = currentVotes.has(cardId);
+          const hasVote = currentVotes.has(targetId);
           const budget = prev.votes_per_person;
           if (!hasVote && currentVotes.size >= budget) return prev;
           if (hasVote) {
-            currentVotes.delete(cardId);
+            currentVotes.delete(targetId);
           } else {
-            currentVotes.add(cardId);
+            currentVotes.add(targetId);
           }
-          const cards = prev.cards.map((c) => {
-            if (c.card_id !== cardId) return c;
-            const delta = hasVote ? -1 : 1;
-            return { ...c, vote_count: Math.max(0, c.vote_count + delta) };
-          });
+          const delta = hasVote ? -1 : 1;
+          const cards = targetType === "card"
+            ? prev.cards.map((c) => {
+              if (c.card_id !== targetId) return c;
+              return { ...c, vote_count: Math.max(0, c.vote_count + delta) };
+            })
+            : prev.cards;
+          const groups = targetType === "group"
+            ? prev.groups.map((g) => {
+              if (g.group_id !== targetId) return g;
+              return { ...g, vote_count: Math.max(0, g.vote_count + delta) };
+            })
+            : prev.groups;
           const nextVotes = [...currentVotes];
           setMyVotes(new Set(nextVotes));
           changed = true;
           return {
             ...prev,
             cards,
+            groups,
             my_votes: nextVotes,
             my_votes_used: nextVotes.length,
             my_votes_remaining: Math.max(0, budget - nextVotes.length),
@@ -308,7 +317,8 @@ export function useRetro(
         const next = await postJson<RetroLiveState>("/retro/vote", {
           token,
           participant_id: pid,
-          card_id: cardId,
+          target_id: targetId,
+          target_type: targetType,
         });
         setState(next);
         setMyVotes(new Set(next.my_votes ?? []));

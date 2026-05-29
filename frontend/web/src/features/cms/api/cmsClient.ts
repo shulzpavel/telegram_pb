@@ -367,6 +367,20 @@ export const cmsRetroApi = {
       method: "POST",
       body: JSON.stringify({ target }),
     }),
+  createGroup: (retroId: number, body: { title: string; card_ids: string[] }) =>
+    cmsFetch<RetroLiveState>(`/retros/${retroId}/groups`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  renameGroup: (retroId: number, groupId: string, body: { title: string }) =>
+    cmsFetch<RetroLiveState>(`/retros/${retroId}/groups/${encodeURIComponent(groupId)}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    }),
+  ungroup: (retroId: number, groupId: string) =>
+    cmsFetch<RetroLiveState>(`/retros/${retroId}/groups/${encodeURIComponent(groupId)}`, {
+      method: "DELETE",
+    }),
   addActionItem: (retroId: number, body: { text: string; assignee?: string | null }) =>
     cmsFetch<RetroLiveState>(`/retros/${retroId}/action-items`, {
       method: "POST",

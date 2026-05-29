@@ -156,6 +156,70 @@ def test_vote_unknown_card_404():
     assert info.value.status_code == 404
 
 
+def test_grouping_moves_votes_to_group_and_blocks_card_votes():
+    retro = _retro(votes_per_person=2)
+    _seed_cards(retro, 3)
+    retro.start_voting()
+    retro.toggle_vote("c0", user_id=-1)
+    retro.toggle_vote("c1", user_id=-2)
+
+    group = retro.create_group(
+        group_id="g1",
+        title="Release pain",
+        card_ids=["c0", "c1"],
+        created_at="t",
+    )
+
+    assert group.votes == {-1, -2}
+    assert retro.find_card("c0").group_id == "g1"
+    assert retro.find_card("c0").votes == set()
+    assert retro.votes_used_by(-1) == 1
+    with pytest.raises(RetroError) as info:
+        retro.toggle_vote("c0", user_id=-1)
+    assert info.value.status_code == 409
+
+    retro.toggle_vote("g1", user_id=-1, target_type="group")
+    assert retro.votes_used_by(-1) == 0
+
+
+def test_grouping_requires_same_section_and_unique_cards():
+    retro = _retro()
+    retro.open_section("task", deadline=None)
+    retro.add_card(card_id="c0", section_id="task", text="a", author_id=-7, author_name="a@x.test", created_at="t")
+    retro.close_section()
+    retro.open_section("sprint", deadline=None)
+    retro.add_card(card_id="c1", section_id="sprint", text="b", author_id=-7, author_name="a@x.test", created_at="t")
+
+    with pytest.raises(RetroError) as info:
+        retro.create_group(group_id="g1", title="Mixed", card_ids=["c0", "c1"], created_at="t")
+    assert info.value.status_code == 409
+
+
+def test_rename_and_ungroup_restores_card_voting():
+    retro = _retro(votes_per_person=1)
+    _seed_cards(retro, 2)
+    group = retro.create_group(group_id="g1", title="Old", card_ids=["c0", "c1"], created_at="t")
+    assert retro.rename_group(group.group_id, "New").title == "New"
+    assert retro.ungroup(group.group_id) is True
+    assert retro.groups == []
+    assert retro.find_card("c0").group_id is None
+    retro.start_voting()
+    retro.toggle_vote("c0", user_id=-1)
+    assert retro.votes_used_by(-1) == 1
+
+
+def test_group_mutations_rejected_after_done():
+    retro = _retro()
+    _seed_cards(retro, 2)
+    retro.start_voting()
+    retro.start_discussion()
+    retro.finalize()
+
+    with pytest.raises(RetroError) as info:
+        retro.create_group(group_id="g1", title="Late", card_ids=["c0", "c1"], created_at="t")
+    assert info.value.status_code == 409
+
+
 # ---------------------------------------------------------------------------
 # Phase transitions
 # ---------------------------------------------------------------------------
@@ -257,6 +321,20 @@ def test_factory_round_trip_preserves_state():
     assert restored.find_card("c0").votes == {-1}
     assert restored.action_items[0].text == "do"
     assert restored.participants[-7].role == "backend"
+
+
+def test_factory_round_trip_preserves_groups():
+    retro = _retro(votes_per_person=3)
+    _seed_cards(retro, 2)
+    retro.start_voting()
+    retro.toggle_vote("c0", user_id=-1)
+    retro.create_group(group_id="g1", title="Grouped", card_ids=["c0", "c1"], created_at="t")
+
+    restored = RetrospectiveFactory.from_dict(RetrospectiveFactory.to_dict(retro))
+
+    assert restored.groups[0].title == "Grouped"
+    assert restored.groups[0].votes == {-1}
+    assert restored.find_card("c0").group_id == "g1"
 
 
 def test_factory_defaults_bad_phase_to_lobby():

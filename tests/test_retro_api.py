@@ -285,6 +285,58 @@ def test_state_endpoint_returns_my_votes(client):
     assert anon.json()["my_votes"] == []
 
 
+def test_manager_groups_cards_and_participant_votes_for_group(client):
+    create = client.post("/api/v1/cms/retros", json={
+        "title": "grouped",
+        "config": {"sections": [{"section_id": "s", "title": "S"}], "votes_per_person": 2, "default_section_seconds": 0},
+    })
+    retro_id = create.json()["id"]
+    token = client.post(f"/api/v1/cms/retros/{retro_id}/invite").json()["token"]
+    pid = client.post("/api/v1/retro/join", json={
+        "token": token, "name": "group.user@betboom.com", "role": "backend",
+    }).json()["participant_id"]
+    client.post(f"/api/v1/cms/retros/{retro_id}/open-section", json={"section_id": "s"})
+    card_ids = []
+    for text in ("slow release", "staging flakes"):
+        res = client.post("/api/v1/retro/card", json={
+            "token": token, "participant_id": pid, "section_id": "s", "text": text,
+        })
+        card_ids.append(res.json()["cards"][-1]["card_id"])
+
+    group = client.post(f"/api/v1/cms/retros/{retro_id}/groups", json={
+        "title": "Release pain",
+        "card_ids": card_ids,
+    })
+    assert group.status_code == 200
+    group_id = group.json()["groups"][0]["group_id"]
+    assert group.json()["cards"][0]["group_id"] == group_id
+
+    client.post(f"/api/v1/cms/retros/{retro_id}/phase", json={"target": "voting"})
+    card_vote = client.post("/api/v1/retro/vote", json={
+        "token": token, "participant_id": pid, "card_id": card_ids[0],
+    })
+    assert card_vote.status_code == 409
+
+    group_vote = client.post("/api/v1/retro/vote", json={
+        "token": token,
+        "participant_id": pid,
+        "target_type": "group",
+        "target_id": group_id,
+    })
+    assert group_vote.status_code == 200
+    assert group_vote.json()["groups"][0]["vote_count"] == 1
+    assert group_vote.json()["my_votes"] == [group_id]
+
+    renamed = client.patch(f"/api/v1/cms/retros/{retro_id}/groups/{group_id}", json={"title": "Release flow"})
+    assert renamed.status_code == 200
+    assert renamed.json()["groups"][0]["title"] == "Release flow"
+
+    ungrouped = client.delete(f"/api/v1/cms/retros/{retro_id}/groups/{group_id}")
+    assert ungrouped.status_code == 200
+    assert ungrouped.json()["groups"] == []
+    assert all(card.get("group_id") is None for card in ungrouped.json()["cards"])
+
+
 def test_websocket_sends_initial_state(client):
     create = client.post("/api/v1/cms/retros", json={"title": "ws", "config": {"sections": []}})
     retro_id = create.json()["id"]

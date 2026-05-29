@@ -28,6 +28,7 @@ function makeState(overrides: Partial<RetroLiveState> = {}): RetroLiveState {
       { card_id: "c2", section_id: "a", text: "two", vote_count: 0 },
       { card_id: "c3", section_id: "b", text: "three", vote_count: 1 },
     ],
+    groups: [],
     action_items: [],
     participants_count: 3,
     ai_summary: null,

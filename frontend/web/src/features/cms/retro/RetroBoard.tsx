@@ -2,8 +2,9 @@ import { useState } from "react";
 import { Badge, Button, Surface, TextareaField } from "../../../design-system";
 import {
   canAddToSection,
-  cardsBySection,
+  groupsBySection,
   phaseLabel,
+  ungroupedCardsBySection,
   type RetroLiveState,
 } from "./retroLogic";
 import { RetroAiView } from "./RetroAiView";
@@ -14,8 +15,11 @@ interface RetroBoardProps {
   myVotes?: Set<string>;
   votesRemaining?: number;
   onAddCard?: (sectionId: string, text: string) => Promise<boolean> | void;
-  onToggleVote?: (cardId: string) => Promise<boolean> | void;
+  onToggleVote?: (targetId: string, targetType?: "card" | "group") => Promise<boolean> | void;
   countdown?: string | null;
+  selectableCards?: boolean;
+  selectedCardIds?: Set<string>;
+  onToggleCardSelection?: (cardId: string) => void;
 }
 
 export function RetroBoard({
@@ -25,16 +29,21 @@ export function RetroBoard({
   onAddCard,
   onToggleVote,
   countdown,
+  selectableCards = false,
+  selectedCardIds,
+  onToggleCardSelection,
 }: RetroBoardProps) {
-  const grouped = cardsBySection(state);
+  const grouped = ungroupedCardsBySection(state);
+  const groups = groupsBySection(state);
+  const cardById = new Map(state.cards.map((card) => [card.card_id, card]));
   const voting = state.phase === "voting";
   const [pendingVote, setPendingVote] = useState<string | null>(null);
 
-  async function vote(cardId: string) {
+  async function vote(targetId: string, targetType: "card" | "group") {
     if (!onToggleVote || pendingVote) return;
-    setPendingVote(cardId);
+    setPendingVote(`${targetType}:${targetId}`);
     try {
-      await onToggleVote(cardId);
+      await onToggleVote(targetId, targetType);
     } finally {
       setPendingVote(null);
     }
@@ -58,8 +67,10 @@ export function RetroBoard({
       <div className="grid gap-4 lg:grid-cols-2 2xl:grid-cols-3">
         {state.sections.map((section) => {
           const cards = grouped.get(section.section_id) ?? [];
+          const sectionGroups = groups.get(section.section_id) ?? [];
           const isActive = state.active_section_id === section.section_id;
           const canWrite = Boolean(onAddCard) && canAddToSection(state, section.section_id);
+          const hasContent = cards.length > 0 || sectionGroups.length > 0;
           return (
             <Surface
               key={section.section_id}
@@ -77,12 +88,65 @@ export function RetroBoard({
                 ) : null}
               </div>
 
-              {cards.length === 0 ? (
+              {!hasContent ? (
                 <p className="rounded-xl border border-dashed border-line px-4 py-6 text-center text-sm text-ink4">
                   Пока нет карточек
                 </p>
               ) : (
                 <ul className="space-y-3">
+                  {sectionGroups.map((group) => {
+                    const mine = myVotes?.has(group.group_id) ?? false;
+                    const budgetBlocked =
+                      !mine && typeof votesRemaining === "number" && votesRemaining <= 0;
+                    const disabled = budgetBlocked || pendingVote !== null;
+                    const groupCards = group.card_ids
+                      .map((cardId) => cardById.get(cardId))
+                      .filter((card): card is NonNullable<typeof card> => Boolean(card));
+                    return (
+                      <li
+                        key={group.group_id}
+                        className="rounded-2xl border border-blue/30 bg-blue/5 px-4 py-3 text-base text-ink shadow-sm"
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0 space-y-2">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <Badge tone="info">группа</Badge>
+                              <h4 className="break-words text-base font-bold text-ink [overflow-wrap:anywhere]">
+                                {group.title}
+                              </h4>
+                            </div>
+                            <ul className="space-y-1 border-l border-blue/30 pl-3 text-sm text-ink2">
+                              {groupCards.map((card) => (
+                                <li key={card.card_id} className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
+                                  {card.text}
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                          {voting && onToggleVote ? (
+                            <button
+                              type="button"
+                              onClick={() => void vote(group.group_id, "group")}
+                              disabled={disabled}
+                              aria-pressed={mine}
+                              aria-label={`${mine ? "Убрать голос с группы" : "Проголосовать за группу"}, сейчас ${group.vote_count} голосов`}
+                              className={[
+                                "inline-flex min-h-10 shrink-0 items-center gap-1 rounded-full px-3 text-sm font-semibold transition-colors",
+                                mine ? "bg-blue text-white" : "border border-line text-ink3 hover:bg-line2",
+                                disabled ? "cursor-not-allowed opacity-50" : "",
+                              ].join(" ")}
+                            >
+                              ▲ {group.vote_count}
+                            </button>
+                          ) : (
+                            <span className="shrink-0 text-sm font-semibold text-ink3">
+                              ▲ {group.vote_count}
+                            </span>
+                          )}
+                        </div>
+                      </li>
+                    );
+                  })}
                   {cards.map((card) => {
                     const mine = myVotes?.has(card.card_id) ?? false;
                     const budgetBlocked =
@@ -94,13 +158,24 @@ export function RetroBoard({
                         className="min-h-24 rounded-xl border border-line bg-surface px-4 py-3 text-base text-ink shadow-sm"
                       >
                         <div className="flex items-start justify-between gap-3">
-                          <span className="min-w-0 whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
-                            {card.text}
-                          </span>
+                          <div className="flex min-w-0 flex-1 items-start gap-3">
+                            {selectableCards && onToggleCardSelection ? (
+                              <input
+                                type="checkbox"
+                                className="mt-1 h-5 w-5 rounded border-line"
+                                checked={selectedCardIds?.has(card.card_id) ?? false}
+                                onChange={() => onToggleCardSelection(card.card_id)}
+                                aria-label="Выбрать карточку для группировки"
+                              />
+                            ) : null}
+                            <span className="min-w-0 whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
+                              {card.text}
+                            </span>
+                          </div>
                           {voting && onToggleVote ? (
                             <button
                               type="button"
-                              onClick={() => void vote(card.card_id)}
+                              onClick={() => void vote(card.card_id, "card")}
                               disabled={disabled}
                               aria-pressed={mine}
                               aria-label={`${mine ? "Убрать голос с карточки" : "Проголосовать за карточку"}, сейчас ${card.vote_count} голосов`}

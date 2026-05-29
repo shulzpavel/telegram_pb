@@ -14,6 +14,16 @@ export interface RetroCardView {
   card_id: string;
   section_id: string;
   text: string;
+  group_id?: string | null;
+  is_grouped?: boolean;
+  vote_count: number;
+}
+
+export interface RetroGroupView {
+  group_id: string;
+  section_id: string;
+  title: string;
+  card_ids: string[];
   vote_count: number;
 }
 
@@ -61,6 +71,7 @@ export interface RetroLiveState {
   default_section_seconds: number;
   sections: RetroSectionDef[];
   cards: RetroCardView[];
+  groups: RetroGroupView[];
   action_items: RetroActionItemView[];
   participants_count: number;
   ai_summary: RetroAiSummary | null;
@@ -101,6 +112,7 @@ export function createMockRetroLiveState(overrides: Partial<RetroLiveState> = {}
     default_section_seconds: 300,
     sections: DEFAULT_RETRO_SECTIONS,
     cards: [],
+    groups: [],
     action_items: [],
     participants_count: 1,
     ai_summary: null,
@@ -137,6 +149,29 @@ export function cardsBySection(state: Pick<RetroLiveState, "sections" | "cards">
     }
   }
   return map;
+}
+
+export function groupsBySection(state: Pick<RetroLiveState, "sections" | "groups">): Map<string, RetroGroupView[]> {
+  const map = new Map<string, RetroGroupView[]>();
+  for (const section of state.sections) {
+    map.set(section.section_id, []);
+  }
+  for (const group of state.groups) {
+    const bucket = map.get(group.section_id);
+    if (bucket) {
+      bucket.push(group);
+    } else {
+      map.set(group.section_id, [group]);
+    }
+  }
+  return map;
+}
+
+export function ungroupedCardsBySection(state: Pick<RetroLiveState, "sections" | "cards">): Map<string, RetroCardView[]> {
+  return cardsBySection({
+    sections: state.sections,
+    cards: state.cards.filter((card) => !card.group_id && !card.is_grouped),
+  });
 }
 
 /** The section that follows `activeId`, or the first one when nothing is active. */

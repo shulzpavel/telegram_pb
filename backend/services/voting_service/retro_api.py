@@ -41,6 +41,7 @@ from app.domain.retro import (
     RetroActionItem,
     RetroCard,
     RetroError,
+    RetroGroup,
     RetroSection,
     RetrospectiveFactory,
 )
@@ -142,7 +143,18 @@ class RetroCardRequest(BaseModel):
 class RetroVoteRequest(BaseModel):
     token: str = Field(min_length=1, max_length=128)
     participant_id: str = Field(min_length=1, max_length=80)
-    card_id: str = Field(min_length=1, max_length=80)
+    card_id: Optional[str] = Field(default=None, min_length=1, max_length=80)
+    target_type: Literal["card", "group"] = "card"
+    target_id: Optional[str] = Field(default=None, min_length=1, max_length=80)
+
+
+class RetroGroupRequest(BaseModel):
+    title: str = Field(min_length=1, max_length=120)
+    card_ids: list[str] = Field(min_length=2, max_length=50)
+
+
+class RetroGroupRenameRequest(BaseModel):
+    title: str = Field(min_length=1, max_length=120)
 
 
 # ---------------------------------------------------------------------------
@@ -227,9 +239,21 @@ def _anonymized_retro_snapshot(retro: Retrospective) -> dict:
                 "section_id": card.section_id,
                 "text": card.text,
                 "created_at": card.created_at,
-                "vote_count": len(card.votes),
+                "group_id": card.group_id,
+                "vote_count": len(card.votes) if card.group_id is None else 0,
             }
             for card in retro.cards
+        ],
+        "groups": [
+            {
+                "group_id": group.group_id,
+                "section_id": group.section_id,
+                "title": group.title,
+                "card_ids": list(group.card_ids),
+                "created_at": group.created_at,
+                "vote_count": len(group.votes),
+            }
+            for group in retro.groups
         ],
         "action_items": [item.to_dict() for item in retro.action_items],
         "ai_summary": retro.ai_summary,
@@ -251,7 +275,20 @@ def _redact_retro_row(row: dict) -> dict:
                 "section_id": card.get("section_id"),
                 "text": card.get("text"),
                 "created_at": card.get("created_at"),
+                "group_id": card.get("group_id"),
                 "vote_count": card.get("vote_count", len(card.get("votes", []) or [])),
+            })
+        groups = []
+        for group in snapshot.get("groups") or []:
+            if not isinstance(group, dict):
+                continue
+            groups.append({
+                "group_id": group.get("group_id"),
+                "section_id": group.get("section_id"),
+                "title": group.get("title"),
+                "card_ids": list(group.get("card_ids") or []),
+                "created_at": group.get("created_at"),
+                "vote_count": group.get("vote_count", len(group.get("votes", []) or [])),
             })
         safe["snapshot"] = {
             key: value
@@ -259,6 +296,7 @@ def _redact_retro_row(row: dict) -> dict:
             if key not in {"participants"}
         }
         safe["snapshot"]["cards"] = cards
+        safe["snapshot"]["groups"] = groups
         safe["snapshot"]["participants_count"] = snapshot.get(
             "participants_count",
             len(snapshot.get("participants", {}) or {}),
@@ -288,9 +326,23 @@ def _retro_from_anonymized_snapshot(data: dict, retro_id: int) -> Retrospective:
             author_id=0,
             author_name="",
             created_at=str(card_data.get("created_at", "")),
+            group_id=(card_data.get("group_id") or None),
         )
         card.votes = set(range(int(card_data.get("vote_count", 0))))
         retro.cards.append(card)
+    for group_data in data.get("groups", []):
+        try:
+            group = RetroGroup(
+                group_id=str(group_data.get("group_id", "")),
+                section_id=str(group_data.get("section_id", "")),
+                title=str(group_data.get("title", "")),
+                card_ids=[str(card_id) for card_id in group_data.get("card_ids", [])],
+                created_at=str(group_data.get("created_at", "")),
+            )
+            group.votes = set(range(int(group_data.get("vote_count", 0))))
+            retro.groups.append(group)
+        except (TypeError, ValueError, KeyError):
+            continue
     for item_data in data.get("action_items", []):
         try:
             retro.action_items.append(RetroActionItem.from_dict(item_data))
@@ -306,9 +358,10 @@ def _build_retro_state(retro: Retrospective, viewer_id: Optional[int] = None) ->
     how many dots I have left). Authors are never exposed. Broadcasts pass
     ``viewer_id=None`` and clients keep their own dots locally.
     """
+    grouped_card_ids = {card_id for group in retro.groups for card_id in group.card_ids}
     ordered = list(retro.cards)
     if retro.phase in (PHASE_VOTING, PHASE_DISCUSSING, PHASE_DONE):
-        ordered.sort(key=lambda c: (-len(c.votes), c.created_at))
+        ordered.sort(key=lambda c: (-(len(c.votes) if c.group_id is None else 0), c.created_at))
     else:
         ordered.sort(key=lambda c: c.created_at)
 
@@ -317,14 +370,34 @@ def _build_retro_state(retro: Retrospective, viewer_id: Optional[int] = None) ->
             "card_id": c.card_id,
             "section_id": c.section_id,
             "text": c.text,
-            "vote_count": len(c.votes),
+            "group_id": c.group_id,
+            "is_grouped": c.card_id in grouped_card_ids,
+            "vote_count": len(c.votes) if c.card_id not in grouped_card_ids else 0,
         }
         for c in ordered
     ]
 
+    groups = [
+        {
+            "group_id": group.group_id,
+            "section_id": group.section_id,
+            "title": group.title,
+            "card_ids": list(group.card_ids),
+            "vote_count": len(group.votes),
+        }
+        for group in retro.groups
+    ]
+    if retro.phase in (PHASE_VOTING, PHASE_DISCUSSING, PHASE_DONE):
+        groups.sort(key=lambda g: (-int(g["vote_count"]), str(g["title"])))
+
     my_votes: list[str] = []
     if viewer_id is not None:
-        my_votes = [c.card_id for c in retro.cards if viewer_id in c.votes]
+        my_votes = [
+            c.card_id
+            for c in retro.cards
+            if c.card_id not in grouped_card_ids and viewer_id in c.votes
+        ]
+        my_votes.extend(g.group_id for g in retro.groups if viewer_id in g.votes)
 
     return {
         "retro_id": retro.retro_id,
@@ -336,6 +409,7 @@ def _build_retro_state(retro: Retrospective, viewer_id: Optional[int] = None) ->
         "default_section_seconds": retro.default_section_seconds,
         "sections": [s.to_dict() for s in retro.sections],
         "cards": cards,
+        "groups": groups,
         "action_items": [a.to_dict() for a in retro.action_items],
         "participants_count": len(retro.participants),
         "ai_summary": retro.ai_summary if retro.phase == PHASE_DONE else None,
@@ -492,6 +566,9 @@ async def retro_vote(body: RetroVoteRequest, request: Request) -> dict:
     retro_id = await _resolve_retro_token(redis_client, body.token)
     participant = await _load_participant(redis_client, body.token, body.participant_id)
     user_id = participant["user_id"]
+    target_id = body.target_id or body.card_id
+    if not target_id:
+        raise HTTPException(status_code=400, detail="Voting target is required")
     await enforce_rate_limit(
         redis_client,
         key=f"rl:retro_vote:token:{body.token}:user:{user_id}",
@@ -502,7 +579,7 @@ async def retro_vote(body: RetroVoteRequest, request: Request) -> dict:
 
     try:
         retro, _ = await repo_mutate(
-            request, retro_id, lambda r: r.toggle_vote(body.card_id, user_id)
+            request, retro_id, lambda r: r.toggle_vote(target_id, user_id, body.target_type)
         )
     except RetroError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
@@ -740,6 +817,71 @@ async def cms_retro_phase(
         raise HTTPException(status_code=400, detail="Unknown phase target")
     retro = await _manager_mutate(request, retro_id, mutate)
     await _audit(request, "cms.retro.phase", actor.username, "ok", {"retro_id": retro_id, "target": target})
+    return _build_retro_state(retro)
+
+
+@retro_router.post("/cms/retros/{retro_id}/groups")
+async def cms_retro_create_group(
+    retro_id: int,
+    body: RetroGroupRequest,
+    request: Request,
+    actor: CmsPrincipal = Depends(require_permission(PERM_RETRO_MANAGE)),
+) -> dict:
+    group_id = str(uuid.uuid4())
+
+    def _mutate(r: Retrospective):
+        return r.create_group(
+            group_id=group_id,
+            title=body.title,
+            card_ids=body.card_ids,
+            created_at=_now_iso(),
+        )
+
+    retro = await _manager_mutate(request, retro_id, _mutate)
+    await _audit(
+        request,
+        "cms.retro.group.create",
+        actor.username,
+        "ok",
+        {"retro_id": retro_id, "group_id": group_id, "cards": len(body.card_ids)},
+    )
+    return _build_retro_state(retro)
+
+
+@retro_router.patch("/cms/retros/{retro_id}/groups/{group_id}")
+async def cms_retro_rename_group(
+    retro_id: int,
+    group_id: str,
+    body: RetroGroupRenameRequest,
+    request: Request,
+    actor: CmsPrincipal = Depends(require_permission(PERM_RETRO_MANAGE)),
+) -> dict:
+    retro = await _manager_mutate(request, retro_id, lambda r: r.rename_group(group_id, body.title))
+    await _audit(
+        request,
+        "cms.retro.group.rename",
+        actor.username,
+        "ok",
+        {"retro_id": retro_id, "group_id": group_id},
+    )
+    return _build_retro_state(retro)
+
+
+@retro_router.delete("/cms/retros/{retro_id}/groups/{group_id}")
+async def cms_retro_ungroup(
+    retro_id: int,
+    group_id: str,
+    request: Request,
+    actor: CmsPrincipal = Depends(require_permission(PERM_RETRO_MANAGE)),
+) -> dict:
+    retro = await _manager_mutate(request, retro_id, lambda r: r.ungroup(group_id))
+    await _audit(
+        request,
+        "cms.retro.group.delete",
+        actor.username,
+        "ok",
+        {"retro_id": retro_id, "group_id": group_id},
+    )
     return _build_retro_state(retro)
 
 

@@ -23,7 +23,7 @@ projections never expose authors or per-user vote identities.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 
 # Phase constants — kept as plain strings so the JSON contract is stable
@@ -83,6 +83,7 @@ class RetroCard:
     author_id: int
     author_name: str
     created_at: str
+    group_id: Optional[str] = None
     votes: set[int] = field(default_factory=set)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -93,6 +94,7 @@ class RetroCard:
             "author_id": self.author_id,
             "author_name": self.author_name,
             "created_at": self.created_at,
+            "group_id": self.group_id,
             "votes": sorted(self.votes),
         }
 
@@ -104,6 +106,45 @@ class RetroCard:
             text=str(data.get("text", "")),
             author_id=int(data.get("author_id", 0)),
             author_name=str(data.get("author_name", "")),
+            created_at=str(data.get("created_at", "")),
+            group_id=(data.get("group_id") or None),
+            votes={int(uid) for uid in data.get("votes", [])},
+        )
+
+
+@dataclass
+class RetroGroup:
+    """Manager-created cluster of similar cards.
+
+    Once cards are in a group, participants vote for the group instead of
+    individual cards inside it. The source cards remain intact for discussion
+    and AI context.
+    """
+
+    group_id: str
+    section_id: str
+    title: str
+    card_ids: List[str]
+    created_at: str
+    votes: set[int] = field(default_factory=set)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "group_id": self.group_id,
+            "section_id": self.section_id,
+            "title": self.title,
+            "card_ids": list(self.card_ids),
+            "created_at": self.created_at,
+            "votes": sorted(self.votes),
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "RetroGroup":
+        return cls(
+            group_id=str(data["group_id"]),
+            section_id=str(data["section_id"]),
+            title=str(data.get("title", "")),
+            card_ids=[str(card_id) for card_id in data.get("card_ids", [])],
             created_at=str(data.get("created_at", "")),
             votes={int(uid) for uid in data.get("votes", [])},
         )
@@ -170,6 +211,7 @@ class Retrospective:
     section_deadline: Optional[str] = None
     participants: Dict[int, RetroParticipant] = field(default_factory=dict)
     cards: List[RetroCard] = field(default_factory=list)
+    groups: List[RetroGroup] = field(default_factory=list)
     action_items: List[RetroActionItem] = field(default_factory=list)
     ai_summary: Optional[Dict[str, Any]] = None
     version: int = 0
@@ -189,13 +231,27 @@ class Retrospective:
         return [card for card in self.cards if card.section_id == section_id]
 
     def votes_used_by(self, user_id: int) -> int:
-        return sum(1 for card in self.cards if user_id in card.votes)
+        card_votes = sum(1 for card in self.cards if card.group_id is None and user_id in card.votes)
+        group_votes = sum(1 for group in self.groups if user_id in group.votes)
+        return card_votes + group_votes
 
     def find_card(self, card_id: str) -> Optional[RetroCard]:
         for card in self.cards:
             if card.card_id == card_id:
                 return card
         return None
+
+    def find_group(self, group_id: str) -> Optional[RetroGroup]:
+        for group in self.groups:
+            if group.group_id == group_id:
+                return group
+        return None
+
+    def group_for_card(self, card_id: str) -> Optional[RetroGroup]:
+        card = self.find_card(card_id)
+        if card is None or card.group_id is None:
+            return None
+        return self.find_group(card.group_id)
 
     def bump_version(self) -> None:
         self.version += 1
@@ -236,24 +292,103 @@ class Retrospective:
         self.bump_version()
         return card
 
-    def toggle_vote(self, card_id: str, user_id: int) -> RetroCard:
-        """Place or remove a dot. Enforces the per-person vote budget."""
+    def toggle_vote(self, target_id: str, user_id: int, target_type: str = "card") -> Union[RetroCard, RetroGroup]:
+        """Place or remove a dot on a card or group.
+
+        Grouped cards are not votable directly; their group is the voting
+        target. The per-person budget is shared across card and group targets.
+        """
         if self.phase != PHASE_VOTING:
             raise RetroError("Голосование сейчас недоступно", status_code=409)
-        card = self.find_card(card_id)
-        if card is None:
-            raise RetroError("Карточка не найдена", status_code=404)
-        if user_id in card.votes:
-            card.votes.discard(user_id)
+        if target_type == "group":
+            target = self.find_group(target_id)
+            if target is None:
+                raise RetroError("Группа не найдена", status_code=404)
+        else:
+            target = self.find_card(target_id)
+            if target is None:
+                raise RetroError("Карточка не найдена", status_code=404)
+            if target.group_id is not None:
+                raise RetroError("Голосуйте за группу, в которую входит карточка", status_code=409)
+
+        if user_id in target.votes:
+            target.votes.discard(user_id)
             self.bump_version()
-            return card
+            return target
         if self.votes_used_by(user_id) >= self.votes_per_person:
             raise RetroError(
                 f"Лимит голосов исчерпан ({self.votes_per_person})", status_code=409
             )
-        card.votes.add(user_id)
+        target.votes.add(user_id)
         self.bump_version()
-        return card
+        return target
+
+    def create_group(self, *, group_id: str, title: str, card_ids: List[str], created_at: str) -> RetroGroup:
+        if self.phase == PHASE_DONE:
+            raise RetroError("Ретро уже завершено", status_code=409)
+        clean = title.strip()
+        if not clean:
+            raise RetroError("Название группы не может быть пустым")
+        unique_ids = list(dict.fromkeys(card_ids))
+        if len(unique_ids) < 2:
+            raise RetroError("Выберите минимум две карточки для группы")
+
+        cards: List[RetroCard] = []
+        section_id: Optional[str] = None
+        migrated_votes: set[int] = set()
+        for card_id in unique_ids:
+            card = self.find_card(card_id)
+            if card is None:
+                raise RetroError("Карточка не найдена", status_code=404)
+            if card.group_id is not None:
+                raise RetroError("Карточка уже входит в группу", status_code=409)
+            if section_id is None:
+                section_id = card.section_id
+            elif card.section_id != section_id:
+                raise RetroError("Группировать можно карточки только из одной секции", status_code=409)
+            migrated_votes.update(card.votes)
+            cards.append(card)
+
+        group = RetroGroup(
+            group_id=group_id,
+            section_id=section_id or "",
+            title=clean[:120],
+            card_ids=unique_ids,
+            created_at=created_at,
+            votes=migrated_votes,
+        )
+        for card in cards:
+            card.group_id = group_id
+            card.votes.clear()
+        self.groups.append(group)
+        self.bump_version()
+        return group
+
+    def rename_group(self, group_id: str, title: str) -> RetroGroup:
+        if self.phase == PHASE_DONE:
+            raise RetroError("Ретро уже завершено", status_code=409)
+        group = self.find_group(group_id)
+        if group is None:
+            raise RetroError("Группа не найдена", status_code=404)
+        clean = title.strip()
+        if not clean:
+            raise RetroError("Название группы не может быть пустым")
+        group.title = clean[:120]
+        self.bump_version()
+        return group
+
+    def ungroup(self, group_id: str) -> bool:
+        if self.phase == PHASE_DONE:
+            raise RetroError("Ретро уже завершено", status_code=409)
+        group = self.find_group(group_id)
+        if group is None:
+            raise RetroError("Группа не найдена", status_code=404)
+        for card in self.cards:
+            if card.group_id == group_id:
+                card.group_id = None
+        self.groups = [item for item in self.groups if item.group_id != group_id]
+        self.bump_version()
+        return True
 
     def add_action_item(self, *, item_id: str, text: str, assignee: Optional[str], created_at: str) -> RetroActionItem:
         if self.phase != PHASE_DISCUSSING:
@@ -350,6 +485,7 @@ class RetrospectiveFactory:
             "section_deadline": retro.section_deadline,
             "participants": {str(uid): p.to_dict() for uid, p in retro.participants.items()},
             "cards": [c.to_dict() for c in retro.cards],
+            "groups": [g.to_dict() for g in retro.groups],
             "action_items": [a.to_dict() for a in retro.action_items],
             "ai_summary": retro.ai_summary,
             "version": retro.version,
@@ -382,6 +518,27 @@ class RetrospectiveFactory:
                 cards.append(RetroCard.from_dict(card_data))
             except (TypeError, ValueError, KeyError):
                 continue
+        groups = []
+        for group_data in data.get("groups", []):
+            try:
+                group = RetroGroup.from_dict(group_data)
+            except (TypeError, ValueError, KeyError):
+                continue
+            existing_card_ids = {card.card_id for card in cards}
+            group.card_ids = [card_id for card_id in group.card_ids if card_id in existing_card_ids]
+            if group.card_ids:
+                groups.append(group)
+        group_ids = {group.group_id for group in groups}
+        card_group_id = {
+            card_id: group.group_id
+            for group in groups
+            for card_id in group.card_ids
+        }
+        for card in cards:
+            if card.card_id in card_group_id:
+                card.group_id = card_group_id[card.card_id]
+            if card.group_id not in group_ids:
+                card.group_id = None
         action_items = []
         for action_data in data.get("action_items", []):
             try:
@@ -399,6 +556,7 @@ class RetrospectiveFactory:
             section_deadline=data.get("section_deadline"),
             participants=participants,
             cards=cards,
+            groups=groups,
             action_items=action_items,
             ai_summary=data.get("ai_summary"),
             version=int(data.get("version", 0)),
