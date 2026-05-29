@@ -542,7 +542,7 @@ function RetroCockpit({
   onBack: () => void;
 }) {
   const toast = useToast();
-  const { state, error } = useRetro(token, { participant: false });
+  const { state, error, applyState } = useRetro(token, { participant: false });
   const [busy, setBusy] = useState(false);
   const [ai, setAi] = useState<RetroAiSummary | null>(initialAi);
   const [now, setNow] = useState(Date.now());
@@ -556,10 +556,11 @@ function RetroCockpit({
 
   const inviteUrl = useMemo(() => `${window.location.origin}/r/${token}`, [token]);
 
-  async function run(action: () => Promise<unknown>, okMsg?: string) {
+  async function run(action: () => Promise<RetroLiveState>, okMsg?: string) {
     setBusy(true);
     try {
-      await action();
+      const next = await action();
+      applyState(next);
       if (okMsg) toast.success(okMsg);
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Ошибка";
@@ -615,7 +616,8 @@ function RetroCockpit({
     if (!title || selectedCardIds.size < 2) return;
     setBusy(true);
     try {
-      await cmsRetroApi.createGroup(retroId, { title, card_ids: [...selectedCardIds] });
+      const next = await cmsRetroApi.createGroup(retroId, { title, card_ids: [...selectedCardIds] });
+      applyState(next);
       setSelectedCardIds(new Set());
       setGroupTitle("");
       toast.success("Группа создана");

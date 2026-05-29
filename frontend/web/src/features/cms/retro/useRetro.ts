@@ -10,6 +10,7 @@ import {
   canAddToSection,
   createMockRetroLiveState,
   isRetroMockEnabled,
+  mergeRetroState,
   type RetroLiveState,
   type RetroPhase,
 } from "./retroLogic";
@@ -21,6 +22,8 @@ interface UseRetroReturn {
   /** Cards the current participant has voted on (authoritative, local). */
   myVotes: Set<string>;
   votesRemaining: number;
+  /** Apply an authoritative HTTP snapshot (manager cockpit mutations). */
+  applyState: (next: RetroLiveState) => void;
   join: (name: string, role: ParticipantRole) => Promise<void>;
   addCard: (sectionId: string, text: string) => Promise<boolean>;
   toggleVote: (targetId: string, targetType?: "card" | "group") => Promise<boolean>;
@@ -79,6 +82,13 @@ export function useRetro(
   const autoJoinStarted = useRef(false);
   const participantIdRef = useRef<string | null>(participantId);
   participantIdRef.current = participantId;
+
+  const applyState = useCallback((incoming: RetroLiveState) => {
+    setState((prev) => mergeRetroState(prev, incoming, { preserveMyVotes: Boolean(participantIdRef.current) }));
+    if (participantIdRef.current && incoming.my_votes?.length) {
+      setMyVotes(new Set(incoming.my_votes));
+    }
+  }, []);
 
   // Seed once from the HTTP state endpoint, then rely on the WebSocket.
   useEffect(() => {
@@ -157,8 +167,13 @@ export function useRetro(
         const msg = JSON.parse(ev.data as string);
         if (msg.type === "ping") return;
         if (msg.type === "retro_state") {
-          // Broadcast carries aggregate counts only; keep our local dots.
-          setState(msg.state as RetroLiveState);
+          const incoming = msg.state as RetroLiveState;
+          setState((prev) =>
+            mergeRetroState(prev, incoming, { preserveMyVotes: Boolean(participantIdRef.current) }),
+          );
+          if (participantIdRef.current && incoming.my_votes?.length) {
+            setMyVotes(new Set(incoming.my_votes));
+          }
           reconnectDelay.current = 1000;
         }
       } catch {
@@ -339,7 +354,18 @@ export function useRetro(
   const phase: RetroPhase | "joining" =
     options.participant && participantId === null ? "joining" : state?.phase ?? "lobby";
 
-  return { state, phase, participantId, myVotes, votesRemaining, join, addCard, toggleVote, error };
+  return {
+    state,
+    phase,
+    participantId,
+    myVotes,
+    votesRemaining,
+    applyState,
+    join,
+    addCard,
+    toggleVote,
+    error,
+  };
 }
 
 export function identityToRole(identity: WebParticipantIdentity | null): ParticipantRole | null {

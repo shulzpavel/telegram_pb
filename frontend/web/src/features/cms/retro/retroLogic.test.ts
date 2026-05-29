@@ -4,6 +4,7 @@ import {
   cardsBySection,
   formatCountdown,
   isCountdownExpired,
+  mergeRetroState,
   nextSectionId,
   phaseLabel,
   type RetroLiveState,
@@ -71,6 +72,38 @@ describe("nextSectionId", () => {
   });
   it("returns null for an empty list", () => {
     expect(nextSectionId([], "a")).toBeNull();
+  });
+});
+
+describe("mergeRetroState", () => {
+  it("ignores older snapshots", () => {
+    const current = makeState({ version: 5, active_section_id: "b" });
+    const stale = makeState({ version: 4, active_section_id: null });
+    expect(mergeRetroState(current, stale)).toBe(current);
+  });
+  it("applies newer snapshots", () => {
+    const current = makeState({ version: 4, active_section_id: null });
+    const newer = makeState({ version: 5, active_section_id: "b" });
+    expect(mergeRetroState(current, newer).active_section_id).toBe("b");
+  });
+  it("preserves local vote hints on anonymous broadcasts", () => {
+    const current = makeState({
+      version: 3,
+      my_votes: ["c1"],
+      my_votes_used: 1,
+      my_votes_remaining: 4,
+    });
+    const broadcast = makeState({
+      version: 4,
+      my_votes: [],
+      my_votes_used: 0,
+      my_votes_remaining: 5,
+    });
+    const merged = mergeRetroState(current, broadcast, { preserveMyVotes: true });
+    expect(merged.version).toBe(4);
+    expect(merged.my_votes).toEqual(["c1"]);
+    expect(merged.my_votes_used).toBe(1);
+    expect(merged.my_votes_remaining).toBe(4);
   });
 });
 

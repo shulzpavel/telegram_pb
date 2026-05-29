@@ -248,6 +248,56 @@ def test_full_retro_flow(client):
     assert "author_id" not in detail.json()["snapshot"]["cards"][0]
 
 
+def test_close_section_then_open_next_section(client):
+    create = client.post("/api/v1/cms/retros", json={
+        "title": "sections",
+        "config": {
+            "sections": [
+                {"section_id": "went_well", "title": "Good"},
+                {"section_id": "pain_points", "title": "Pain"},
+            ],
+            "votes_per_person": 3,
+            "default_section_seconds": 0,
+        },
+    })
+    retro_id = create.json()["id"]
+    token = client.post(f"/api/v1/cms/retros/{retro_id}/invite").json()["token"]
+    pid = client.post("/api/v1/retro/join", json={
+        "token": token, "name": "facilitator@betboom.com", "role": "backend",
+    }).json()["participant_id"]
+
+    opened = client.post(
+        f"/api/v1/cms/retros/{retro_id}/open-section",
+        json={"section_id": "went_well"},
+    )
+    assert opened.json()["active_section_id"] == "went_well"
+    client.post("/api/v1/retro/card", json={
+        "token": token, "participant_id": pid, "section_id": "went_well", "text": "ship fast",
+    })
+
+    paused = client.post(f"/api/v1/cms/retros/{retro_id}/close-section")
+    assert paused.status_code == 200
+    assert paused.json()["phase"] == "collecting"
+    assert paused.json()["active_section_id"] is None
+
+    blocked = client.post("/api/v1/retro/card", json={
+        "token": token, "participant_id": pid, "section_id": "pain_points", "text": "blocked",
+    })
+    assert blocked.status_code == 409
+
+    resumed = client.post(
+        f"/api/v1/cms/retros/{retro_id}/open-section",
+        json={"section_id": "pain_points"},
+    )
+    assert resumed.status_code == 200
+    assert resumed.json()["active_section_id"] == "pain_points"
+
+    card = client.post("/api/v1/retro/card", json={
+        "token": token, "participant_id": pid, "section_id": "pain_points", "text": "slow ci",
+    })
+    assert card.status_code == 200
+
+
 def test_join_rejects_bad_email(client):
     create = client.post("/api/v1/cms/retros", json={"title": "r", "config": {"sections": []}})
     retro_id = create.json()["id"]

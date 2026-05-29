@@ -93,6 +93,43 @@ export function phaseLabel(phase: RetroPhase): string {
   return RETRO_PHASE_LABELS[phase] ?? phase;
 }
 
+/** Ignore out-of-order WebSocket snapshots after a newer HTTP mutation. */
+export function shouldApplyRetroState(
+  current: RetroLiveState | null,
+  incoming: RetroLiveState,
+): boolean {
+  if (!current) return true;
+  return incoming.version >= current.version;
+}
+
+/**
+ * Apply a server snapshot while optionally keeping the viewer's vote hints
+ * from anonymous pub/sub broadcasts (``my_votes`` is empty there).
+ */
+export function mergeRetroState(
+  current: RetroLiveState | null,
+  incoming: RetroLiveState,
+  options?: { preserveMyVotes?: boolean },
+): RetroLiveState {
+  if (current && !shouldApplyRetroState(current, incoming)) {
+    return current;
+  }
+  if (
+    options?.preserveMyVotes &&
+    current &&
+    current.my_votes.length > 0 &&
+    incoming.my_votes.length === 0
+  ) {
+    return {
+      ...incoming,
+      my_votes: current.my_votes,
+      my_votes_used: current.my_votes_used,
+      my_votes_remaining: current.my_votes_remaining,
+    };
+  }
+  return incoming;
+}
+
 export const DEFAULT_RETRO_SECTIONS: RetroSectionDef[] = [
   { section_id: "went_well", title: "Что прошло хорошо" },
   { section_id: "pain_points", title: "Что мешало" },
