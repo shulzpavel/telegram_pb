@@ -301,6 +301,7 @@ function emptyInputs(): PlannerInputs {
     tracks: makeDefaultTracks(),
     roles: makeDefaultRoles(),
     velocityHistory: makeDefaultHistory(),
+    actualByTrack: {},
   };
 }
 
@@ -343,6 +344,19 @@ function payloadToInputs(payload: SprintPlanPayload): PlannerInputs {
   const fallbackTrackId = tracks[0]?.id ?? "back";
   const knownIds = new Set(tracks.map((t) => t.id));
 
+  // Per-track actuals — keep only entries that match an existing track.
+  // Plans without actuals (older payloads) start with an empty map; the
+  // manager fills it in at sprint close.
+  const actualByTrack: Record<string, number> = {};
+  if (payload.actual_by_track) {
+    for (const t of tracks) {
+      const v = payload.actual_by_track[t.id];
+      if (typeof v === "number" && Number.isFinite(v) && v >= 0) {
+        actualByTrack[t.id] = v;
+      }
+    }
+  }
+
   return {
     workingDays: payload.working_days,
     bufferPercent: payload.buffer_percent,
@@ -359,6 +373,7 @@ function payloadToInputs(payload: SprintPlanPayload): PlannerInputs {
       headcount: role.headcount,
       absences: role.absences,
     })),
+    actualByTrack,
   };
 }
 
@@ -427,9 +442,19 @@ function inputsToPayload(
       absences: role.absences,
       track_id: role.trackId,
     })),
+    actual_by_track: serializeActualByTrack(inputs),
     notes,
     result_summary: summarizePlannerResult(result),
   };
+}
+
+function serializeActualByTrack(inputs: PlannerInputs): Record<string, number> | undefined {
+  const out: Record<string, number> = {};
+  for (const t of inputs.tracks) {
+    const v = inputs.actualByTrack?.[t.id];
+    if (typeof v === "number" && Number.isFinite(v) && v >= 0) out[t.id] = v;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
 }
 
 function PlannerEditorPage({
@@ -722,6 +747,20 @@ function PlannerForm({
     onInputs({ ...inputs, roles: inputs.roles.filter((_, i) => i !== index) });
   }
 
+  // ----- actual mutators -----
+  function setActualForTrack(trackId: string, value: number | null) {
+    const next = { ...(inputs.actualByTrack ?? {}) };
+    if (value === null) {
+      delete next[trackId];
+    } else {
+      next[trackId] = value;
+    }
+    onInputs({ ...inputs, actualByTrack: next });
+  }
+  function clearAllActuals() {
+    onInputs({ ...inputs, actualByTrack: {} });
+  }
+
   // ----- track mutators -----
   function addTrack() {
     // Random opaque id keeps every keystroke in the label field stable —
@@ -909,6 +948,14 @@ function PlannerForm({
         </div>
       </FormCard>
 
+      <FactCard
+        tracks={inputs.tracks}
+        actualByTrack={inputs.actualByTrack}
+        onChange={setActualForTrack}
+        onClear={clearAllActuals}
+        disabled={disabled}
+      />
+
       <FormCard
         title="Команда по ролям"
         description="Каждой роли — один трек. Capacity роли (человек × рабочие дни − отсутствия) пойдёт в план соответствующего трека."
@@ -1015,6 +1062,85 @@ function FormCard({
         {action ?? null}
       </div>
       {children}
+    </div>
+  );
+}
+
+/**
+ * Outcome capture for a closed sprint. Visually accented (green border /
+ * tint) so it reads as a separate ritual from the planning inputs above —
+ * the manager fills it in after the sprint demo, not during planning.
+ */
+function FactCard({
+  tracks,
+  actualByTrack,
+  onChange,
+  onClear,
+  disabled,
+}: {
+  tracks: PlannerInputs["tracks"];
+  actualByTrack: PlannerInputs["actualByTrack"];
+  onChange: (trackId: string, value: number | null) => void;
+  onClear: () => void;
+  disabled: boolean;
+}) {
+  const hasAny = Object.values(actualByTrack ?? {}).some(
+    (v) => typeof v === "number" && Number.isFinite(v),
+  );
+  return (
+    <div className="rounded-lg border border-green/30 bg-green/5 p-4 shadow-card">
+      <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+        <div className="flex items-start gap-2">
+          <span
+            aria-hidden="true"
+            className="mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-green/15 text-green"
+          >
+            <CheckIcon />
+          </span>
+          <div>
+            <h3 className="text-sm font-bold text-ink">Факт по итогам спринта</h3>
+            <p className="mt-1 text-xs text-ink3">
+              Заполняет менеджер в конце спринта — сколько SP реально закрыли по каждому треку.
+              Сохраняется в плане для истории и сравнения с рекомендацией.
+            </p>
+          </div>
+        </div>
+        {!disabled && hasAny ? (
+          <Button size="sm" variant="ghost" onClick={onClear}>
+            Очистить факт
+          </Button>
+        ) : null}
+      </div>
+
+      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+        {tracks.map((track) => {
+          const raw = actualByTrack?.[track.id];
+          const valueStr = typeof raw === "number" && Number.isFinite(raw) ? String(raw) : "";
+          return (
+            <TextField
+              key={track.id}
+              label={`Факт ${track.label}, SP`}
+              type="number"
+              inputMode="decimal"
+              value={valueStr}
+              min={0}
+              step={1}
+              placeholder="—"
+              disabled={disabled}
+              onChange={(event) => {
+                const text = event.target.value.trim();
+                if (text === "") {
+                  onChange(track.id, null);
+                  return;
+                }
+                const next = Number.parseFloat(text);
+                onChange(track.id, Number.isFinite(next) && next >= 0 ? next : null);
+              }}
+              reserveMessageSpace={false}
+            />
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -1149,6 +1275,8 @@ function ResultPanel({ result }: { result: PlannerResult }) {
         </p>
       </div>
 
+      {result.hasActuals ? <ActualVsPlanCard result={result} hidden={hidden} /> : null}
+
       <div className="rounded-lg border border-line bg-surface p-4 shadow-card">
         <h3 className="text-sm font-bold text-ink">Capacity команды, чел-дней</h3>
         <p className="mt-1 text-xs text-ink3">
@@ -1275,6 +1403,77 @@ function CheckIcon() {
     >
       <path d="M4 10.5L8 14.5L16 6" />
     </svg>
+  );
+}
+
+/**
+ * Plan vs actual summary. Only rendered once at least one track has an
+ * `actualSp` entry. Tracks hidden via the visibility toggles in the
+ * recommendation panel are also hidden here, so the user always sees a
+ * coherent slice.
+ */
+function ActualVsPlanCard({
+  result,
+  hidden,
+}: {
+  result: PlannerResult;
+  hidden: Set<string>;
+}) {
+  const visible = result.tracks.filter((t) => !hidden.has(t.id) && t.actualSp !== null);
+  if (visible.length === 0) {
+    return null;
+  }
+  const totalPlan = visible.reduce((acc, t) => acc + t.planLimit, 0);
+  const totalActual = visible.reduce((acc, t) => acc + (t.actualSp ?? 0), 0);
+  const totalRatio = totalPlan > 0 ? totalActual / totalPlan : 0;
+
+  return (
+    <div className="rounded-lg border border-green/30 bg-green/5 p-4 shadow-card">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <p className="text-[11px] font-bold uppercase tracking-wide text-green">
+          Факт по итогам спринта
+        </p>
+        <p className="text-[11px] text-ink3">
+          Σ {formatSp(totalActual)} / {formatSp(totalPlan)} SP
+          {totalPlan > 0 ? ` · ${Math.round(totalRatio * 100)}% от плана` : ""}
+        </p>
+      </div>
+      <div className="mt-2 grid gap-3 sm:grid-cols-2">
+        {visible.map((track) => (
+          <ActualTrackCard key={track.id} track={track} />
+        ))}
+      </div>
+      <p className="mt-3 text-xs text-ink3">
+        Сравнение факта с рекомендацией. Это число сохраняется в плане — пригодится для следующего
+        спринта (можно скопировать в «Историю Velocity»).
+      </p>
+    </div>
+  );
+}
+
+function ActualTrackCard({ track }: { track: PlannerTrackResult }) {
+  const actual = track.actualSp ?? 0;
+  const delta = track.deltaSp;
+  const ratio = track.deltaRatio;
+  const tone =
+    ratio >= 0.9 ? "text-green" : ratio >= 0.75 ? "text-ink" : "text-amber";
+  const deltaLabel =
+    delta === 0
+      ? "точно по плану"
+      : delta > 0
+        ? `+${formatSp(delta)} к плану`
+        : `${formatSp(delta)} от плана`;
+  return (
+    <div className="rounded-md border border-line bg-surface px-3 py-2">
+      <p className="text-[11px] font-bold uppercase tracking-wide text-ink3">{track.label}</p>
+      <p className={`mt-0.5 text-2xl font-bold leading-tight ${tone}`}>
+        {formatSp(actual)} SP
+      </p>
+      <p className="mt-0.5 text-xs text-ink3">
+        план {formatSp(track.planLimit)} · {deltaLabel}
+        {track.planLimit > 0 ? ` · ${Math.round(ratio * 100)}%` : ""}
+      </p>
+    </div>
   );
 }
 

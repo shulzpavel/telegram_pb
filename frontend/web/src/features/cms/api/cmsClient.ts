@@ -278,6 +278,8 @@ export interface SprintPlanPayload {
   tracks?: SprintPlanTrack[];
   velocity_history: SprintPlanHistoryEntry[];
   roles: SprintPlanRoleInput[];
+  /** Actual closed SP per track, entered by the manager at sprint end. */
+  actual_by_track?: Record<string, number>;
   notes: string;
   result_summary?: string | null;
 }

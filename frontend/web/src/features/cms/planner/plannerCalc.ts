@@ -73,6 +73,13 @@ export interface PlannerInputs {
   roles: PlannerRoleInput[];
   /** Last 3–5 closed sprints. Average is taken across all entries with sp > 0. */
   velocityHistory: PlannerHistoryEntry[];
+  /**
+   * Actual SP closed during this sprint, per track. Entered at sprint
+   * close — empty / undefined while the sprint is still in flight.
+   * Mapped to PlannerTrackResult.actualSp / deltaSp / deltaPercent so
+   * the result panel can compare plan vs reality.
+   */
+  actualByTrack: Record<string, number>;
 }
 
 export interface PlannerRoleBreakdown {
@@ -113,6 +120,15 @@ export interface PlannerTrackResult {
   reserveSp: number;
   /** True when at least one role is pinned to this track. */
   hasRoles: boolean;
+  /**
+   * Actual SP the team closed on this track at sprint end. `null` when
+   * the value hasn't been entered yet (sprint still open).
+   */
+  actualSp: number | null;
+  /** actualSp − planLimit. Positive = over plan, negative = under plan. */
+  deltaSp: number;
+  /** actualSp / planLimit as a 0..∞ ratio (1 = exactly on plan). 0 when planLimit is 0. */
+  deltaRatio: number;
 }
 
 export interface PlannerResult {
@@ -130,6 +146,10 @@ export interface PlannerResult {
   totalPlanLimit: number;
   /** Σ reserveSp across tracks — overall buffer carved out. */
   totalReserveSp: number;
+  /** Σ actualSp across tracks that have an actual value. `null` if nobody entered anything. */
+  totalActualSp: number | null;
+  /** True when at least one track has an actual SP entry. */
+  hasActuals: boolean;
   /** Per-role breakdown for the detailed-capacity table. */
   roles: PlannerRoleBreakdown[];
   /** Role with the smallest netCapacity. `null` when no roles defined. */
@@ -297,6 +317,16 @@ export function computePlannerResult(inputs: PlannerInputs): PlannerResult {
     const planLimit = round1(adjustedVelocity * (1 - buffer / 100));
     const reserveSp = round1(Math.max(0, adjustedVelocity - planLimit));
 
+    // Distinguish "haven't entered yet" (null) from "entered zero" so the
+    // UI can render a placeholder vs an honest "0 SP closed".
+    const rawActual = inputs.actualByTrack?.[track.id];
+    const actualSp =
+      typeof rawActual === "number" && Number.isFinite(rawActual) && rawActual >= 0
+        ? round1(rawActual)
+        : null;
+    const deltaSp = actualSp !== null ? round1(actualSp - planLimit) : 0;
+    const deltaRatio = actualSp !== null && planLimit > 0 ? round1((actualSp / planLimit) * 100) / 100 : 0;
+
     return {
       id: track.id,
       label: track.label,
@@ -311,11 +341,18 @@ export function computePlannerResult(inputs: PlannerInputs): PlannerResult {
       planLimit,
       reserveSp,
       hasRoles: agg.hasRoles,
+      actualSp,
+      deltaSp,
+      deltaRatio,
     };
   });
 
   const totalPlanLimit = round1(trackResults.reduce((acc, t) => acc + t.planLimit, 0));
   const totalReserveSp = round1(trackResults.reduce((acc, t) => acc + t.reserveSp, 0));
+  const actualEntries = trackResults.filter((t) => t.actualSp !== null);
+  const totalActualSp = actualEntries.length > 0
+    ? round1(actualEntries.reduce((acc, t) => acc + (t.actualSp ?? 0), 0))
+    : null;
 
   return {
     totalBaseCapacity: roles.totalBase,
@@ -325,6 +362,8 @@ export function computePlannerResult(inputs: PlannerInputs): PlannerResult {
     tracks: trackResults,
     totalPlanLimit,
     totalReserveSp,
+    totalActualSp,
+    hasActuals: actualEntries.length > 0,
     roles: roles.rows,
     bottleneckRole: roles.bottleneck,
     usedBootstrapVelocity: everyVelocityEmpty && tracksWithRoles.length > 0,

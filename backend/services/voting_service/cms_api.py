@@ -223,6 +223,9 @@ class SprintPlanPayload(BaseModel):
     tracks: Optional[list[SprintPlanTrack]] = Field(default=None, max_length=20)
     velocity_history: list[SprintPlanHistoryEntry] = Field(default_factory=list, max_length=20)
     roles: list[SprintPlanRoleInput] = Field(default_factory=list, max_length=30)
+    # Actual SP closed during this sprint, per track. Entered by the
+    # manager at sprint end (compare with the recommended plan).
+    actual_by_track: Optional[dict[str, float]] = Field(default=None)
     notes: str = Field(default="", max_length=2000)
     result_summary: Optional[str] = Field(default=None, max_length=200)
 

@@ -35,6 +35,7 @@ function makeInputs(overrides: Partial<PlannerInputs> = {}): PlannerInputs {
         storyPointsByTrack: { back: 60, front: 40, qa: 30 },
       },
     ],
+    actualByTrack: {},
     ...overrides,
   };
 }
@@ -203,6 +204,62 @@ describe("computePlannerResult — per-track math", () => {
   });
 });
 
+describe("computePlannerResult — actual vs plan", () => {
+  it("returns null actualSp + zero totals when nothing entered", () => {
+    const result = computePlannerResult(makeInputs());
+    expect(result.hasActuals).toBe(false);
+    expect(result.totalActualSp).toBeNull();
+    for (const track of result.tracks) {
+      expect(track.actualSp).toBeNull();
+      expect(track.deltaSp).toBe(0);
+      expect(track.deltaRatio).toBe(0);
+    }
+  });
+
+  it("computes delta and ratio for tracks with an actual value", () => {
+    const result = computePlannerResult(
+      makeInputs({
+        actualByTrack: { back: 50, front: 30 }, // qa omitted on purpose
+      }),
+    );
+    const back = result.tracks.find((t) => t.id === "back")!;
+    expect(back.actualSp).toBe(50);
+    // back.planLimit ≈ 44.4 → delta ≈ +5.6, ratio ≈ 1.13
+    expect(back.deltaSp).toBeCloseTo(5.6, 1);
+    expect(back.deltaRatio).toBeCloseTo(1.13, 2);
+
+    const qa = result.tracks.find((t) => t.id === "qa")!;
+    expect(qa.actualSp).toBeNull();
+    expect(qa.deltaSp).toBe(0);
+
+    expect(result.hasActuals).toBe(true);
+    expect(result.totalActualSp).toBe(80);
+  });
+
+  it("treats zero as an entered value (under-plan), not as missing", () => {
+    const result = computePlannerResult(
+      makeInputs({ actualByTrack: { back: 0, front: 0, qa: 0 } }),
+    );
+    expect(result.hasActuals).toBe(true);
+    expect(result.totalActualSp).toBe(0);
+    for (const track of result.tracks) {
+      expect(track.actualSp).toBe(0);
+      expect(track.deltaSp).toBe(-track.planLimit);
+    }
+  });
+
+  it("ignores negative / NaN garbage in actualByTrack", () => {
+    const result = computePlannerResult(
+      makeInputs({
+        actualByTrack: { back: -10, front: Number.NaN, qa: 25 },
+      }),
+    );
+    expect(result.tracks.find((t) => t.id === "back")!.actualSp).toBeNull();
+    expect(result.tracks.find((t) => t.id === "front")!.actualSp).toBeNull();
+    expect(result.tracks.find((t) => t.id === "qa")!.actualSp).toBe(25);
+  });
+});
+
 describe("summarizePlannerResult", () => {
   it("renders one segment per non-empty track with the global buffer", () => {
     const result = computePlannerResult(makeInputs());
@@ -237,6 +294,7 @@ describe("summarizePlannerResult", () => {
       tracks: [],
       roles: [],
       velocityHistory: [],
+      actualByTrack: {},
     });
     expect(summarizePlannerResult(result)).toBe("Нет данных");
   });
