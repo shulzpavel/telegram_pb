@@ -62,6 +62,13 @@ from services.voting_service.ws_manager import redis_pubsub_listener
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_RETRO_SECTIONS = (
+    ("went_well", "Что прошло хорошо"),
+    ("pain_points", "Что мешало"),
+    ("improvements", "Что улучшим"),
+    ("experiments", "Идеи и эксперименты"),
+)
+
 retro_router = APIRouter()
 
 RETRO_TOKEN_TTL = 8 * 3600
@@ -187,11 +194,7 @@ def _retro_from_config(retro_id: int, title: str, config: dict) -> Retrospective
         seen.add(sid)
         sections.append(RetroSection(section_id=sid, title=str(raw.get("title", "")).strip() or sid))
     if not sections:
-        sections = [
-            RetroSection(section_id="task", title="По задаче"),
-            RetroSection(section_id="sprint", title="По итогам спринта"),
-            RetroSection(section_id="process", title="По процессам"),
-        ]
+        sections = [RetroSection(section_id=section_id, title=title) for section_id, title in DEFAULT_RETRO_SECTIONS]
     return Retrospective(
         retro_id=retro_id,
         title=title,

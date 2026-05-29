@@ -5,6 +5,7 @@ import {
   Alert,
   Badge,
   Button,
+  ConfirmDialog,
   EmptyState,
   SelectField,
   Spinner,
@@ -13,7 +14,13 @@ import {
   useToast,
 } from "../../../design-system";
 import { ApiError } from "../../../shared/api/http";
-import { InlineError, SectionHeader } from "../components/CmsPrimitives";
+import {
+  DataTable,
+  InlineError,
+  MobileRecordCard,
+  MobileRecordField,
+  SectionHeader,
+} from "../components/CmsPrimitives";
 import {
   cmsRetroApi,
   type RetroConfig,
@@ -21,8 +28,9 @@ import {
   type RetroSectionConfig,
 } from "../api/cmsClient";
 import { RetroAiView } from "./RetroAiView";
-import { RetroBoard } from "./RetroBoard";
+import { RetroBoard, RetroOutcomesPanel } from "./RetroBoard";
 import {
+  DEFAULT_RETRO_SECTIONS,
   formatCountdown,
   phaseLabel,
   type RetroAiSummary,
@@ -30,11 +38,7 @@ import {
 } from "./retroLogic";
 import { useRetro } from "./useRetro";
 
-const DEFAULT_SECTIONS: RetroSectionConfig[] = [
-  { section_id: "sprint", title: "По итогам спринта" },
-  { section_id: "process", title: "По процессам" },
-  { section_id: "task", title: "По задаче" },
-];
+const DEFAULT_SECTIONS: RetroSectionConfig[] = DEFAULT_RETRO_SECTIONS.map((section) => ({ ...section }));
 
 export default function RetroShell({ canManage = false, canAnalyze = false }: { canManage?: boolean; canAnalyze?: boolean }) {
   return (
@@ -56,6 +60,8 @@ function RetroListPage({ canManage }: { canManage: boolean }) {
   const toast = useToast();
   const [items, setItems] = useState<RetroRecord[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [confirmTarget, setConfirmTarget] = useState<RetroRecord | null>(null);
+  const [busyDelete, setBusyDelete] = useState<number | null>(null);
 
   const reload = useCallback(() => {
     cmsRetroApi
@@ -69,74 +75,144 @@ function RetroListPage({ canManage }: { canManage: boolean }) {
   }, [reload]);
 
   async function remove(retro: RetroRecord) {
-    if (!window.confirm(`Удалить ретро «${retro.title}»?`)) return;
+    setBusyDelete(retro.id);
     try {
       await cmsRetroApi.delete(retro.id);
       toast.success("Ретро удалено");
       reload();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Не удалось удалить");
+    } finally {
+      setBusyDelete(null);
+      setConfirmTarget(null);
     }
   }
 
+  const loading = items === null;
+  const rows = items ?? [];
+
   return (
-    <div className="space-y-5">
+    <section className="space-y-4">
       <SectionHeader
         title="Ретроспективы"
         description="Настройте секции, поделитесь ссылкой с командой и проведите живое ретро. В конце — AI-анализ итогов."
         actions={
           canManage ? (
-            <Button variant="primary" onClick={() => navigate("new")}>
+            <Button variant="primary" size="sm" onClick={() => navigate("new")}>
               Создать ретро
             </Button>
           ) : null
         }
       />
       {error ? <InlineError text={error} /> : null}
-      {items === null ? (
-        <Spinner />
-      ) : items.length === 0 ? (
-        <EmptyState
-          title="Пока нет ретроспектив"
-          description="Создайте первое ретро — настройте секции и пригласите команду."
-          action={
-            canManage ? (
-              <Button variant="primary" onClick={() => navigate("new")}>
-                Создать ретро
-              </Button>
-            ) : undefined
-          }
-        />
-      ) : (
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-          {items.map((retro) => (
-            <Surface key={retro.id} className="flex flex-col gap-2 p-4">
-              <div className="flex items-start justify-between gap-2">
-                <Link to={`${retro.id}`} className="text-sm font-bold text-ink hover:text-blue">
-                  {retro.title}
-                </Link>
-                <StatusBadge status={retro.status} />
-              </div>
-              <p className="text-xs text-ink3">
-                Секций: {retro.config?.sections?.length ?? 0} · обновлено{" "}
-                {new Date(retro.updated_at).toLocaleString("ru-RU")}
-              </p>
-              {retro.ai_summary ? <Badge tone="info">есть AI-анализ</Badge> : null}
-              <div className="mt-auto flex gap-2 pt-2">
+      <DataTable
+        columns={["Ретро", "Статус", "Секции", "AI", "Обновлено", "Действия"]}
+        error={null}
+        loading={loading}
+        loadingMore={false}
+        hasMore={false}
+        loadedCount={rows.length}
+        total={rows.length}
+        onMore={() => undefined}
+        itemNoun="ретро"
+        empty={
+          rows.length === 0 && !loading ? (
+            <EmptyState
+              title="Пока нет ретроспектив"
+              description="Создайте первое ретро — настройте секции и пригласите команду."
+              action={
+                canManage ? (
+                  <Button variant="primary" size="sm" onClick={() => navigate("new")}>
+                    Создать ретро
+                  </Button>
+                ) : undefined
+              }
+            />
+          ) : null
+        }
+        mobileCards={rows.map((retro) => (
+          <MobileRecordCard
+            key={retro.id}
+            title={
+              <Link to={`${retro.id}`} className="hover:text-blue">
+                {retro.title}
+              </Link>
+            }
+            meta={`Обновлено ${formatRetroDate(retro.updated_at)}`}
+            action={<StatusBadge status={retro.status} />}
+            footer={
+              <>
                 <Button variant="secondary" size="sm" onClick={() => navigate(`${retro.id}`)}>
                   Открыть
                 </Button>
                 {canManage ? (
-                  <Button variant="ghost" size="sm" onClick={() => void remove(retro)}>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setConfirmTarget(retro)}
+                    loading={busyDelete === retro.id}
+                    disabled={busyDelete !== null}
+                  >
+                    Удалить
+                  </Button>
+                ) : null}
+              </>
+            }
+          >
+            <MobileRecordField label="Секции" value={retro.config?.sections?.length ?? 0} />
+            <MobileRecordField label="AI" value={retro.ai_summary ? "есть анализ" : "нет"} />
+          </MobileRecordCard>
+        ))}
+      >
+        {rows.map((retro) => (
+          <tr key={retro.id} className="border-t border-line align-top">
+            <td className="px-3 py-2">
+              <Link to={`${retro.id}`} className="font-semibold text-ink hover:text-blue">
+                {retro.title}
+              </Link>
+            </td>
+            <td className="px-3 py-2">
+              <StatusBadge status={retro.status} />
+            </td>
+            <td className="px-3 py-2 tabular-nums">{retro.config?.sections?.length ?? 0}</td>
+            <td className="px-3 py-2">
+              {retro.ai_summary ? <Badge tone="info">есть</Badge> : <span className="text-xs text-ink4">—</span>}
+            </td>
+            <td className="whitespace-nowrap px-3 py-2 text-ink3">{formatRetroDate(retro.updated_at)}</td>
+            <td className="px-3 py-2">
+              <div className="flex flex-wrap gap-2">
+                <Button variant="secondary" size="sm" onClick={() => navigate(`${retro.id}`)}>
+                  Открыть
+                </Button>
+                {canManage ? (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setConfirmTarget(retro)}
+                    loading={busyDelete === retro.id}
+                    disabled={busyDelete !== null}
+                  >
                     Удалить
                   </Button>
                 ) : null}
               </div>
-            </Surface>
-          ))}
-        </div>
-      )}
-    </div>
+            </td>
+          </tr>
+        ))}
+      </DataTable>
+      <ConfirmDialog
+        open={confirmTarget !== null}
+        title="Удалить ретро?"
+        description={confirmTarget ? `Ретро «${confirmTarget.title}» будет удалено из CMS.` : ""}
+        confirmLabel="Удалить"
+        cancelLabel="Отмена"
+        tone="danger"
+        onCancel={() => setConfirmTarget(null)}
+        onConfirm={() => {
+          if (confirmTarget) void remove(confirmTarget);
+        }}
+      />
+    </section>
   );
 }
 
@@ -144,6 +220,10 @@ function StatusBadge({ status }: { status: string }) {
   if (status === "live") return <Badge tone="info">идёт</Badge>;
   if (status === "done") return <Badge tone="success">завершено</Badge>;
   return <Badge tone="neutral">черновик</Badge>;
+}
+
+function formatRetroDate(value: string): string {
+  return new Date(value).toLocaleString("ru-RU");
 }
 
 // ---------------------------------------------------------------------------
@@ -544,6 +624,7 @@ function RetroCockpit({
         <ManagerControls
           state={state}
           busy={busy}
+          countdown={countdown}
           onOpenSection={(sectionId) =>
             run(() => cmsRetroApi.openSection(retroId, sectionId), "Секция открыта")
           }
@@ -568,6 +649,7 @@ function RetroCockpit({
       ) : null}
 
       <RetroBoard state={state} countdown={countdown} />
+      <RetroOutcomesPanel state={state} showAi={false} />
 
       {state.phase === "done" ? (
         <Surface className="space-y-3 p-4">
@@ -592,6 +674,7 @@ function RetroCockpit({
 function ManagerControls({
   state,
   busy,
+  countdown,
   onOpenSection,
   onCloseSection,
   onStartVoting,
@@ -600,6 +683,7 @@ function ManagerControls({
 }: {
   state: RetroLiveState;
   busy: boolean;
+  countdown: string | null;
   onOpenSection: (sectionId: string) => void;
   onCloseSection: () => void;
   onStartVoting: () => void;
@@ -608,7 +692,12 @@ function ManagerControls({
 }) {
   return (
     <Surface className="space-y-3 p-4">
-      <p className="text-sm font-semibold text-ink3">Управление ходом ретро</p>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-sm font-semibold text-ink3">Управление ходом ретро</p>
+        {state.phase === "collecting" && countdown ? (
+          <Badge tone={countdown === "0:00" ? "danger" : "neutral"}>Осталось на мысли: {countdown}</Badge>
+        ) : null}
+      </div>
 
       {state.phase === "lobby" || state.phase === "collecting" ? (
         <div className="space-y-2">
@@ -690,7 +779,7 @@ function ActionItemsPanel({
               key={item.item_id}
               className="flex items-center justify-between gap-2 rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink"
             >
-              <span>
+              <span className="min-w-0 whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
                 {item.text}
                 {item.assignee ? <span className="ml-2 text-ink3">· {item.assignee}</span> : null}
               </span>

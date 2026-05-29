@@ -23,13 +23,13 @@ export function RetroAiView({ summary }: { summary: RetroAiSummary }) {
         </Badge>
       </div>
 
-      <p className="whitespace-pre-wrap text-sm text-ink2">{summary.summary}</p>
+      <p className="whitespace-pre-wrap break-words text-sm text-ink2 [overflow-wrap:anywhere]">{summary.summary}</p>
 
       {summary.highlights.length > 0 ? (
         <Block title="Что прошло хорошо">
           <ul className="list-disc space-y-1 pl-5 text-sm text-ink2">
             {summary.highlights.map((item, i) => (
-              <li key={i}>{item}</li>
+              <li key={i} className="break-words [overflow-wrap:anywhere]">{item}</li>
             ))}
           </ul>
         </Block>
@@ -41,10 +41,14 @@ export function RetroAiView({ summary }: { summary: RetroAiSummary }) {
             {summary.problems.map((problem, i) => (
               <li key={i} className="rounded-lg border border-line bg-surface px-3 py-2">
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-sm font-semibold text-ink">{problem.title}</span>
+                  <span className="break-words text-sm font-semibold text-ink [overflow-wrap:anywhere]">{problem.title}</span>
                   <Badge tone={SEVERITY_TONE[problem.severity]}>{SEVERITY_LABEL[problem.severity]}</Badge>
                 </div>
-                {problem.detail ? <p className="mt-1 text-sm text-ink3">{problem.detail}</p> : null}
+                {problem.detail ? (
+                  <p className="mt-1 whitespace-pre-wrap break-words text-sm text-ink3 [overflow-wrap:anywhere]">
+                    {problem.detail}
+                  </p>
+                ) : null}
               </li>
             ))}
           </ul>
@@ -55,7 +59,7 @@ export function RetroAiView({ summary }: { summary: RetroAiSummary }) {
         <Block title="Повторяющиеся паттерны">
           <ul className="list-disc space-y-1 pl-5 text-sm text-ink2">
             {summary.patterns.map((item, i) => (
-              <li key={i}>{item}</li>
+              <li key={i} className="break-words [overflow-wrap:anywhere]">{item}</li>
             ))}
           </ul>
         </Block>
@@ -67,7 +71,7 @@ export function RetroAiView({ summary }: { summary: RetroAiSummary }) {
             {summary.recommendations.map((rec, i) => (
               <li key={i} className="flex flex-wrap items-center gap-2 rounded-lg border border-line bg-surface px-3 py-2">
                 <Badge tone={SEVERITY_TONE[rec.impact]}>эффект: {SEVERITY_LABEL[rec.impact]}</Badge>
-                <span className="text-sm text-ink2">{rec.text}</span>
+                <span className="min-w-0 break-words text-sm text-ink2 [overflow-wrap:anywhere]">{rec.text}</span>
               </li>
             ))}
           </ul>
@@ -78,7 +82,7 @@ export function RetroAiView({ summary }: { summary: RetroAiSummary }) {
         <Block title="Риски">
           <ul className="list-disc space-y-1 pl-5 text-sm text-ink2">
             {summary.risks.map((item, i) => (
-              <li key={i}>{item}</li>
+              <li key={i} className="break-words [overflow-wrap:anywhere]">{item}</li>
             ))}
           </ul>
         </Block>
@@ -88,7 +92,7 @@ export function RetroAiView({ summary }: { summary: RetroAiSummary }) {
         <Block title="Предлагаемые action items">
           <ul className="list-disc space-y-1 pl-5 text-sm text-ink2">
             {summary.suggested_action_items.map((item, i) => (
-              <li key={i}>{item}</li>
+              <li key={i} className="break-words [overflow-wrap:anywhere]">{item}</li>
             ))}
           </ul>
         </Block>

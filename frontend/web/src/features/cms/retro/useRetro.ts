@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiUrl, retroWsUrl } from "../../../app/config";
-import { saveWebIdentity, type WebParticipantIdentity } from "../../../shared/lib/participantIdentity";
+import {
+  PARTICIPANT_EMAIL_DOMAIN,
+  saveWebIdentity,
+  type WebParticipantIdentity,
+} from "../../../shared/lib/participantIdentity";
 import type { ParticipantRole } from "../../../hooks/useSession";
 import {
   canAddToSection,
@@ -46,6 +50,7 @@ async function postJson<T>(path: string, body: unknown): Promise<T> {
  * own dots locally and reconcile them from our own join/state/vote responses.
  */
 const MOCK_PARTICIPANT_ID = "mock-participant";
+const ANONYMOUS_ROLE: ParticipantRole = "backend";
 
 export function useRetro(
   token: string,
@@ -55,6 +60,7 @@ export function useRetro(
     options.mock ??
     (typeof window !== "undefined" ? isRetroMockEnabled(window.location.search) : false);
   const pidKey = `pp_retro_pid_${token}`;
+  const anonKey = `pp_retro_anon_${token}`;
   const [participantId, setParticipantId] = useState<string | null>(() => {
     try {
       return options.participant ? localStorage.getItem(pidKey) : null;
@@ -70,6 +76,7 @@ export function useRetro(
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectDelay = useRef(1000);
   const unmounted = useRef(false);
+  const autoJoinStarted = useRef(false);
   const participantIdRef = useRef<string | null>(participantId);
   participantIdRef.current = participantId;
 
@@ -90,6 +97,52 @@ export function useRetro(
       cancelled = true;
     };
   }, [mockEnabled, token, participantId]);
+
+  useEffect(() => {
+    if (!options.participant || participantId !== null) return;
+    if (autoJoinStarted.current) return;
+    autoJoinStarted.current = true;
+    let cancelled = false;
+
+    if (mockEnabled) {
+      try {
+        localStorage.setItem(pidKey, MOCK_PARTICIPANT_ID);
+      } catch {
+        // ignore storage errors
+      }
+      setParticipantId(MOCK_PARTICIPANT_ID);
+      setState(createMockRetroLiveState());
+      setMyVotes(new Set());
+      return;
+    }
+
+    const anonymousEmail = getAnonymousRetroEmail(anonKey);
+    postJson<{ participant_id: string; state: RetroLiveState }>("/retro/join", {
+      token,
+      name: anonymousEmail,
+      role: ANONYMOUS_ROLE,
+    })
+      .then((data) => {
+        if (cancelled) return;
+        try {
+          localStorage.setItem(pidKey, data.participant_id);
+        } catch {
+          // ignore storage errors
+        }
+        setParticipantId(data.participant_id);
+        setState(data.state);
+        setMyVotes(new Set(data.state.my_votes ?? []));
+      })
+      .catch((e) => {
+        if (cancelled) return;
+        autoJoinStarted.current = false;
+        setError(e instanceof Error ? e.message : "Не удалось подключиться");
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [anonKey, mockEnabled, options.participant, participantId, pidKey, token]);
 
   const connect = useCallback(() => {
     if (mockEnabled) return;
@@ -281,4 +334,22 @@ export function useRetro(
 
 export function identityToRole(identity: WebParticipantIdentity | null): ParticipantRole | null {
   return identity?.role ?? null;
+}
+
+function getAnonymousRetroEmail(storageKey: string): string {
+  let seed = "";
+  try {
+    seed = localStorage.getItem(storageKey) ?? "";
+    if (!seed) {
+      seed =
+        typeof crypto !== "undefined" && "randomUUID" in crypto
+          ? crypto.randomUUID()
+          : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      localStorage.setItem(storageKey, seed);
+    }
+  } catch {
+    seed = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  }
+  const safe = seed.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 24) || "guest";
+  return `retro-${safe}@${PARTICIPANT_EMAIL_DOMAIN}`;
 }

@@ -82,20 +82,24 @@ export function phaseLabel(phase: RetroPhase): string {
   return RETRO_PHASE_LABELS[phase] ?? phase;
 }
 
+export const DEFAULT_RETRO_SECTIONS: RetroSectionDef[] = [
+  { section_id: "went_well", title: "Что прошло хорошо" },
+  { section_id: "pain_points", title: "Что мешало" },
+  { section_id: "improvements", title: "Что улучшим" },
+  { section_id: "experiments", title: "Идеи и эксперименты" },
+];
+
 /** Client-only demo board for e2e and local preview without a backend. */
 export function createMockRetroLiveState(overrides: Partial<RetroLiveState> = {}): RetroLiveState {
   return {
     retro_id: 0,
     title: "Демо ретроспектива",
-    phase: "lobby",
-    active_section_id: null,
-    section_deadline: null,
+    phase: "collecting",
+    active_section_id: DEFAULT_RETRO_SECTIONS[0].section_id,
+    section_deadline: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
     votes_per_person: 5,
     default_section_seconds: 300,
-    sections: [
-      { section_id: "went_well", title: "Что прошло хорошо" },
-      { section_id: "improve", title: "Что улучшить" },
-    ],
+    sections: DEFAULT_RETRO_SECTIONS,
     cards: [],
     action_items: [],
     participants_count: 1,

@@ -6,6 +6,7 @@ import {
   phaseLabel,
   type RetroLiveState,
 } from "./retroLogic";
+import { RetroAiView } from "./RetroAiView";
 
 interface RetroBoardProps {
   state: RetroLiveState;
@@ -40,8 +41,8 @@ export function RetroBoard({
   }
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-2">
+    <div className="space-y-5">
+      <div className="flex flex-wrap items-center gap-2 text-sm">
         <Badge tone={state.phase === "done" ? "success" : "info"}>{phaseLabel(state.phase)}</Badge>
         <span className="text-sm text-ink3">Участников: {state.participants_count}</span>
         {voting && typeof votesRemaining === "number" ? (
@@ -54,7 +55,7 @@ export function RetroBoard({
         ) : null}
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+      <div className="grid gap-4 lg:grid-cols-2 2xl:grid-cols-3">
         {state.sections.map((section) => {
           const cards = grouped.get(section.section_id) ?? [];
           const isActive = state.active_section_id === section.section_id;
@@ -63,12 +64,12 @@ export function RetroBoard({
             <Surface
               key={section.section_id}
               className={[
-                "flex flex-col gap-3 p-4",
+                "flex min-h-72 flex-col gap-4 p-4 sm:p-5",
                 isActive && state.phase === "collecting" ? "ring-2 ring-blue/40" : "",
               ].join(" ")}
             >
               <div className="flex items-center justify-between gap-2">
-                <h3 className="text-sm font-bold text-ink">{section.title}</h3>
+                <h3 className="min-w-0 text-base font-bold text-ink sm:text-lg">{section.title}</h3>
                 {isActive && state.phase === "collecting" ? (
                   <Badge tone="info">открыта</Badge>
                 ) : state.phase === "collecting" ? (
@@ -77,9 +78,11 @@ export function RetroBoard({
               </div>
 
               {cards.length === 0 ? (
-                <p className="text-xs text-ink4">Пока нет карточек</p>
+                <p className="rounded-xl border border-dashed border-line px-4 py-6 text-center text-sm text-ink4">
+                  Пока нет карточек
+                </p>
               ) : (
-                <ul className="space-y-2">
+                <ul className="space-y-3">
                   {cards.map((card) => {
                     const mine = myVotes?.has(card.card_id) ?? false;
                     const budgetBlocked =
@@ -88,10 +91,12 @@ export function RetroBoard({
                     return (
                       <li
                         key={card.card_id}
-                        className="rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink"
+                        className="min-h-24 rounded-xl border border-line bg-surface px-4 py-3 text-base text-ink shadow-sm"
                       >
-                        <div className="flex items-start justify-between gap-2">
-                          <span className="whitespace-pre-wrap break-words">{card.text}</span>
+                        <div className="flex items-start justify-between gap-3">
+                          <span className="min-w-0 whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
+                            {card.text}
+                          </span>
                           {voting && onToggleVote ? (
                             <button
                               type="button"
@@ -100,7 +105,7 @@ export function RetroBoard({
                               aria-pressed={mine}
                               aria-label={`${mine ? "Убрать голос с карточки" : "Проголосовать за карточку"}, сейчас ${card.vote_count} голосов`}
                               className={[
-                                "shrink-0 inline-flex min-h-8 items-center gap-1 rounded-full px-2.5 text-xs font-semibold transition-colors",
+                                "inline-flex min-h-10 shrink-0 items-center gap-1 rounded-full px-3 text-sm font-semibold transition-colors",
                                 mine
                                   ? "bg-blue text-white"
                                   : "border border-line text-ink3 hover:bg-line2",
@@ -110,7 +115,7 @@ export function RetroBoard({
                               ▲ {card.vote_count}
                             </button>
                           ) : (
-                            <span className="shrink-0 text-xs font-semibold text-ink3">
+                            <span className="shrink-0 text-sm font-semibold text-ink3">
                               ▲ {card.vote_count}
                             </span>
                           )}
@@ -153,7 +158,7 @@ function AddCardForm({ onSubmit }: { onSubmit: (text: string) => Promise<boolean
         hint="Cmd/Ctrl + Enter — добавить"
         placeholder="Ваша мысль…"
         value={text}
-        rows={2}
+        rows={4}
         reserveMessageSpace={false}
         onChange={(e) => setText(e.target.value)}
         onKeyDown={(e) => {
@@ -163,9 +168,45 @@ function AddCardForm({ onSubmit }: { onSubmit: (text: string) => Promise<boolean
           }
         }}
       />
-      <Button variant="secondary" size="sm" onClick={() => void submit()} loading={busy} disabled={!text.trim()}>
+      <Button variant="secondary" onClick={() => void submit()} loading={busy} disabled={!text.trim()}>
         Добавить карточку
       </Button>
+    </div>
+  );
+}
+
+export function RetroOutcomesPanel({
+  state,
+  className = "",
+  showAi = true,
+}: {
+  state: RetroLiveState;
+  className?: string;
+  showAi?: boolean;
+}) {
+  const hasActions = state.action_items.length > 0;
+  const hasAi = showAi && state.ai_summary !== null;
+  if (!hasActions && !hasAi) return null;
+
+  return (
+    <div className={["space-y-4", className].filter(Boolean).join(" ")}>
+      {hasActions ? (
+        <Surface className="space-y-3 p-4 sm:p-5">
+          <h3 className="text-base font-bold text-ink">Выводы по ретро</h3>
+          <ul className="space-y-2">
+            {state.action_items.map((item) => (
+              <li
+                key={item.item_id}
+                className="rounded-xl border border-line bg-surface px-4 py-3 text-sm text-ink2 sm:text-base"
+              >
+                <span className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{item.text}</span>
+                {item.assignee ? <span className="ml-2 text-ink3">· {item.assignee}</span> : null}
+              </li>
+            ))}
+          </ul>
+        </Surface>
+      ) : null}
+      {hasAi ? <RetroAiView summary={state.ai_summary!} /> : null}
     </div>
   );
 }
