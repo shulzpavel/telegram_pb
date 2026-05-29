@@ -86,12 +86,12 @@ test.describe("participant flow", () => {
 
 test.describe("retro participant flow", () => {
   test("/r/:token renders the anonymous join form", async ({ page }) => {
-    // No backend in the preview build — the state fetch fails and the page
-    // stays on the join step. We assert the stable join affordances render.
-    await page.goto("/r/smoke-token");
+    // Same pattern as /demo?mock=1 — no backend in the preview build.
+    await page.goto("/r/demo?mock=1");
 
     await expect(page.getByRole("heading", { name: /Ретроспектива команды/ })).toBeVisible();
-    await expect(page.getByRole("button", { name: "QA" })).toBeVisible();
+    await expect(page.getByLabel("Корпоративная почта")).toBeVisible();
+    await expect(page.getByRole("radio", { name: "QA" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Войти в ретро" })).toBeVisible();
   });
 });

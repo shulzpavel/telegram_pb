@@ -2,7 +2,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiUrl, retroWsUrl } from "../../../app/config";
 import { saveWebIdentity, type WebParticipantIdentity } from "../../../shared/lib/participantIdentity";
 import type { ParticipantRole } from "../../../hooks/useSession";
-import type { RetroLiveState, RetroPhase } from "./retroLogic";
+import {
+  canAddToSection,
+  createMockRetroLiveState,
+  isRetroMockEnabled,
+  type RetroLiveState,
+  type RetroPhase,
+} from "./retroLogic";
 
 interface UseRetroReturn {
   state: RetroLiveState | null;
@@ -39,7 +45,15 @@ async function postJson<T>(path: string, body: unknown): Promise<T> {
  * server broadcasting aggregate counts only — we track the current viewer's
  * own dots locally and reconcile them from our own join/state/vote responses.
  */
-export function useRetro(token: string, options: { participant?: boolean } = {}): UseRetroReturn {
+const MOCK_PARTICIPANT_ID = "mock-participant";
+
+export function useRetro(
+  token: string,
+  options: { participant?: boolean; mock?: boolean } = {},
+): UseRetroReturn {
+  const mockEnabled =
+    options.mock ??
+    (typeof window !== "undefined" ? isRetroMockEnabled(window.location.search) : false);
   const pidKey = `pp_retro_pid_${token}`;
   const [participantId, setParticipantId] = useState<string | null>(() => {
     try {
@@ -61,6 +75,7 @@ export function useRetro(token: string, options: { participant?: boolean } = {})
 
   // Seed once from the HTTP state endpoint, then rely on the WebSocket.
   useEffect(() => {
+    if (mockEnabled) return;
     let cancelled = false;
     const pidQuery = participantId ? `?participant_id=${encodeURIComponent(participantId)}` : "";
     fetch(apiUrl(`/retro/state/${token}${pidQuery}`))
@@ -74,9 +89,10 @@ export function useRetro(token: string, options: { participant?: boolean } = {})
     return () => {
       cancelled = true;
     };
-  }, [token, participantId]);
+  }, [mockEnabled, token, participantId]);
 
   const connect = useCallback(() => {
+    if (mockEnabled) return;
     if (unmounted.current) return;
     const ws = new WebSocket(retroWsUrl(token));
     wsRef.current = ws;
@@ -107,9 +123,10 @@ export function useRetro(token: string, options: { participant?: boolean } = {})
       reconnectTimer.current = setTimeout(connect, delay);
     };
     ws.onerror = () => ws.close();
-  }, [token]);
+  }, [mockEnabled, token]);
 
   useEffect(() => {
+    if (mockEnabled) return;
     unmounted.current = false;
     connect();
     return () => {
@@ -117,11 +134,23 @@ export function useRetro(token: string, options: { participant?: boolean } = {})
       if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
       wsRef.current?.close();
     };
-  }, [connect]);
+  }, [connect, mockEnabled]);
 
   const join = useCallback(
     async (name: string, role: ParticipantRole) => {
       setError(null);
+      if (mockEnabled) {
+        saveWebIdentity(name, role);
+        try {
+          localStorage.setItem(pidKey, MOCK_PARTICIPANT_ID);
+        } catch {
+          // ignore storage errors
+        }
+        setParticipantId(MOCK_PARTICIPANT_ID);
+        setState(createMockRetroLiveState());
+        setMyVotes(new Set());
+        return;
+      }
       try {
         const data = await postJson<{ participant_id: string; state: RetroLiveState }>(
           "/retro/join",
@@ -142,7 +171,7 @@ export function useRetro(token: string, options: { participant?: boolean } = {})
         throw e;
       }
     },
-    [token, pidKey],
+    [mockEnabled, token, pidKey],
   );
 
   const addCard = useCallback(
@@ -150,6 +179,24 @@ export function useRetro(token: string, options: { participant?: boolean } = {})
       const pid = participantIdRef.current;
       if (!pid) return false;
       setError(null);
+      if (mockEnabled) {
+        const trimmed = text.trim();
+        if (!trimmed) return false;
+        setState((prev) => {
+          if (!prev || !canAddToSection(prev, sectionId)) return prev;
+          const cardId = `mock-card-${prev.cards.length + 1}`;
+          const next = {
+            ...prev,
+            cards: [
+              ...prev.cards,
+              { card_id: cardId, section_id: sectionId, text: trimmed, vote_count: 0 },
+            ],
+            version: prev.version + 1,
+          };
+          return next;
+        });
+        return true;
+      }
       try {
         const next = await postJson<RetroLiveState>("/retro/card", {
           token,
@@ -164,7 +211,7 @@ export function useRetro(token: string, options: { participant?: boolean } = {})
         return false;
       }
     },
-    [token],
+    [mockEnabled, token],
   );
 
   const toggleVote = useCallback(
@@ -172,6 +219,38 @@ export function useRetro(token: string, options: { participant?: boolean } = {})
       const pid = participantIdRef.current;
       if (!pid) return false;
       setError(null);
+      if (mockEnabled) {
+        let changed = false;
+        setState((prev) => {
+          if (!prev || prev.phase !== "voting") return prev;
+          const currentVotes = new Set(prev.my_votes ?? []);
+          const hasVote = currentVotes.has(cardId);
+          const budget = prev.votes_per_person;
+          if (!hasVote && currentVotes.size >= budget) return prev;
+          if (hasVote) {
+            currentVotes.delete(cardId);
+          } else {
+            currentVotes.add(cardId);
+          }
+          const cards = prev.cards.map((c) => {
+            if (c.card_id !== cardId) return c;
+            const delta = hasVote ? -1 : 1;
+            return { ...c, vote_count: Math.max(0, c.vote_count + delta) };
+          });
+          const nextVotes = [...currentVotes];
+          setMyVotes(new Set(nextVotes));
+          changed = true;
+          return {
+            ...prev,
+            cards,
+            my_votes: nextVotes,
+            my_votes_used: nextVotes.length,
+            my_votes_remaining: Math.max(0, budget - nextVotes.length),
+            version: prev.version + 1,
+          };
+        });
+        return changed;
+      }
       try {
         const next = await postJson<RetroLiveState>("/retro/vote", {
           token,
@@ -186,7 +265,7 @@ export function useRetro(token: string, options: { participant?: boolean } = {})
         return false;
       }
     },
-    [token],
+    [mockEnabled, token],
   );
 
   const votesRemaining = useMemo(() => {

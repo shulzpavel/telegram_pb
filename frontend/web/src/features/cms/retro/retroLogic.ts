@@ -82,6 +82,36 @@ export function phaseLabel(phase: RetroPhase): string {
   return RETRO_PHASE_LABELS[phase] ?? phase;
 }
 
+/** Client-only demo board for e2e and local preview without a backend. */
+export function createMockRetroLiveState(overrides: Partial<RetroLiveState> = {}): RetroLiveState {
+  return {
+    retro_id: 0,
+    title: "Демо ретроспектива",
+    phase: "lobby",
+    active_section_id: null,
+    section_deadline: null,
+    votes_per_person: 5,
+    default_section_seconds: 300,
+    sections: [
+      { section_id: "went_well", title: "Что прошло хорошо" },
+      { section_id: "improve", title: "Что улучшить" },
+    ],
+    cards: [],
+    action_items: [],
+    participants_count: 1,
+    ai_summary: null,
+    my_votes: [],
+    my_votes_used: 0,
+    my_votes_remaining: 5,
+    version: 1,
+    ...overrides,
+  };
+}
+
+export function isRetroMockEnabled(search = ""): boolean {
+  return new URLSearchParams(search).get("mock") === "1";
+}
+
 export const MOOD_LABELS: Record<RetroMood, string> = {
   low: "Напряжённый",
   neutral: "Смешанный",
