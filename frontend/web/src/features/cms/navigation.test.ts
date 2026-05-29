@@ -28,10 +28,10 @@ describe("CMS navigation", () => {
     expect(hasPermission(admin, CMS_PERMISSIONS.accessManage)).toBe(true);
     expect(visibleCmsTabs(admin).map((tab) => tab.key)).toEqual([
       "overview",
-      "sessions",
-      "users",
       "planner",
+      "sessions",
       "retro",
+      "users",
       "tokens",
       "events",
       "access",
@@ -103,10 +103,10 @@ describe("groupVisibleTabs", () => {
     const grouped = groupVisibleTabs(admin);
     expect(grouped.map((g) => g.group.key)).toEqual(["core", "operations", "security"]);
     expect(grouped.find((g) => g.group.key === "operations")?.items.map((t) => t.key)).toEqual([
-      "sessions",
-      "users",
       "planner",
+      "sessions",
       "retro",
+      "users",
       "tokens",
     ]);
   });
