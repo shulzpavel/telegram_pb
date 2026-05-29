@@ -1764,6 +1764,20 @@ class PostgresCmsStore:
                 WHERE s.id IS NULL OR s.deleted_at IS NULL
                 """
             )
+            sprint_plans = await conn.fetchval(
+                """
+                SELECT COUNT(*)::bigint
+                FROM cms_sprint_plans
+                """
+            )
+            retros = await conn.fetchrow(
+                """
+                SELECT
+                    COUNT(*)::bigint AS total_retros,
+                    COUNT(*) FILTER (WHERE status = 'live')::bigint AS live_retros
+                FROM cms_retros
+                """
+            )
             votes = await conn.fetchval(
                 """
                 SELECT COUNT(*)::bigint
@@ -1776,6 +1790,8 @@ class PostgresCmsStore:
                 **_row_to_dict(sessions),
                 **_row_to_dict(users),
                 **_row_to_dict(tokens),
+                **_row_to_dict(retros),
+                "total_sprint_plans": sprint_plans or 0,
                 "votes_rows": votes or 0,
             }
 

@@ -10,24 +10,35 @@ interface HubAction {
   description: string;
   details: string[];
   cta: { label: string; to: string; variant: "primary" | "secondary" };
+  demo?: { label: string; to: string };
 }
 
 const ACTIONS: HubAction[] = [
   {
-    id: "manager",
-    eyebrow: "Я веду сессию",
-    title: "Запустить planning session",
-    description: "Создайте комнату, добавьте задачи из Jira или вручную и отправьте invite команде.",
-    details: ["Менеджерский cockpit", "Импорт Jira", "AI summary", "CSV-отчёт"],
-    cta: { label: "Открыть менеджерский экран", to: "/manage", variant: "primary" },
+    id: "planner",
+    eyebrow: "Сначала план",
+    title: "Посчитать capacity и velocity",
+    description: "Соберите команду, отпуска и историю спринтов — калькулятор подскажет реалистичный план в story points.",
+    details: ["Velocity", "Capacity", "Роли и треки", "Сохранённые расчёты"],
+    cta: { label: "Открыть калькулятор", to: "/cms/planner", variant: "primary" },
   },
   {
-    id: "player",
-    eyebrow: "Я участник",
-    title: "Посмотреть демо голосования",
-    description: "Откройте демо как игрок: имя, роль, карточки оценки и live-состояния без настройки.",
-    details: ["Без логина", "Мобильный экран", "Карты оценки", "Live-голоса"],
-    cta: { label: "Открыть демо для игрока", to: "/demo", variant: "secondary" },
+    id: "sessions",
+    eyebrow: "Затем оценка",
+    title: "Провести planning poker",
+    description: "Создайте сессию, добавьте задачи из Jira или вручную и отправьте invite команде для live-голосования.",
+    details: ["Cockpit ведущего", "Импорт Jira", "AI summary", "CSV-отчёт"],
+    cta: { label: "Открыть сессии", to: "/cms/sessions", variant: "secondary" },
+    demo: { label: "Демо голосования", to: "/demo?mock=1" },
+  },
+  {
+    id: "retro",
+    eyebrow: "После спринта",
+    title: "Собрать ретро",
+    description: "Откройте секции, соберите анонимные карточки, сгруппируйте похожие темы и завершите обсуждение AI-итогами.",
+    details: ["Анонимные карточки", "Группировка", "Голосование", "AI action items"],
+    cta: { label: "Открыть ретро", to: "/cms/retro", variant: "secondary" },
+    demo: { label: "Демо ретро", to: "/r/demo-retro?mock=1" },
   },
 ];
 
@@ -65,17 +76,17 @@ export default function LandingPage() {
       </AutoHideAppHeader>
 
       <section className="flex flex-1 items-center px-4 py-8 pb-safe-6 lg:px-6">
-        <div className="mx-auto grid w-full max-w-5xl gap-6 lg:grid-cols-[0.9fr_1.1fr] lg:items-center">
+        <div className="mx-auto grid w-full max-w-6xl gap-6 lg:grid-cols-[0.78fr_1.22fr] lg:items-center">
           <motion.div {...enter}>
             <Badge tone="info">Общая ссылка для команды</Badge>
             <h1 className="mt-4 max-w-xl text-balance text-3xl font-bold leading-tight tracking-tight sm:text-5xl sm:leading-[1.08]">
-              Выберите, что нужно сделать сейчас
+              Планирование, poker и ретро в одном месте
             </h1>
             <p className="mt-4 max-w-lg text-base leading-7 text-ink2 sm:text-lg">
-              Быстрый вход в planning poker: создайте сессию для команды или откройте demo, чтобы посмотреть голосование глазами участника.
+              Начните с калькулятора capacity, проведите planning session и закройте цикл ретроспективой с анонимными карточками.
             </p>
             <div className="mt-6 rounded-2xl border border-blue/20 bg-blue/10 p-4 text-sm leading-6 text-ink2">
-              Уже есть invite-ссылка? Откройте её напрямую — она ведёт сразу на экран входа в сессию.
+              Уже есть invite-ссылка? Откройте её напрямую — ссылки на сессии и ретро ведут сразу на нужный экран команды.
             </div>
           </motion.div>
 
@@ -112,11 +123,20 @@ export default function LandingPage() {
                     ))}
                   </div>
 
-                  <Link to={action.cta.to} className="mt-5 block">
-                    <Button variant={action.cta.variant} size="lg" className="w-full">
-                      {action.cta.label}
-                    </Button>
-                  </Link>
+                  <div className="mt-5 flex flex-col gap-2 sm:flex-row">
+                    <Link to={action.cta.to} className="block flex-1">
+                      <Button variant={action.cta.variant} size="lg" className="w-full">
+                        {action.cta.label}
+                      </Button>
+                    </Link>
+                    {action.demo ? (
+                      <Link to={action.demo.to} className="block sm:w-auto">
+                        <Button variant="ghost" size="lg" className="w-full sm:w-auto">
+                          {action.demo.label}
+                        </Button>
+                      </Link>
+                    ) : null}
+                  </div>
                 </Surface>
               </motion.div>
             ))}
@@ -133,31 +153,37 @@ export default function LandingPage() {
                 <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                   <div className="min-w-0">
                     <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue">Как это работает</p>
-                    <h2 className="mt-2 text-xl font-bold text-ink sm:text-2xl">Короткая инструкция</h2>
+                    <h2 className="mt-2 text-xl font-bold text-ink sm:text-2xl">Рабочий порядок</h2>
                     <p className="mt-2 max-w-xl text-sm leading-6 text-ink2">
-                      Менеджер создаёт комнату, импортирует задачи из Jira, запускает голосование и при необходимости генерирует AI summary.
-                      Участники заходят по invite-ссылке, выбирают оценку, видят описание задачи и подсказку, если менеджер её сгенерировал.
+                      Сначала оцените capacity команды, затем проведите planning poker по задачам и после спринта соберите ретро.
+                      Для быстрых проверок есть mock demo: голосование и ретро открываются без подготовки данных.
                     </p>
                   </div>
                   <span
                     className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-line bg-line2 text-sm font-bold text-blue"
                     aria-hidden
                   >
-                    3
+                    4
                   </span>
                 </div>
 
-                <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                <div className="mt-4 grid gap-3 sm:grid-cols-3">
                   <div className="rounded-xl border border-line bg-line2/70 p-3">
-                    <p className="text-xs font-bold uppercase tracking-wide text-ink3">Для менеджера</p>
+                    <p className="text-xs font-bold uppercase tracking-wide text-ink3">Калькулятор</p>
                     <p className="mt-1 text-sm leading-6 text-ink2">
-                      Добавьте задачи, нажмите «Начать голосование», следите за live-оценками и финализируйте SP.
+                      Зафиксируйте состав команды, absences и velocity перед тем, как брать объём в спринт.
                     </p>
                   </div>
                   <div className="rounded-xl border border-line bg-line2/70 p-3">
-                    <p className="text-xs font-bold uppercase tracking-wide text-ink3">Для участника</p>
+                    <p className="text-xs font-bold uppercase tracking-wide text-ink3">Сессии</p>
                     <p className="mt-1 text-sm leading-6 text-ink2">
-                      Откройте invite, прочитайте задачу и описание, выберите карту — голос сразу виден команде.
+                      Команда голосует по invite-ссылке, ведущий управляет задачами, AI и финальными SP.
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-line bg-line2/70 p-3">
+                    <p className="text-xs font-bold uppercase tracking-wide text-ink3">Ретро</p>
+                    <p className="mt-1 text-sm leading-6 text-ink2">
+                      Соберите карточки по секциям, сгруппируйте темы и сохраните action items после обсуждения.
                     </p>
                   </div>
                 </div>
@@ -169,10 +195,11 @@ export default function LandingPage() {
 
       <footer className="shrink-0 border-t border-line/70 bg-surface/50 pb-safe backdrop-blur-md">
         <div className="mx-auto flex max-w-5xl flex-col gap-3 px-4 py-4 text-xs text-ink3 sm:flex-row sm:items-center sm:justify-between lg:px-6">
-          <p>Planning Poker для оценки задач, Jira import и командного голосования.</p>
+          <p>Planning Poker для capacity planning, оценки задач и командных ретро.</p>
           <nav aria-label="Служебные ссылки" className="flex flex-wrap gap-4">
             <Link to="/cms" className="font-semibold text-ink2 hover:text-blue">CMS</Link>
-            <Link to="/demo?mock=1" className="font-semibold text-ink2 hover:text-blue">Mock demo</Link>
+            <Link to="/demo?mock=1" className="font-semibold text-ink2 hover:text-blue">Demo poker</Link>
+            <Link to="/r/demo-retro?mock=1" className="font-semibold text-ink2 hover:text-blue">Demo retro</Link>
           </nav>
         </div>
       </footer>

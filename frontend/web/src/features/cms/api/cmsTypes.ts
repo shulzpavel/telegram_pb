@@ -69,8 +69,11 @@ export interface CmsAdmin {
 }
 
 export interface Overview {
+  total_sprint_plans: number;
   total_sessions: number;
   active_sessions: number;
+  total_retros: number;
+  live_retros: number;
   total_votes: number;
   total_tasks: number;
   total_users: number;

@@ -34,18 +34,18 @@ export default function OverviewPage() {
     <section className="space-y-4">
       <SectionHeader
         title="Сводка"
-        description="Быстрый взгляд на состояние планинг-покера: сколько сессий, участников, задач, голосов и активных приглашений."
+        description="Быстрый взгляд на рабочий контур: калькулятор, planning sessions, ретро, участники и invite-ссылки."
         actions={
           <>
-            <Button variant="primary" size="sm" onClick={() => navigate("/manage")}>
-              Открыть cockpit
+            <Button variant="primary" size="sm" onClick={() => navigate("/cms/planner")}>
+              Открыть калькулятор
             </Button>
             <Button variant="ghost" size="sm" className="whitespace-nowrap" onClick={loadOverview}>Обновить</Button>
           </>
         }
       />
       <HelpCallout title="Что здесь">
-        <p>Тайл-карточки кликабельны: можно сразу перейти к нужному разделу.</p>
+        <p>Тайл-карточки кликабельны и идут в основном порядке работы: калькулятор → сессии → ретро.</p>
         <p>Цифры обновляются вручную — кнопкой «Обновить». Удалённые из истории сессии в счётчики не входят.</p>
       </HelpCallout>
       {error ? <InlineError text={error} /> : null}
@@ -63,11 +63,25 @@ function OverviewCards({
 }) {
   const tiles: OverviewTile[] = [
     {
+      label: "Калькулятор",
+      value: overview.total_sprint_plans,
+      caption: "сохранённых расчётов",
+      to: "/cms/planner",
+      hint: "Открыть калькулятор capacity",
+    },
+    {
       label: "Сессии",
       value: overview.total_sessions,
       caption: `${overview.active_sessions} идёт сейчас`,
       to: "/cms/sessions",
       hint: "Открыть список сессий",
+    },
+    {
+      label: "Ретро",
+      value: overview.total_retros,
+      caption: `${overview.live_retros} идёт сейчас`,
+      to: "/cms/retro",
+      hint: "Открыть ретроспективы",
     },
     {
       label: "Участники",
@@ -99,7 +113,7 @@ function OverviewCards({
     },
   ];
   return (
-    <section className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+    <section className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7">
       {tiles.map((tile) => (
         <button
           key={tile.label}
