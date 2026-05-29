@@ -13,13 +13,16 @@ import { expect, test } from "@playwright/test";
 // -----------------------------------------------------------------------------
 
 test.describe("public surfaces", () => {
-  test("landing hub presents entry paths for manager and player", async ({ page }) => {
+  test("landing hub presents calculator, sessions, retro and demos", async ({ page }) => {
     await page.goto("/");
     await expect(
-      page.getByRole("heading", { level: 1, name: /Выберите, что нужно сделать сейчас/ }),
+      page.getByRole("heading", { level: 1, name: /Планирование, poker и ретро в одном месте/ }),
     ).toBeVisible();
-    await expect(page.getByRole("link", { name: "Открыть менеджерский экран" })).toBeVisible();
-    await expect(page.getByRole("link", { name: "Открыть демо для игрока" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Открыть калькулятор" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Открыть сессии" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Открыть ретро" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Демо голосования" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Демо ретро" })).toBeVisible();
   });
 
   test("unknown URL falls back to the 404 mascot", async ({ page }) => {
@@ -87,7 +90,7 @@ test.describe("participant flow", () => {
 test.describe("retro participant flow", () => {
   test("/r/:token opens the anonymous retro board", async ({ page }) => {
     // Same pattern as /demo?mock=1 — no backend in the preview build.
-    await page.goto("/r/demo?mock=1");
+    await page.goto("/r/demo-retro?mock=1");
 
     await expect(page.getByText("Демо ретроспектива")).toBeVisible();
     await expect(page.getByText("Что прошло хорошо")).toBeVisible();
