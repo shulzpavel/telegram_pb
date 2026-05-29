@@ -136,6 +136,34 @@ def _sprint_plan_row(row: asyncpg.Record) -> dict[str, Any]:
     }
 
 
+def _decode_jsonb(raw: Any) -> Any:
+    """Decode an asyncpg JSONB column (text/bytes/native) into a Python object."""
+    if isinstance(raw, (bytes, bytearray)):
+        return json.loads(raw.decode("utf-8"))
+    if isinstance(raw, str):
+        return json.loads(raw)
+    return raw
+
+
+def _retro_row(row: asyncpg.Record) -> dict[str, Any]:
+    """Serialize a cms_retros row. config/snapshot/ai_summary are JSONB."""
+    created_at = row["created_at"]
+    updated_at = row["updated_at"]
+    return {
+        "id": int(row["id"]),
+        "title": row["title"],
+        "status": row["status"],
+        "config": _decode_jsonb(row["config"]) or {},
+        "snapshot": _decode_jsonb(row["snapshot"]),
+        "ai_summary": _decode_jsonb(row["ai_summary"]),
+        "created_by": int(row["created_by"]) if row["created_by"] is not None else None,
+        "created_by_username": row["created_by_username"] if "created_by_username" in row.keys() else None,
+        "created_by_display_name": row["created_by_display_name"] if "created_by_display_name" in row.keys() else None,
+        "created_at": created_at.isoformat() if isinstance(created_at, datetime) else created_at,
+        "updated_at": updated_at.isoformat() if isinstance(updated_at, datetime) else updated_at,
+    }
+
+
 def _serialize_session(session: Session) -> dict[str, Any]:
     return SessionFactory.to_dict(session)
 
@@ -513,6 +541,21 @@ class PostgresCmsStore:
                 );
                 CREATE INDEX IF NOT EXISTS idx_cms_sprint_plans_updated
                     ON cms_sprint_plans(updated_at DESC, id DESC);
+
+                CREATE TABLE IF NOT EXISTS cms_retros (
+                    id BIGSERIAL PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'draft'
+                        CHECK (status IN ('draft', 'live', 'done')),
+                    config JSONB NOT NULL DEFAULT '{}'::jsonb,
+                    snapshot JSONB,
+                    ai_summary JSONB,
+                    created_by BIGINT REFERENCES cms_admin_accounts(id) ON DELETE SET NULL,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                );
+                CREATE INDEX IF NOT EXISTS idx_cms_retros_updated
+                    ON cms_retros(updated_at DESC, id DESC);
                 """
             )
 
@@ -1561,6 +1604,130 @@ class PostgresCmsStore:
             row = await conn.fetchrow(
                 "DELETE FROM cms_sprint_plans WHERE id = $1 RETURNING id",
                 plan_id,
+            )
+        return row is not None
+
+    # -- retrospectives --------------------------------------------------
+
+    _RETRO_SELECT = """
+        SELECT r.id, r.title, r.status, r.config, r.snapshot, r.ai_summary,
+               r.created_by, r.created_at, r.updated_at,
+               a.username AS created_by_username,
+               a.display_name AS created_by_display_name
+        FROM cms_retros r
+        LEFT JOIN cms_admin_accounts a ON a.id = r.created_by
+    """
+
+    async def list_retros(self) -> list[dict[str, Any]]:
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(
+                self._RETRO_SELECT + " ORDER BY r.updated_at DESC, r.id DESC"
+            )
+        return [_retro_row(row) for row in rows]
+
+    async def get_retro(self, retro_id: int) -> Optional[dict[str, Any]]:
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(self._RETRO_SELECT + " WHERE r.id = $1", retro_id)
+        return _retro_row(row) if row else None
+
+    async def create_retro(
+        self,
+        title: str,
+        config: dict[str, Any],
+        created_by: Optional[int],
+    ) -> dict[str, Any]:
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                INSERT INTO cms_retros (title, config, status, created_by)
+                VALUES ($1, $2::jsonb, 'draft', $3)
+                RETURNING id
+                """,
+                title.strip(),
+                json.dumps(config),
+                created_by,
+            )
+        retro = await self.get_retro(int(row["id"]))
+        assert retro is not None
+        return retro
+
+    async def update_retro_config(
+        self,
+        retro_id: int,
+        title: str,
+        config: dict[str, Any],
+    ) -> Optional[dict[str, Any]]:
+        async with self.pool.acquire() as conn:
+            updated = await conn.fetchrow(
+                """
+                UPDATE cms_retros
+                SET title = $2, config = $3::jsonb, updated_at = NOW()
+                WHERE id = $1
+                RETURNING id
+                """,
+                retro_id,
+                title.strip(),
+                json.dumps(config),
+            )
+        if not updated:
+            return None
+        return await self.get_retro(retro_id)
+
+    async def update_retro_status(self, retro_id: int, status: str) -> Optional[dict[str, Any]]:
+        async with self.pool.acquire() as conn:
+            updated = await conn.fetchrow(
+                "UPDATE cms_retros SET status = $2, updated_at = NOW() WHERE id = $1 RETURNING id",
+                retro_id,
+                status,
+            )
+        if not updated:
+            return None
+        return await self.get_retro(retro_id)
+
+    async def save_retro_snapshot(
+        self,
+        retro_id: int,
+        snapshot: dict[str, Any],
+        status: Optional[str] = None,
+    ) -> Optional[dict[str, Any]]:
+        async with self.pool.acquire() as conn:
+            updated = await conn.fetchrow(
+                """
+                UPDATE cms_retros
+                SET snapshot = $2::jsonb,
+                    status = COALESCE($3, status),
+                    updated_at = NOW()
+                WHERE id = $1
+                RETURNING id
+                """,
+                retro_id,
+                json.dumps(snapshot),
+                status,
+            )
+        if not updated:
+            return None
+        return await self.get_retro(retro_id)
+
+    async def save_retro_ai_summary(
+        self,
+        retro_id: int,
+        ai_summary: dict[str, Any],
+    ) -> Optional[dict[str, Any]]:
+        async with self.pool.acquire() as conn:
+            updated = await conn.fetchrow(
+                "UPDATE cms_retros SET ai_summary = $2::jsonb, updated_at = NOW() WHERE id = $1 RETURNING id",
+                retro_id,
+                json.dumps(ai_summary),
+            )
+        if not updated:
+            return None
+        return await self.get_retro(retro_id)
+
+    async def delete_retro(self, retro_id: int) -> bool:
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "DELETE FROM cms_retros WHERE id = $1 RETURNING id",
+                retro_id,
             )
         return row is not None
 

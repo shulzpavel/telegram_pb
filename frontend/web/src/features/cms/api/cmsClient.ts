@@ -2,6 +2,7 @@ import { CMS_PAGE_LIMIT, cmsUrl } from "../../../app/config";
 import { ApiError, requestJson } from "../../../shared/api/http";
 import type { Page, ParamValue } from "../../../shared/types/pagination";
 import type { AuditEvent, CmsAdmin, CmsPageAccess, CmsPermission, CmsPrincipal, CmsRole, JiraPreview, TaskItem, ThemeMode } from "./cmsTypes";
+import type { RetroAiSummary, RetroLiveState } from "../retro/retroLogic";
 
 const CMS_AUTH_HINT_KEY = "planning_poker_cms_auth";
 
@@ -312,6 +313,73 @@ export const cmsPlannerApi = {
     cmsFetch<{ ok: boolean; id: number }>(`/sprint-plans/${planId}`, {
       method: "DELETE",
     }),
+};
+
+export interface RetroSectionConfig {
+  section_id?: string;
+  title: string;
+}
+
+export interface RetroConfig {
+  sections: RetroSectionConfig[];
+  votes_per_person: number;
+  default_section_seconds: number;
+}
+
+export interface RetroRecord {
+  id: number;
+  title: string;
+  status: "draft" | "live" | "done" | string;
+  config: RetroConfig;
+  snapshot: Record<string, unknown> | null;
+  ai_summary: RetroAiSummary | null;
+  created_by: number | null;
+  created_by_username: string | null;
+  created_by_display_name: string | null;
+  created_at: string;
+  updated_at: string;
+  /** Present only on the single-record GET — the current live projection. */
+  live?: RetroLiveState | null;
+}
+
+export const cmsRetroApi = {
+  list: () => cmsFetch<{ items: RetroRecord[] }>("/retros"),
+  get: (retroId: number) => cmsFetch<RetroRecord>(`/retros/${retroId}`),
+  create: (body: { title: string; config: RetroConfig }) =>
+    cmsFetch<RetroRecord>("/retros", { method: "POST", body: JSON.stringify(body) }),
+  update: (retroId: number, body: { title: string; config: RetroConfig }) =>
+    cmsFetch<RetroRecord>(`/retros/${retroId}`, { method: "PUT", body: JSON.stringify(body) }),
+  delete: (retroId: number) =>
+    cmsFetch<{ ok: boolean; id: number }>(`/retros/${retroId}`, { method: "DELETE" }),
+  invite: (retroId: number) =>
+    cmsFetch<{ token: string; url: string; state: RetroLiveState }>(`/retros/${retroId}/invite`, {
+      method: "POST",
+    }),
+  openSection: (retroId: number, sectionId: string, seconds?: number | null) =>
+    cmsFetch<RetroLiveState>(`/retros/${retroId}/open-section`, {
+      method: "POST",
+      body: JSON.stringify({ section_id: sectionId, seconds: seconds ?? null }),
+    }),
+  closeSection: (retroId: number) =>
+    cmsFetch<RetroLiveState>(`/retros/${retroId}/close-section`, { method: "POST" }),
+  setPhase: (retroId: number, target: "voting" | "discussing") =>
+    cmsFetch<RetroLiveState>(`/retros/${retroId}/phase`, {
+      method: "POST",
+      body: JSON.stringify({ target }),
+    }),
+  addActionItem: (retroId: number, body: { text: string; assignee?: string | null }) =>
+    cmsFetch<RetroLiveState>(`/retros/${retroId}/action-items`, {
+      method: "POST",
+      body: JSON.stringify({ text: body.text, assignee: body.assignee ?? null }),
+    }),
+  removeActionItem: (retroId: number, itemId: string) =>
+    cmsFetch<RetroLiveState>(`/retros/${retroId}/action-items/${encodeURIComponent(itemId)}`, {
+      method: "DELETE",
+    }),
+  finalize: (retroId: number) =>
+    cmsFetch<RetroLiveState>(`/retros/${retroId}/finalize`, { method: "POST" }),
+  analyze: (retroId: number) =>
+    cmsFetch<{ ai_summary: RetroAiSummary }>(`/retros/${retroId}/analyze`, { method: "POST" }),
 };
 
 export const cmsTasksApi = {

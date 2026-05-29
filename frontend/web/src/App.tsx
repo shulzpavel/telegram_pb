@@ -14,6 +14,7 @@ const ManagerPage = lazy(() => import("./features/manager/ManagerPage"));
 const ForbiddenPage = lazy(() => import("./pages/ForbiddenPage"));
 const NotFoundPage = lazy(() => import("./pages/NotFoundPage"));
 const SessionPage = lazy(() => import("./pages/SessionPage"));
+const RetroPage = lazy(() => import("./pages/RetroPage"));
 
 function SessionDetailIndex() {
   const { id } = useParams<{ id: string }>();
@@ -97,6 +98,7 @@ function AppRoutes() {
           <Route path="/manage" element={<ManagerPage />} />
           <Route path="/manage/finished/:chatId" element={<FinishedSessionPage />} />
           <Route path="/s/:token" element={<SessionPage />} />
+          <Route path="/r/:token" element={<RetroPage />} />
           <Route path="/demo" element={<DemoPage />} />
           <Route path="/403" element={<ForbiddenPage />} />
           {/* Anything else falls through to the friendly mascot. */}

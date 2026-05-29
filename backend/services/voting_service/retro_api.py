@@ -1,0 +1,846 @@
+"""Retrospective API — public (participant) + manager (CMS) endpoints.
+
+Mirrors the planning-poker stack:
+
+* Live state lives in Redis (``retro:{id}``) via ``RedisRetroRepository``
+  with optimistic locking; mutations fan out over the pub/sub channel
+  ``retro_events:{id}`` to every connected WebSocket.
+* Participants join anonymously via a public ``web_retro:{token}`` link
+  (corporate email + role), exactly like the voting flow.
+* Managers configure/facilitate through cookie-authenticated CMS routes
+  guarded by ``cms.retro.view`` and audited.
+
+Cards are anonymous to *everyone* (the author is stored server-side only,
+for the durable snapshot). Vote anonymity is preserved by broadcasting
+only aggregate ``vote_count`` — each client tracks its own dots locally
+and reconciles them from its own join/state/vote responses.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+import os
+import re
+import uuid
+from datetime import datetime, timedelta, timezone
+from typing import Literal, Optional
+
+import redis.asyncio as aioredis
+from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect
+from pydantic import BaseModel, Field
+
+from app.domain.retro import (
+    DEFAULT_SECTION_SECONDS,
+    DEFAULT_VOTES_PER_PERSON,
+    PHASE_DISCUSSING,
+    PHASE_DONE,
+    PHASE_VOTING,
+    Retrospective,
+    RetroActionItem,
+    RetroCard,
+    RetroError,
+    RetroSection,
+    RetrospectiveFactory,
+)
+from services.voting_service._http_shared import (
+    CmsPrincipal,
+    _audit,
+    _get_cms_store,
+    _get_redis,
+    require_permission,
+)
+from services.voting_service.cms_rbac import PERM_RETRO_ANALYZE, PERM_RETRO_MANAGE, PERM_RETRO_VIEW
+from services.voting_service.participant_identity import (
+    stable_user_id_from_email,
+    validate_participant_email,
+    validate_participant_role,
+)
+from services.voting_service.rate_limit import client_ip, enforce_rate_limit
+from services.voting_service.ws_manager import redis_pubsub_listener
+
+logger = logging.getLogger(__name__)
+
+retro_router = APIRouter()
+
+RETRO_TOKEN_TTL = 8 * 3600
+REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
+
+RETRO_JOIN_RATE_MAX = int(os.getenv("RETRO_JOIN_RATE_MAX", "30"))
+RETRO_JOIN_RATE_WINDOW = int(os.getenv("RETRO_JOIN_RATE_WINDOW_SECONDS", "60"))
+RETRO_CARD_RATE_MAX = int(os.getenv("RETRO_CARD_RATE_MAX", "60"))
+RETRO_CARD_RATE_WINDOW = int(os.getenv("RETRO_CARD_RATE_WINDOW_SECONDS", "60"))
+RETRO_VOTE_RATE_MAX = int(os.getenv("RETRO_VOTE_RATE_MAX", "120"))
+RETRO_VOTE_RATE_WINDOW = int(os.getenv("RETRO_VOTE_RATE_WINDOW_SECONDS", "60"))
+RETRO_INVITE_RATE_MAX = int(os.getenv("RETRO_INVITE_RATE_MAX", "20"))
+RETRO_INVITE_RATE_WINDOW = int(os.getenv("RETRO_INVITE_RATE_WINDOW_SECONDS", "3600"))
+
+SECTION_ID_RE = re.compile(r"^[a-z0-9_-]{1,64}$")
+
+
+# ---------------------------------------------------------------------------
+# Pydantic models
+# ---------------------------------------------------------------------------
+
+
+class RetroSectionInput(BaseModel):
+    section_id: Optional[str] = Field(default=None, max_length=64, pattern=r"^[a-z0-9_-]+$")
+    title: str = Field(min_length=1, max_length=80)
+
+
+class RetroConfigInput(BaseModel):
+    sections: list[RetroSectionInput] = Field(default_factory=list, max_length=20)
+    votes_per_person: int = Field(default=DEFAULT_VOTES_PER_PERSON, ge=1, le=50)
+    default_section_seconds: int = Field(default=DEFAULT_SECTION_SECONDS, ge=0, le=7200)
+
+
+class RetroCreateRequest(BaseModel):
+    title: str = Field(min_length=1, max_length=200)
+    config: RetroConfigInput = Field(default_factory=RetroConfigInput)
+
+
+class RetroUpdateRequest(BaseModel):
+    title: str = Field(min_length=1, max_length=200)
+    config: RetroConfigInput = Field(default_factory=RetroConfigInput)
+
+
+class RetroOpenSectionRequest(BaseModel):
+    section_id: str = Field(min_length=1, max_length=64, pattern=r"^[a-z0-9_-]+$")
+    seconds: Optional[int] = Field(default=None, ge=0, le=7200)
+
+
+class RetroPhaseRequest(BaseModel):
+    target: Literal["voting", "discussing"]
+
+
+class RetroActionItemRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=500)
+    assignee: Optional[str] = Field(default=None, max_length=120)
+
+
+class RetroJoinRequest(BaseModel):
+    token: str = Field(min_length=1, max_length=128)
+    name: str = Field(min_length=1, max_length=120)
+    role: str = Field(default="backend", max_length=32)
+
+
+class RetroCardRequest(BaseModel):
+    token: str = Field(min_length=1, max_length=128)
+    participant_id: str = Field(min_length=1, max_length=80)
+    section_id: str = Field(min_length=1, max_length=64, pattern=r"^[a-z0-9_-]+$")
+    text: str = Field(min_length=1, max_length=1000)
+
+
+class RetroVoteRequest(BaseModel):
+    token: str = Field(min_length=1, max_length=128)
+    participant_id: str = Field(min_length=1, max_length=80)
+    card_id: str = Field(min_length=1, max_length=80)
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _retro_channel(retro_id: int) -> str:
+    return f"retro_events:{retro_id}"
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _get_retro_repo(request: Request):
+    repo = getattr(request.app.state, "retro_repository", None)
+    if repo is None:
+        raise HTTPException(status_code=503, detail="Retro storage is not configured")
+    return repo
+
+
+def _slugify_section(title: str, index: int) -> str:
+    base = "".join(ch if ch.isalnum() else "-" for ch in title.strip().lower()).strip("-")
+    return (base or f"section-{index + 1}")[:64]
+
+
+def _clean_title(raw: str) -> str:
+    title = raw.strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="Укажите название ретро")
+    return title
+
+
+def _retro_from_config(retro_id: int, title: str, config: dict) -> Retrospective:
+    """Build a fresh live Retrospective from a stored CMS config payload."""
+    sections: list[RetroSection] = []
+    seen: set[str] = set()
+    for index, raw in enumerate(config.get("sections") or []):
+        sid = str(raw.get("section_id") or _slugify_section(str(raw.get("title", "")), index))
+        if not SECTION_ID_RE.match(sid):
+            sid = _slugify_section(str(raw.get("title", "")), index)
+        base_sid = sid[:64]
+        counter = 2
+        while sid in seen:
+            suffix = f"-{counter}"
+            sid = f"{base_sid[:64 - len(suffix)]}{suffix}"
+            counter += 1
+        seen.add(sid)
+        sections.append(RetroSection(section_id=sid, title=str(raw.get("title", "")).strip() or sid))
+    if not sections:
+        sections = [
+            RetroSection(section_id="task", title="По задаче"),
+            RetroSection(section_id="sprint", title="По итогам спринта"),
+            RetroSection(section_id="process", title="По процессам"),
+        ]
+    return Retrospective(
+        retro_id=retro_id,
+        title=title,
+        sections=sections,
+        votes_per_person=int(config.get("votes_per_person", DEFAULT_VOTES_PER_PERSON)),
+        default_section_seconds=int(config.get("default_section_seconds", DEFAULT_SECTION_SECONDS)),
+    )
+
+
+def _anonymized_retro_snapshot(retro: Retrospective) -> dict:
+    """Durable retro snapshot safe to return from CMS APIs.
+
+    The live aggregate keeps authors and exact voter ids in Redis so domain
+    rules can enforce budgets. The durable Postgres copy must not expose
+    those identities because retro cards are promised to be anonymous.
+    """
+    return {
+        "retro_id": retro.retro_id,
+        "title": retro.title,
+        "sections": [s.to_dict() for s in retro.sections],
+        "votes_per_person": retro.votes_per_person,
+        "default_section_seconds": retro.default_section_seconds,
+        "phase": retro.phase,
+        "active_section_id": retro.active_section_id,
+        "section_deadline": retro.section_deadline,
+        "participants_count": len(retro.participants),
+        "cards": [
+            {
+                "card_id": card.card_id,
+                "section_id": card.section_id,
+                "text": card.text,
+                "created_at": card.created_at,
+                "vote_count": len(card.votes),
+            }
+            for card in retro.cards
+        ],
+        "action_items": [item.to_dict() for item in retro.action_items],
+        "ai_summary": retro.ai_summary,
+        "version": retro.version,
+    }
+
+
+def _redact_retro_row(row: dict) -> dict:
+    """Return a CMS row without author/voter identities in historical snapshots."""
+    safe = dict(row)
+    snapshot = safe.get("snapshot")
+    if isinstance(snapshot, dict) and "cards" in snapshot:
+        cards = []
+        for card in snapshot.get("cards") or []:
+            if not isinstance(card, dict):
+                continue
+            cards.append({
+                "card_id": card.get("card_id"),
+                "section_id": card.get("section_id"),
+                "text": card.get("text"),
+                "created_at": card.get("created_at"),
+                "vote_count": card.get("vote_count", len(card.get("votes", []) or [])),
+            })
+        safe["snapshot"] = {
+            key: value
+            for key, value in snapshot.items()
+            if key not in {"participants"}
+        }
+        safe["snapshot"]["cards"] = cards
+        safe["snapshot"]["participants_count"] = snapshot.get(
+            "participants_count",
+            len(snapshot.get("participants", {}) or {}),
+        )
+    return safe
+
+
+def _retro_from_anonymized_snapshot(data: dict, retro_id: int) -> Retrospective:
+    """Rebuild enough of a Retrospective from the safe snapshot for AI analysis."""
+    retro = Retrospective(
+        retro_id=retro_id,
+        title=str(data.get("title", "")),
+        sections=[RetroSection.from_dict(s) for s in data.get("sections", [])],
+        votes_per_person=int(data.get("votes_per_person", DEFAULT_VOTES_PER_PERSON)),
+        default_section_seconds=int(data.get("default_section_seconds", DEFAULT_SECTION_SECONDS)),
+        phase=str(data.get("phase", PHASE_DONE)),
+        active_section_id=data.get("active_section_id"),
+        section_deadline=data.get("section_deadline"),
+        ai_summary=data.get("ai_summary"),
+        version=int(data.get("version", 0)),
+    )
+    for card_data in data.get("cards", []):
+        card = RetroCard(
+            card_id=str(card_data.get("card_id", "")),
+            section_id=str(card_data.get("section_id", "")),
+            text=str(card_data.get("text", "")),
+            author_id=0,
+            author_name="",
+            created_at=str(card_data.get("created_at", "")),
+        )
+        card.votes = set(range(int(card_data.get("vote_count", 0))))
+        retro.cards.append(card)
+    for item_data in data.get("action_items", []):
+        try:
+            retro.action_items.append(RetroActionItem.from_dict(item_data))
+        except (TypeError, ValueError, KeyError):
+            continue
+    return retro
+
+
+def _build_retro_state(retro: Retrospective, viewer_id: Optional[int] = None) -> dict:
+    """Anonymous live projection shared by participants and the manager cockpit.
+
+    ``viewer_id`` only affects the ``my_*`` hints (which cards *I* voted,
+    how many dots I have left). Authors are never exposed. Broadcasts pass
+    ``viewer_id=None`` and clients keep their own dots locally.
+    """
+    ordered = list(retro.cards)
+    if retro.phase in (PHASE_VOTING, PHASE_DISCUSSING, PHASE_DONE):
+        ordered.sort(key=lambda c: (-len(c.votes), c.created_at))
+    else:
+        ordered.sort(key=lambda c: c.created_at)
+
+    cards = [
+        {
+            "card_id": c.card_id,
+            "section_id": c.section_id,
+            "text": c.text,
+            "vote_count": len(c.votes),
+        }
+        for c in ordered
+    ]
+
+    my_votes: list[str] = []
+    if viewer_id is not None:
+        my_votes = [c.card_id for c in retro.cards if viewer_id in c.votes]
+
+    return {
+        "retro_id": retro.retro_id,
+        "title": retro.title,
+        "phase": retro.phase,
+        "active_section_id": retro.active_section_id,
+        "section_deadline": retro.section_deadline,
+        "votes_per_person": retro.votes_per_person,
+        "default_section_seconds": retro.default_section_seconds,
+        "sections": [s.to_dict() for s in retro.sections],
+        "cards": cards,
+        "action_items": [a.to_dict() for a in retro.action_items],
+        "participants_count": len(retro.participants),
+        "ai_summary": retro.ai_summary if retro.phase == PHASE_DONE else None,
+        "my_votes": my_votes,
+        "my_votes_used": len(my_votes),
+        "my_votes_remaining": max(0, retro.votes_per_person - len(my_votes)),
+        "version": retro.version,
+    }
+
+
+async def _publish_retro(redis_client: aioredis.Redis, retro: Retrospective) -> None:
+    """Best-effort broadcast of the anonymous state to all WS listeners."""
+    try:
+        await redis_client.publish(
+            _retro_channel(retro.retro_id),
+            json.dumps({"type": "retro_state", "state": _build_retro_state(retro)}),
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("retro publish failed id=%s err=%r", retro.retro_id, exc)
+
+
+async def _resolve_retro_token(redis_client: aioredis.Redis, token: str) -> int:
+    data = await redis_client.get(f"web_retro:{token}")
+    if not data:
+        raise HTTPException(status_code=404, detail="Retro token not found or expired")
+    try:
+        return int(json.loads(data)["retro_id"])
+    except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+        raise HTTPException(status_code=404, detail="Retro token not found or expired") from exc
+
+
+async def _load_participant(redis_client: aioredis.Redis, token: str, participant_id: str) -> dict:
+    raw = await redis_client.get(f"retro_participant:{token}:{participant_id}")
+    if not raw:
+        raise HTTPException(status_code=403, detail="Participant not found or session expired")
+    try:
+        payload = json.loads(raw)
+        payload["user_id"] = int(payload["user_id"])
+        return payload
+    except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+        raise HTTPException(status_code=403, detail="Participant not found or session expired") from exc
+
+
+# ---------------------------------------------------------------------------
+# Public (participant) endpoints
+# ---------------------------------------------------------------------------
+
+
+@retro_router.post("/retro/join")
+async def retro_join(body: RetroJoinRequest, request: Request) -> dict:
+    """Join a retro by its public token (corporate email + team role)."""
+    try:
+        display_name = validate_participant_email(body.name)
+        team_role = validate_participant_role(body.role)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    redis_client = await _get_redis(request)
+    await enforce_rate_limit(
+        redis_client,
+        key=f"rl:retro_join:ip:{client_ip(request)}",
+        limit=RETRO_JOIN_RATE_MAX,
+        window_seconds=RETRO_JOIN_RATE_WINDOW,
+        error_detail="Too many join attempts",
+    )
+    retro_id = await _resolve_retro_token(redis_client, body.token)
+    await enforce_rate_limit(
+        redis_client,
+        key=f"rl:retro_join:token:{body.token}",
+        limit=RETRO_JOIN_RATE_MAX,
+        window_seconds=RETRO_JOIN_RATE_WINDOW,
+        error_detail="Too many join attempts",
+    )
+
+    participant_id = str(uuid.uuid4())
+    user_id = stable_user_id_from_email(display_name)
+
+    await redis_client.setex(
+        f"retro_participant:{body.token}:{participant_id}",
+        RETRO_TOKEN_TTL,
+        json.dumps({"name": display_name, "user_id": user_id, "role": team_role}),
+    )
+
+    repo = _get_retro_repo(request)
+    try:
+        retro, added = await repo.mutate_retro(
+            retro_id, lambda r: r.add_participant(user_id, display_name, team_role)
+        )
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Retro is not active") from None
+
+    if added:
+        await _publish_retro(redis_client, retro)
+
+    return {"participant_id": participant_id, "state": _build_retro_state(retro, user_id)}
+
+
+@retro_router.get("/retro/state/{token}")
+async def retro_state(token: str, request: Request, participant_id: Optional[str] = None) -> dict:
+    redis_client = await _get_redis(request)
+    retro_id = await _resolve_retro_token(redis_client, token)
+    repo = _get_retro_repo(request)
+    retro = await repo.get_retro(retro_id)
+    if retro is None:
+        raise HTTPException(status_code=404, detail="Retro is not active")
+
+    viewer_id: Optional[int] = None
+    if participant_id:
+        try:
+            viewer_id = (await _load_participant(redis_client, token, participant_id))["user_id"]
+        except HTTPException:
+            viewer_id = None
+    return _build_retro_state(retro, viewer_id)
+
+
+@retro_router.post("/retro/card")
+async def retro_add_card(body: RetroCardRequest, request: Request) -> dict:
+    redis_client = await _get_redis(request)
+    retro_id = await _resolve_retro_token(redis_client, body.token)
+    participant = await _load_participant(redis_client, body.token, body.participant_id)
+    user_id = participant["user_id"]
+    await enforce_rate_limit(
+        redis_client,
+        key=f"rl:retro_card:token:{body.token}:user:{user_id}",
+        limit=RETRO_CARD_RATE_MAX,
+        window_seconds=RETRO_CARD_RATE_WINDOW,
+        error_detail="Too many cards",
+    )
+
+    card_id = str(uuid.uuid4())
+
+    def _mutate(r: Retrospective):
+        return r.add_card(
+            card_id=card_id,
+            section_id=body.section_id,
+            text=body.text,
+            author_id=user_id,
+            author_name=participant.get("name", ""),
+            created_at=_now_iso(),
+        )
+
+    try:
+        retro, _ = await repo_mutate(request, retro_id, _mutate)
+    except RetroError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+
+    await _publish_retro(redis_client, retro)
+    return _build_retro_state(retro, user_id)
+
+
+@retro_router.post("/retro/vote")
+async def retro_vote(body: RetroVoteRequest, request: Request) -> dict:
+    redis_client = await _get_redis(request)
+    retro_id = await _resolve_retro_token(redis_client, body.token)
+    participant = await _load_participant(redis_client, body.token, body.participant_id)
+    user_id = participant["user_id"]
+    await enforce_rate_limit(
+        redis_client,
+        key=f"rl:retro_vote:token:{body.token}:user:{user_id}",
+        limit=RETRO_VOTE_RATE_MAX,
+        window_seconds=RETRO_VOTE_RATE_WINDOW,
+        error_detail="Too many votes",
+    )
+
+    try:
+        retro, _ = await repo_mutate(
+            request, retro_id, lambda r: r.toggle_vote(body.card_id, user_id)
+        )
+    except RetroError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+
+    await _publish_retro(redis_client, retro)
+    return _build_retro_state(retro, user_id)
+
+
+# ---------------------------------------------------------------------------
+# WebSocket endpoint
+# ---------------------------------------------------------------------------
+
+
+@retro_router.websocket("/retro-ws/{token}")
+async def retro_websocket(websocket: WebSocket, token: str) -> None:
+    app_state = websocket.scope["app"].state
+    redis_client = getattr(app_state, "web_redis", None)
+    repo = getattr(app_state, "retro_repository", None)
+    if redis_client is None or repo is None:
+        await websocket.close(code=4503)
+        return
+
+    token_data = await redis_client.get(f"web_retro:{token}")
+    if not token_data:
+        await websocket.close(code=4004)
+        return
+    try:
+        retro_id = int(json.loads(token_data)["retro_id"])
+    except (json.JSONDecodeError, KeyError, TypeError, ValueError):
+        await websocket.close(code=4004)
+        return
+
+    await websocket.accept()
+
+    try:
+        retro = await repo.get_retro(retro_id)
+        state = _build_retro_state(retro) if retro else {"phase": "lobby", "cards": []}
+        await websocket.send_text(json.dumps({"type": "retro_state", "state": state}))
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("retro WS initial state failed: %s", exc)
+        await websocket.close(code=1011)
+        return
+
+    channel = _retro_channel(retro_id)
+    listen_task = asyncio.create_task(redis_pubsub_listener(REDIS_URL, token, channel, websocket))
+    try:
+        while True:
+            try:
+                await asyncio.wait_for(websocket.receive(), timeout=30)
+            except asyncio.TimeoutError:
+                try:
+                    await websocket.send_text(json.dumps({"type": "ping"}))
+                except Exception:
+                    break
+    except WebSocketDisconnect:
+        pass
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("retro WS receive error: %s", exc)
+    finally:
+        listen_task.cancel()
+        try:
+            await listen_task
+        except (asyncio.CancelledError, Exception):
+            pass
+
+
+# ---------------------------------------------------------------------------
+# Shared mutate helper (maps missing live state to 404)
+# ---------------------------------------------------------------------------
+
+
+async def repo_mutate(request: Request, retro_id: int, mutator):
+    repo = _get_retro_repo(request)
+    try:
+        return await repo.mutate_retro(retro_id, mutator)
+    except KeyError:
+        raise HTTPException(status_code=409, detail="Retro session is not started") from None
+
+
+# ---------------------------------------------------------------------------
+# Manager (CMS) endpoints
+# ---------------------------------------------------------------------------
+
+
+@retro_router.get("/cms/retros")
+async def cms_list_retros(
+    request: Request,
+    _: CmsPrincipal = Depends(require_permission(PERM_RETRO_VIEW)),
+) -> dict:
+    items = await _get_cms_store(request).list_retros()
+    return {"items": [_redact_retro_row(item) for item in items]}
+
+
+@retro_router.post("/cms/retros")
+async def cms_create_retro(
+    body: RetroCreateRequest,
+    request: Request,
+    actor: CmsPrincipal = Depends(require_permission(PERM_RETRO_MANAGE)),
+) -> dict:
+    retro = await _get_cms_store(request).create_retro(
+        title=_clean_title(body.title),
+        config=body.config.model_dump(),
+        created_by=actor.id,
+    )
+    await _audit(request, "cms.retro.create", actor.username, "ok", {"retro_id": retro["id"]})
+    return retro
+
+
+@retro_router.get("/cms/retros/{retro_id}")
+async def cms_get_retro(
+    retro_id: int,
+    request: Request,
+    _: CmsPrincipal = Depends(require_permission(PERM_RETRO_VIEW)),
+) -> dict:
+    row = await _get_cms_store(request).get_retro(retro_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Retro not found")
+    row = _redact_retro_row(row)
+    # Attach live state when the session has been started.
+    live = await _get_retro_repo(request).get_retro(retro_id)
+    row["live"] = _build_retro_state(live) if live else None
+    return row
+
+
+@retro_router.put("/cms/retros/{retro_id}")
+async def cms_update_retro(
+    retro_id: int,
+    body: RetroUpdateRequest,
+    request: Request,
+    actor: CmsPrincipal = Depends(require_permission(PERM_RETRO_MANAGE)),
+) -> dict:
+    store = _get_cms_store(request)
+    existing = await store.get_retro(retro_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Retro not found")
+    if existing["status"] not in ("draft",):
+        raise HTTPException(status_code=409, detail="Нельзя менять конфигурацию запущенного ретро")
+    retro = await store.update_retro_config(retro_id, _clean_title(body.title), body.config.model_dump())
+    await _audit(request, "cms.retro.update", actor.username, "ok", {"retro_id": retro_id})
+    return retro
+
+
+@retro_router.delete("/cms/retros/{retro_id}")
+async def cms_delete_retro(
+    retro_id: int,
+    request: Request,
+    actor: CmsPrincipal = Depends(require_permission(PERM_RETRO_MANAGE)),
+) -> dict:
+    deleted = await _get_cms_store(request).delete_retro(retro_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Retro not found")
+    await _get_retro_repo(request).delete_retro(retro_id)
+    await _audit(request, "cms.retro.delete", actor.username, "ok", {"retro_id": retro_id})
+    return {"ok": True, "id": retro_id}
+
+
+@retro_router.post("/cms/retros/{retro_id}/invite")
+async def cms_retro_invite(
+    retro_id: int,
+    request: Request,
+    actor: CmsPrincipal = Depends(require_permission(PERM_RETRO_MANAGE)),
+) -> dict:
+    """Bootstrap live state from config and mint a public participant link."""
+    store = _get_cms_store(request)
+    row = await store.get_retro(retro_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Retro not found")
+
+    repo = _get_retro_repo(request)
+    default = _retro_from_config(retro_id, row["title"], row.get("config") or {})
+    retro = await repo.ensure_retro(retro_id, default)
+
+    redis_client = await _get_redis(request)
+    await enforce_rate_limit(
+        redis_client,
+        key=f"rl:retro_invite:actor:{actor.username}:retro:{retro_id}",
+        limit=RETRO_INVITE_RATE_MAX,
+        window_seconds=RETRO_INVITE_RATE_WINDOW,
+        error_detail="Too many retro invite requests",
+    )
+    token = str(uuid.uuid4())
+    await redis_client.setex(f"web_retro:{token}", RETRO_TOKEN_TTL, json.dumps({"retro_id": retro_id}))
+
+    if row["status"] == "draft":
+        await store.update_retro_status(retro_id, "live")
+
+    await _audit(request, "cms.retro.invite", actor.username, "ok", {"retro_id": retro_id})
+    return {"token": token, "url": f"/r/{token}", "state": _build_retro_state(retro)}
+
+
+@retro_router.post("/cms/retros/{retro_id}/open-section")
+async def cms_retro_open_section(
+    retro_id: int,
+    body: RetroOpenSectionRequest,
+    request: Request,
+    actor: CmsPrincipal = Depends(require_permission(PERM_RETRO_MANAGE)),
+) -> dict:
+    def _mutate(r: Retrospective):
+        seconds = body.seconds if body.seconds is not None else r.default_section_seconds
+        deadline = None
+        if seconds and seconds > 0:
+            deadline = (datetime.now(timezone.utc) + timedelta(seconds=seconds)).isoformat()
+        r.open_section(body.section_id, deadline)
+
+    retro = await _manager_mutate(request, retro_id, _mutate)
+    await _audit(request, "cms.retro.section.open", actor.username, "ok",
+                 {"retro_id": retro_id, "section_id": body.section_id})
+    return _build_retro_state(retro)
+
+
+@retro_router.post("/cms/retros/{retro_id}/close-section")
+async def cms_retro_close_section(
+    retro_id: int,
+    request: Request,
+    actor: CmsPrincipal = Depends(require_permission(PERM_RETRO_MANAGE)),
+) -> dict:
+    retro = await _manager_mutate(request, retro_id, lambda r: r.close_section())
+    await _audit(request, "cms.retro.section.close", actor.username, "ok", {"retro_id": retro_id})
+    return _build_retro_state(retro)
+
+
+@retro_router.post("/cms/retros/{retro_id}/phase")
+async def cms_retro_phase(
+    retro_id: int,
+    body: RetroPhaseRequest,
+    request: Request,
+    actor: CmsPrincipal = Depends(require_permission(PERM_RETRO_MANAGE)),
+) -> dict:
+    target = body.target.strip().lower()
+    if target == PHASE_VOTING:
+        mutate = lambda r: r.start_voting()
+    elif target == PHASE_DISCUSSING:
+        mutate = lambda r: r.start_discussion()
+    else:
+        raise HTTPException(status_code=400, detail="Unknown phase target")
+    retro = await _manager_mutate(request, retro_id, mutate)
+    await _audit(request, "cms.retro.phase", actor.username, "ok", {"retro_id": retro_id, "target": target})
+    return _build_retro_state(retro)
+
+
+@retro_router.post("/cms/retros/{retro_id}/action-items")
+async def cms_retro_add_action_item(
+    retro_id: int,
+    body: RetroActionItemRequest,
+    request: Request,
+    actor: CmsPrincipal = Depends(require_permission(PERM_RETRO_MANAGE)),
+) -> dict:
+    item_id = str(uuid.uuid4())
+
+    def _mutate(r: Retrospective):
+        r.add_action_item(item_id=item_id, text=body.text, assignee=body.assignee, created_at=_now_iso())
+
+    retro = await _manager_mutate(request, retro_id, _mutate)
+    await _audit(request, "cms.retro.action_item.add", actor.username, "ok", {"retro_id": retro_id})
+    return _build_retro_state(retro)
+
+
+@retro_router.delete("/cms/retros/{retro_id}/action-items/{item_id}")
+async def cms_retro_remove_action_item(
+    retro_id: int,
+    item_id: str,
+    request: Request,
+    actor: CmsPrincipal = Depends(require_permission(PERM_RETRO_MANAGE)),
+) -> dict:
+    retro = await _manager_mutate(request, retro_id, lambda r: r.remove_action_item(item_id))
+    await _audit(request, "cms.retro.action_item.remove", actor.username, "ok", {"retro_id": retro_id})
+    return _build_retro_state(retro)
+
+
+@retro_router.post("/cms/retros/{retro_id}/finalize")
+async def cms_retro_finalize(
+    retro_id: int,
+    request: Request,
+    actor: CmsPrincipal = Depends(require_permission(PERM_RETRO_MANAGE)),
+) -> dict:
+    retro = await _manager_mutate(request, retro_id, lambda r: r.finalize())
+    snapshot = _anonymized_retro_snapshot(retro)
+    await _get_cms_store(request).save_retro_snapshot(retro_id, snapshot, status="done")
+    await _audit(request, "cms.retro.finalize", actor.username, "ok", {"retro_id": retro_id})
+    return _build_retro_state(retro)
+
+
+@retro_router.post("/cms/retros/{retro_id}/analyze")
+async def cms_retro_analyze(
+    retro_id: int,
+    request: Request,
+    actor: CmsPrincipal = Depends(require_permission(PERM_RETRO_ANALYZE)),
+) -> dict:
+    store = _get_cms_store(request)
+    repo = _get_retro_repo(request)
+    retro = await repo.get_retro(retro_id)
+    if retro is None:
+        row = await store.get_retro(retro_id)
+        if row and row.get("snapshot"):
+            retro = _retro_from_anonymized_snapshot(row["snapshot"], retro_id)
+    if retro is None:
+        raise HTTPException(status_code=404, detail="Retro not found")
+    if retro.phase != PHASE_DONE:
+        raise HTTPException(status_code=409, detail="Сначала завершите ретро")
+    if not retro.cards:
+        raise HTTPException(status_code=400, detail="Нет карточек для анализа")
+
+    await enforce_rate_limit(
+        await _get_redis(request),
+        key=f"rl:retro_ai:actor:{actor.username}",
+        limit=int(os.getenv("RETRO_AI_RATE_MAX", "20")),
+        window_seconds=int(os.getenv("RETRO_AI_RATE_WINDOW_SECONDS", "3600")),
+        error_detail="Слишком много AI-запросов, попробуйте позже",
+    )
+
+    from services.voting_service.retro_ai_llm import LlmRetroError, generate_retro_analysis
+
+    http_session = getattr(request.app.state, "http_session", None)
+    if http_session is None:
+        raise HTTPException(status_code=503, detail="AI is not configured")
+    try:
+        summary = await generate_retro_analysis(http_session, retro)
+    except LlmRetroError as exc:
+        await _audit(request, "cms.retro.analyze", actor.username, "error", {"retro_id": retro_id, "error": exc.message})
+        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+
+    await store.save_retro_ai_summary(retro_id, summary)
+    try:
+        retro, _ = await repo.mutate_retro(retro_id, lambda r: _set_ai(r, summary))
+        await _publish_retro(await _get_redis(request), retro)
+    except KeyError:
+        pass
+    await _audit(request, "cms.retro.analyze", actor.username, "ok", {"retro_id": retro_id})
+    return {"ai_summary": summary}
+
+
+def _set_ai(retro: Retrospective, summary: dict) -> None:
+    retro.ai_summary = summary
+    retro.bump_version()
+
+
+async def _manager_mutate(request: Request, retro_id: int, mutator) -> Retrospective:
+    """Run a manager mutation, broadcast, and map domain errors to HTTP."""
+    try:
+        retro, _ = await repo_mutate(request, retro_id, mutator)
+    except RetroError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+    await _publish_retro(await _get_redis(request), retro)
+    return retro

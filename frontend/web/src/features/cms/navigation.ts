@@ -12,6 +12,9 @@ export const CMS_PERMISSIONS = {
   appSessionsManage: "app.sessions.manage",
   webParticipantsDelete: "cms.web_participants.delete",
   planner: "cms.planner.view",
+  retro: "cms.retro.view",
+  retroManage: "cms.retro.manage",
+  retroAnalyze: "cms.retro.analyze",
 } as const;
 
 /**
@@ -86,6 +89,15 @@ export const cmsTabs: CmsTab[] = [
     permission: CMS_PERMISSIONS.planner,
     path: "/cms/planner",
     routePath: "planner",
+    group: "operations",
+  },
+  {
+    key: "retro",
+    label: "Ретроспективы",
+    description: "Живое ретро: настраиваем секции, команда подключается по ссылке, в конце — AI-анализ итогов.",
+    permission: CMS_PERMISSIONS.retro,
+    path: "/cms/retro",
+    routePath: "retro",
     group: "operations",
   },
   {

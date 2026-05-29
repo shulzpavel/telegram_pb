@@ -25,6 +25,9 @@ PERM_TASKS_MANAGE = "cms.tasks.manage"
 PERM_APP_SESSIONS_MANAGE = "app.sessions.manage"
 PERM_WEB_PARTICIPANTS_DELETE = "cms.web_participants.delete"
 PERM_PLANNER_VIEW = "cms.planner.view"
+PERM_RETRO_VIEW = "cms.retro.view"
+PERM_RETRO_MANAGE = "cms.retro.manage"
+PERM_RETRO_ANALYZE = "cms.retro.analyze"
 
 CMS_PERMISSION_DEFINITIONS: list[dict[str, str]] = [
     {
@@ -91,6 +94,21 @@ CMS_PERMISSION_DEFINITIONS: list[dict[str, str]] = [
         "key": PERM_PLANNER_VIEW,
         "label": "View sprint planner",
         "description": "Can view and edit the sprint capacity/velocity planner.",
+    },
+    {
+        "key": PERM_RETRO_VIEW,
+        "label": "View retrospectives",
+        "description": "Can view team retrospectives.",
+    },
+    {
+        "key": PERM_RETRO_MANAGE,
+        "label": "Manage retrospectives",
+        "description": "Can create, configure, facilitate, and delete team retrospectives.",
+    },
+    {
+        "key": PERM_RETRO_ANALYZE,
+        "label": "Analyze retrospectives",
+        "description": "Can generate paid AI analysis for completed retrospectives.",
     },
 ]
 
@@ -163,6 +181,13 @@ CMS_PAGE_DEFINITIONS: list[dict[str, Any]] = [
         "permission_key": PERM_PLANNER_VIEW,
         "sort_order": 35,
     },
+    {
+        "key": "retro",
+        "label": "Retrospectives",
+        "path": "/cms/retro",
+        "permission_key": PERM_RETRO_VIEW,
+        "sort_order": 36,
+    },
 ]
 
 OPERATIONAL_VIEW_PERMISSIONS = [
@@ -174,6 +199,7 @@ OPERATIONAL_VIEW_PERMISSIONS = [
     PERM_WEB_VIEW,
     PERM_EVENTS_VIEW,
     PERM_PLANNER_VIEW,
+    PERM_RETRO_VIEW,
 ]
 
 ALL_PERMISSION_KEYS = [item["key"] for item in CMS_PERMISSION_DEFINITIONS]

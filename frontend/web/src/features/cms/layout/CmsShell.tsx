@@ -16,6 +16,7 @@ const AccessShell = lazy(() => import("../access/AccessShell"));
 const AuditEventsPage = lazy(() => import("../events/AuditEventsPage"));
 const OverviewPage = lazy(() => import("../overview/OverviewPage"));
 const PlannerShell = lazy(() => import("../planner/PlannerShell"));
+const RetroShell = lazy(() => import("../retro/RetroShell"));
 const SessionsPage = lazy(() => import("../sessions/SessionsPage"));
 const TokensPage = lazy(() => import("../tokens/TokensPage"));
 const UsersPage = lazy(() => import("../users/UsersPage"));
@@ -66,6 +67,8 @@ export default function CmsShell({
   const canManageAccess = hasPermission(principal, CMS_PERMISSIONS.accessManage);
   const canManageTasks = hasPermission(principal, CMS_PERMISSIONS.tasksManage);
   const canManageSessions = hasPermission(principal, CMS_PERMISSIONS.appSessionsManage);
+  const canManageRetro = hasPermission(principal, CMS_PERMISSIONS.retroManage);
+  const canAnalyzeRetro = hasPermission(principal, CMS_PERMISSIONS.retroAnalyze);
 
   const activeTab = useMemo<CmsTab | null>(() => {
     const match = visibleTabs.find((item) => {
@@ -254,6 +257,9 @@ export default function CmsShell({
               ) : null}
               {hasPermission(principal, CMS_PERMISSIONS.planner) ? (
                 <Route path="planner/*" element={<PlannerShell canManage />} />
+              ) : null}
+              {hasPermission(principal, CMS_PERMISSIONS.retro) ? (
+                <Route path="retro/*" element={<RetroShell canManage={canManageRetro} canAnalyze={canAnalyzeRetro} />} />
               ) : null}
               {/* Deprecated routes from the Telegram-era console: route any
                   lingering bookmarks back to the active landing page. */}

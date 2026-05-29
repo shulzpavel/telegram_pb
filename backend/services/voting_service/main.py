@@ -17,6 +17,7 @@ from services.voting_service.app_api import app_router
 from services.voting_service.health import health_router
 from services.voting_service.metrics import metrics_router
 from services.voting_service.cms_api import cms_router
+from services.voting_service.retro_api import retro_router
 from services.voting_service.web_api import web_router, REDIS_URL
 
 logger = logging.getLogger(__name__)
@@ -74,6 +75,11 @@ async def lifespan(app: FastAPI):
     web_redis = await aioredis.from_url(REDIS_URL, decode_responses=True)
     app.state.web_redis = web_redis
 
+    # Live retrospective store — shares the same Redis instance/URL as the
+    # voting live state and pub/sub fan-out.
+    from services.voting_service.retro_redis_repository import RedisRetroRepository
+    app.state.retro_repository = RedisRetroRepository(REDIS_URL)
+
     # Long-lived HTTP session for outbound calls to the jira-service container
     # and to the Anthropic API. Re-used across requests so the connection pool
     # and TLS handshakes survive — without it the per-request
@@ -103,6 +109,7 @@ async def lifespan(app: FastAPI):
     for label, closer in (
         ("repository", _maybe_close(getattr(app.state, "repository", None))),
         ("cms_store", _maybe_close(getattr(app.state, "cms_store", None))),
+        ("retro_repository", _maybe_close(getattr(app.state, "retro_repository", None))),
         ("web_redis", _maybe_aclose(getattr(app.state, "web_redis", None))),
         ("http_session", _maybe_close(getattr(app.state, "http_session", None))),
     ):
@@ -161,6 +168,7 @@ app.include_router(metrics_router, prefix="/metrics", tags=["metrics"])
 app.include_router(app_router, prefix="/api/v1", tags=["app"])
 app.include_router(web_router, prefix="/api/v1", tags=["web"])
 app.include_router(cms_router, prefix="/api/v1", tags=["cms"])
+app.include_router(retro_router, prefix="/api/v1", tags=["retro"])
 
 
 if __name__ == "__main__":

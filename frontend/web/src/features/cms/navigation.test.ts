@@ -31,6 +31,7 @@ describe("CMS navigation", () => {
       "sessions",
       "users",
       "planner",
+      "retro",
       "tokens",
       "events",
       "access",
@@ -85,7 +86,7 @@ describe("CMS navigation", () => {
   });
 
   it("keeps the canonical tab count stable", () => {
-    expect(cmsTabs).toHaveLength(7);
+    expect(cmsTabs).toHaveLength(8);
   });
 });
 
@@ -105,6 +106,7 @@ describe("groupVisibleTabs", () => {
       "sessions",
       "users",
       "planner",
+      "retro",
       "tokens",
     ]);
   });
