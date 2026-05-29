@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, Navigate, Route, Routes, useNavigate, useParams } from "react-router-dom";
 import {
   AiSparkleButton,
@@ -27,6 +27,7 @@ import {
   type RetroRecord,
   type RetroSectionConfig,
 } from "../api/cmsClient";
+import { useUnsavedChangesGuard } from "../hooks/useUnsavedChangesGuard";
 import { RetroAiView } from "./RetroAiView";
 import { RetroBoard, RetroOutcomesPanel } from "./RetroBoard";
 import {
@@ -251,6 +252,7 @@ function RetroCreatePage({ canManage }: { canManage: boolean }) {
         initialTitle=""
         initialConfig={{ sections: DEFAULT_SECTIONS, votes_per_person: 5, default_section_seconds: 300 }}
         submitLabel="Создать"
+        warnOnUnsaved
         onSubmit={handleCreate}
         onCancel={() => navigate("/cms/retro")}
       />
@@ -266,12 +268,14 @@ function RetroConfigForm({
   initialTitle,
   initialConfig,
   submitLabel,
+  warnOnUnsaved = false,
   onSubmit,
   onCancel,
 }: {
   initialTitle: string;
   initialConfig: RetroConfig;
   submitLabel: string;
+  warnOnUnsaved?: boolean;
   onSubmit: (title: string, config: RetroConfig) => Promise<void>;
   onCancel: () => void;
 }) {
@@ -281,6 +285,14 @@ function RetroConfigForm({
   const [timerMinutes, setTimerMinutes] = useState(Math.round((initialConfig.default_section_seconds ?? 0) / 60));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const initialDraftRef = useRef(JSON.stringify({ title, sections, votesPerPerson, timerMinutes }));
+  const currentDraft = useMemo(
+    () => JSON.stringify({ title, sections, votesPerPerson, timerMinutes }),
+    [sections, timerMinutes, title, votesPerPerson],
+  );
+  const unsavedGuard = useUnsavedChangesGuard({
+    when: warnOnUnsaved && currentDraft !== initialDraftRef.current && !busy,
+  });
 
   function updateSection(index: number, value: string) {
     setSections((prev) => prev.map((s, i) => (i === index ? { ...s, title: value } : s)));
@@ -308,11 +320,11 @@ function RetroConfigForm({
     setError(null);
     setBusy(true);
     try {
-      await onSubmit(cleanTitle, {
+      await unsavedGuard.runWithoutPrompt(() => onSubmit(cleanTitle, {
         sections: cleanSections,
         votes_per_person: Math.max(1, votesPerPerson),
         default_section_seconds: Math.max(0, timerMinutes) * 60,
-      });
+      }));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Не удалось сохранить");
     } finally {
@@ -388,10 +400,11 @@ function RetroConfigForm({
         <Button variant="primary" onClick={() => void submit()} loading={busy}>
           {submitLabel}
         </Button>
-        <Button variant="ghost" onClick={onCancel}>
+        <Button variant="ghost" onClick={() => unsavedGuard.confirmIfNeeded(onCancel)}>
           Отмена
         </Button>
       </div>
+      {unsavedGuard.dialog}
     </Surface>
   );
 }

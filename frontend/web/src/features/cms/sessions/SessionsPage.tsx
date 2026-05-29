@@ -46,6 +46,7 @@ import {
 } from "../components/CmsPrimitives";
 import { useCmsList } from "../hooks/useCmsList";
 import { useDebouncedValue } from "../hooks/useDebouncedValue";
+import { useUnsavedChangesGuard } from "../hooks/useUnsavedChangesGuard";
 import { formatDate, shortHash } from "../../../shared/lib/format";
 import { displaySessionTitle, sessionKeyChip } from "./sessionTitle";
 import { normalizeOptionalNumber, normalizeOptionalText } from "./taskInput";
@@ -77,6 +78,9 @@ export default function SessionsPage({ canManageTasks, canManageSessions }: Sess
   const [createTitle, setCreateTitle] = useState("");
   const [createBusy, setCreateBusy] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
+  const createSessionGuard = useUnsavedChangesGuard({
+    when: createOpen && createTitle.trim().length > 0 && !createBusy,
+  });
   const debouncedQ = useDebouncedValue(q);
   const params = useMemo(
     () => ({ q: debouncedQ, active: active === "" ? undefined : active === "true" }),
@@ -113,7 +117,7 @@ export default function SessionsPage({ canManageTasks, canManageSessions }: Sess
       storeManagerSession(session);
       setCreateOpen(false);
       setCreateTitle("");
-      navigate(`/cms/sessions/${session.chat_id}/cockpit`);
+      createSessionGuard.runWithoutPrompt(() => navigate(`/cms/sessions/${session.chat_id}/cockpit`));
     } catch (err) {
       setCreateError(err instanceof Error ? err.message : "Не удалось создать сессию");
     } finally {
@@ -381,13 +385,14 @@ export default function SessionsPage({ canManageTasks, canManageSessions }: Sess
         busy={createBusy}
         error={createError}
         onTitleChange={setCreateTitle}
-        onCancel={() => {
+        onCancel={() => createSessionGuard.confirmIfNeeded(() => {
           if (createBusy) return;
           setCreateOpen(false);
           setCreateError(null);
-        }}
+        })}
         onSubmit={submitCreate}
       />
+      {createSessionGuard.dialog}
 
       {selectedId ? (
         <SessionDetails

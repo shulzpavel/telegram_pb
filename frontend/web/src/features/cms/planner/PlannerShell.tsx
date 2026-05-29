@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Navigate, Route, Routes, useNavigate, useParams } from "react-router-dom";
 import {
   Alert,
@@ -40,6 +40,7 @@ import {
   type PlannerTrack,
   type PlannerTrackResult,
 } from "./plannerCalc";
+import { useUnsavedChangesGuard } from "../hooks/useUnsavedChangesGuard";
 
 interface PlannerShellProps {
   canManage: boolean;
@@ -479,6 +480,11 @@ function PlannerEditorPage({
   const [legacyBackendDetected, setLegacyBackendDetected] = useState(false);
   const [pendingDelete, setPendingDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const initialCreateDraftRef = useRef(JSON.stringify({ name, notes, inputs }));
+  const currentDraft = useMemo(() => JSON.stringify({ name, notes, inputs }), [inputs, name, notes]);
+  const unsavedGuard = useUnsavedChangesGuard({
+    when: mode === "create" && currentDraft !== initialCreateDraftRef.current && !saving,
+  });
 
   useEffect(() => {
     if (mode !== "edit" || !planId || !Number.isFinite(planId)) return;
@@ -547,7 +553,7 @@ function PlannerEditorPage({
       );
 
       if (mode === "create") {
-        navigate(`../${saved.id}`, { replace: true });
+        unsavedGuard.runWithoutPrompt(() => navigate(`../${saved.id}`, { replace: true }));
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : "Не удалось сохранить план.";
@@ -571,7 +577,7 @@ function PlannerEditorPage({
     setDeleting(true);
     try {
       await cmsPlannerApi.delete(planId);
-      navigate("..");
+      unsavedGuard.runWithoutPrompt(() => navigate(".."));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось удалить план.");
     } finally {
@@ -587,7 +593,7 @@ function PlannerEditorPage({
         description="Заполните поля — расчёт обновляется по мере ввода. Сохраните, чтобы вернуться позже."
         actions={
           <div className="flex flex-wrap gap-2">
-            <Button variant="ghost" size="sm" onClick={() => navigate("..")}>К списку</Button>
+            <Button variant="ghost" size="sm" onClick={() => unsavedGuard.confirmIfNeeded(() => navigate(".."))}>К списку</Button>
             {mode === "edit" && canManage ? (
               <Button variant="danger" size="sm" onClick={() => setPendingDelete(true)}>
                 Удалить
@@ -634,7 +640,7 @@ function PlannerEditorPage({
               Сохранено
             </span>
           ) : null}
-          <Button variant="ghost" onClick={() => navigate("..")} disabled={saving}>Отмена</Button>
+          <Button variant="ghost" onClick={() => unsavedGuard.confirmIfNeeded(() => navigate(".."))} disabled={saving}>Отмена</Button>
           {canManage ? (
             <Button
               variant="primary"
@@ -659,6 +665,7 @@ function PlannerEditorPage({
         onConfirm={() => void confirmDelete()}
         onCancel={() => setPendingDelete(false)}
       />
+      {unsavedGuard.dialog}
     </section>
   );
 }
