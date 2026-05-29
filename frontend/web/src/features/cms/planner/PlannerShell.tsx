@@ -948,14 +948,6 @@ function PlannerForm({
         </div>
       </FormCard>
 
-      <FactCard
-        tracks={inputs.tracks}
-        actualByTrack={inputs.actualByTrack}
-        onChange={setActualForTrack}
-        onClear={clearAllActuals}
-        disabled={disabled}
-      />
-
       <FormCard
         title="Команда по ролям"
         description="Каждой роли — один трек. Capacity роли (человек × рабочие дни − отсутствия) пойдёт в план соответствующего трека."
@@ -1037,6 +1029,14 @@ function PlannerForm({
           hint="Сюда удобно записать особые риски, новички, праздники"
         />
       </FormCard>
+
+      <FactCard
+        tracks={inputs.tracks}
+        actualByTrack={inputs.actualByTrack}
+        onChange={setActualForTrack}
+        onClear={clearAllActuals}
+        disabled={disabled}
+      />
     </div>
   );
 }
