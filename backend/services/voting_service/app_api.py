@@ -30,6 +30,7 @@ from app.usecases.manage_tasks import (
     ReorderTasksUseCase,
     TaskMutationResult,
     TaskQueueError,
+    ReopenCompletedTaskUseCase,
     UpdateTaskUseCase,
 )
 from services.voting_service._http_shared import (
@@ -118,6 +119,10 @@ class AppSessionRenameRequest(BaseModel):
 
 class FinalEstimateRequest(BaseModel):
     value: int = Field(ge=0, le=1000)
+
+
+class ReopenCompletedRequest(BaseModel):
+    expected_version: Optional[int] = Field(default=None, ge=0)
 
 
 class AiTaskSummary(BaseModel):
@@ -1083,6 +1088,44 @@ async def app_skip_task(
     await _publish_state(request, session)
     await _audit(request, "app.session.skip", actor.username, "ok", {"chat_id": chat_id})
     return _manager_session_payload(session)
+
+
+@app_router.post("/app/sessions/{chat_id}/completed/{task_id}/reopen")
+async def app_reopen_completed_task(
+    chat_id: int,
+    task_id: str,
+    body: ReopenCompletedRequest,
+    request: Request,
+    topic_id: Optional[int] = None,
+    actor: CmsPrincipal = Depends(_manager_dep),
+) -> dict:
+    use_case = ReopenCompletedTaskUseCase(request.app.state.repository)
+    try:
+        result = await use_case.execute(
+            chat_id=chat_id,
+            topic_id=topic_id,
+            task_id=task_id,
+            expected_version=body.expected_version,
+        )
+    except TaskQueueError as exc:
+        await _audit(
+            request,
+            "app.session.completed_reopen",
+            actor.username,
+            "failed",
+            {"error": str(exc), "chat_id": chat_id, "task_id": task_id},
+        )
+        _raise_task_error(exc)
+    await _ensure_current_task_description(request, chat_id, topic_id, session=result.session)
+    await _publish_state(request, result.session)
+    await _audit(
+        request,
+        "app.session.completed_reopen",
+        actor.username,
+        "ok",
+        {"chat_id": chat_id, "task_id": task_id},
+    )
+    return _manager_session_payload(result.session)
 
 
 @app_router.post("/app/sessions/{chat_id}/final-estimate")

@@ -24,6 +24,7 @@ import { ManagerSessionChrome } from "./ManagerSessionChrome";
 
 /** Page size for the completed-tasks list. Mirrors backend default of 20. */
 const TASKS_PAGE_SIZE = 20;
+const MANAGER_SESSION_STORAGE_KEY = "pp_manager_session";
 
 function toSafeNumber(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
@@ -265,7 +266,11 @@ export default function FinishedSessionPage() {
           // Re-mount the body whenever chatId changes so the progressive
           // list seed is consumed cleanly (the hook only honors the seed
           // on first load for a given paramsKey).
-          <FinishedSummaryBody key={chatId} chatId={chatId} summary={summary} />
+          <FinishedSummaryBody
+            key={chatId}
+            chatId={chatId}
+            summary={summary}
+          />
         )}
       </div>
 
@@ -429,7 +434,17 @@ function FinishedSummarySkeleton() {
   );
 }
 
-function FinishedSummaryBody({ chatId, summary }: { chatId: number; summary: SessionSummary }) {
+function FinishedSummaryBody({
+  chatId,
+  summary,
+}: {
+  chatId: number;
+  summary: SessionSummary;
+}) {
+  const navigate = useNavigate();
+  const [reopenBusy, setReopenBusy] = useState<string | null>(null);
+  const [reopenError, setReopenError] = useState<string | null>(null);
+
   const duration = useMemo(() => formatDuration(summary.started_at, summary.finished_at), [summary]);
   const stats = useMemo(() => normalizeSummaryStats(summary.stats), [summary.stats]);
   const total = stats.total_completed;
@@ -496,8 +511,39 @@ function FinishedSummaryBody({ chatId, summary }: { chatId: number; summary: Ses
   // progressive list.
   const items = isPaginated ? list.items : summary.completed_tasks;
 
+  const reopenTask = useCallback(
+    async (taskId: string) => {
+      setReopenBusy(taskId);
+      setReopenError(null);
+      try {
+        const updated = await managerApi.reopenCompletedTask(
+          chatId,
+          taskId,
+          summary.topic_id,
+        );
+        window.localStorage.setItem(
+          MANAGER_SESSION_STORAGE_KEY,
+          JSON.stringify({
+            chatId: updated.chat_id,
+            topicId: updated.topic_id,
+            title: updated.title,
+            token: updated.token,
+            inviteUrl: updated.invite_url,
+          }),
+        );
+        navigate("/manage");
+      } catch (err) {
+        setReopenError(err instanceof Error ? err.message : "Не удалось переоткрыть задачу");
+      } finally {
+        setReopenBusy(null);
+      }
+    },
+    [chatId, navigate, summary.topic_id],
+  );
+
   return (
     <div className="space-y-6">
+      {reopenError ? <Alert tone="danger">{reopenError}</Alert> : null}
       {/* META + STATS */}
       <Surface className="p-5">
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
@@ -537,7 +583,13 @@ function FinishedSummaryBody({ chatId, summary }: { chatId: number; summary: Ses
           {/* Mobile: compact cards (no horizontal scroll). */}
           <ul className="flex flex-col gap-3 bg-canvas p-3 md:hidden">
             {items.map((entry, idx) => (
-              <TaskCard key={entry.task_id} index={idx + 1} entry={entry} />
+              <TaskCard
+                key={entry.task_id}
+                index={idx + 1}
+                entry={entry}
+                reopenBusy={reopenBusy}
+                onReopen={reopenTask}
+              />
             ))}
           </ul>
           {/* Desktop: regular table; cells use break-words / fixed max-widths
@@ -557,7 +609,13 @@ function FinishedSummaryBody({ chatId, summary }: { chatId: number; summary: Ses
               </thead>
               <tbody className="divide-y divide-line">
                 {items.map((entry, idx) => (
-                  <TaskRow key={entry.task_id} index={idx + 1} entry={entry} />
+                  <TaskRow
+                    key={entry.task_id}
+                    index={idx + 1}
+                    entry={entry}
+                    reopenBusy={reopenBusy}
+                    onReopen={reopenTask}
+                  />
                 ))}
               </tbody>
             </table>
@@ -636,7 +694,17 @@ function MetaRow({ label, children }: { label: string; children: React.ReactNode
   );
 }
 
-function TaskRow({ index, entry }: { index: number; entry: CompletedTask }) {
+function TaskRow({
+  index,
+  entry,
+  reopenBusy,
+  onReopen,
+}: {
+  index: number;
+  entry: CompletedTask;
+  reopenBusy: string | null;
+  onReopen: (taskId: string) => void;
+}) {
   const distribution = Object.entries(entry.distribution).sort((a, b) => b[1] - a[1]);
   const max = distribution.reduce((acc, [, count]) => Math.max(acc, count), 1);
 
@@ -656,11 +724,22 @@ function TaskRow({ index, entry }: { index: number; entry: CompletedTask }) {
         <p className="max-w-[28rem] break-words font-semibold text-ink">{entry.summary}</p>
       </td>
       <td className="px-4 py-3 text-center">
-        {entry.story_points !== null ? (
-          <span className="rounded-md bg-emerald-100 px-2 py-0.5 text-sm font-bold tabular-nums text-emerald-700">{entry.story_points}</span>
-        ) : (
-          <span className="text-xs text-ink4">—</span>
-        )}
+        <div className="flex flex-col items-center gap-2">
+          {entry.story_points !== null ? (
+            <span className="rounded-md bg-emerald-100 px-2 py-0.5 text-sm font-bold tabular-nums text-emerald-700">{entry.story_points}</span>
+          ) : (
+            <span className="text-xs text-ink4">—</span>
+          )}
+          <Button
+            size="sm"
+            variant="secondary"
+            disabled={reopenBusy !== null}
+            loading={reopenBusy === entry.task_id}
+            onClick={() => { void onReopen(entry.task_id); }}
+          >
+            Переоценить
+          </Button>
+        </div>
       </td>
       <td className="px-4 py-3 text-center text-sm font-semibold tabular-nums text-ink2">{entry.voter_count}</td>
       <td className="px-4 py-3">
@@ -706,7 +785,17 @@ function TaskRow({ index, entry }: { index: number; entry: CompletedTask }) {
 /** Mobile-only compact card for the finished-tasks list. Mirrors the data
  *  available in `TaskRow` but stacks vertically so we never produce a
  *  horizontal scroll inside the page. */
-function TaskCard({ index, entry }: { index: number; entry: CompletedTask }) {
+function TaskCard({
+  index,
+  entry,
+  reopenBusy,
+  onReopen,
+}: {
+  index: number;
+  entry: CompletedTask;
+  reopenBusy: string | null;
+  onReopen: (taskId: string) => void;
+}) {
   const distribution = Object.entries(entry.distribution).sort((a, b) => b[1] - a[1]);
   const max = distribution.reduce((acc, [, count]) => Math.max(acc, count), 1);
   return (
@@ -736,6 +825,16 @@ function TaskCard({ index, entry }: { index: number; entry: CompletedTask }) {
           {entry.consensus ? <Badge tone="success">Consensus</Badge> : null}
         </div>
       </div>
+      <Button
+        size="sm"
+        variant="secondary"
+        className="mt-3 w-full"
+        disabled={reopenBusy !== null}
+        loading={reopenBusy === entry.task_id}
+        onClick={() => { void onReopen(entry.task_id); }}
+      >
+        Переоценить
+      </Button>
       <p className="mt-3 text-xs text-ink3">
         Голосов: <span className="font-semibold tabular-nums text-ink2">{entry.voter_count}</span>
       </p>

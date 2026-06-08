@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Optional
 
 from app.domain.session import Session
@@ -78,6 +79,65 @@ def _normalize_text(value: Optional[str]) -> Optional[str]:
         return None
     normalized = value.strip()
     return normalized or None
+
+
+def _completed_tasks_in_batch(session: Session) -> list[Task]:
+    """Tasks already played in the active batch (mirrors app_api helper)."""
+    completed = list(session.last_batch)
+    if session.batch_completed:
+        return completed + list(session.tasks_queue)
+    return completed + list(session.tasks_queue[: session.current_task_index])
+
+
+def _completed_task_ids(session: Session) -> set[str]:
+    return {task.task_id for task in _completed_tasks_in_batch(session)}
+
+
+def _find_completed_task_reference(session: Session, task_id: str) -> Task:
+    for task in _completed_tasks_in_batch(session):
+        if task.task_id == task_id:
+            return task
+    raise TaskQueueError("Task is not in completed history", status_code=404)
+
+
+def _remove_completed_task_from_buckets(session: Session, task_id: str) -> None:
+    """Drop a played task from last_batch, history and the completed queue slice."""
+    completed_queue_end = len(session.tasks_queue) if session.batch_completed else session.current_task_index
+    for index in range(completed_queue_end - 1, -1, -1):
+        if session.tasks_queue[index].task_id == task_id:
+            session.tasks_queue.pop(index)
+            if index < session.current_task_index:
+                session.current_task_index -= 1
+
+    session.last_batch = [task for task in session.last_batch if task.task_id != task_id]
+    session.history = [task for task in session.history if task.task_id != task_id]
+
+
+def _reopen_completed_task(session: Session, task_id: str) -> Task:
+    if task_id not in _completed_task_ids(session):
+        raise TaskQueueError("Task is not in completed history", status_code=404)
+    if session.is_voting_active:
+        raise TaskQueueError("Cannot reopen a completed task while voting is active", status_code=409)
+
+    task = _find_completed_task_reference(session, task_id)
+    preserved_sp = task.story_points
+    _remove_completed_task_from_buckets(session, task_id)
+
+    task.votes.clear()
+    task.completed_at = None
+    task.story_points = preserved_sp
+    task.touch()
+
+    insert_at = max(0, min(session.current_task_index, len(session.tasks_queue)))
+    session.tasks_queue.insert(insert_at, task)
+    session.current_task_index = insert_at
+
+    session.batch_completed = False
+    session.revealed_task_id = None
+    session.current_batch_started_at = datetime.utcnow().isoformat()
+    if not session.last_batch_started_at:
+        session.last_batch_started_at = session.current_batch_started_at
+    return task
 
 
 def _update_current_index_by_id(session: Session, current_task_id: Optional[str]) -> None:
@@ -287,5 +347,25 @@ class ReorderTasksUseCase:
             _update_current_index_by_id(session, current_task_id)
             session.bump_tasks_version()
             return TaskMutationResult(session=session, tasks=tuple(session.tasks_queue))
+
+        return await _mutate_session(self.session_repo, chat_id, topic_id, mutate)
+
+
+class ReopenCompletedTaskUseCase:
+    def __init__(self, session_repo: SessionRepository):
+        self.session_repo = session_repo
+
+    async def execute(
+        self,
+        chat_id: int,
+        topic_id: Optional[int],
+        task_id: str,
+        expected_version: Optional[int] = None,
+    ) -> TaskMutationResult:
+        def mutate(session: Session) -> TaskMutationResult:
+            _assert_version(session, expected_version)
+            task = _reopen_completed_task(session, task_id)
+            session.bump_tasks_version()
+            return TaskMutationResult(session=session, task=task)
 
         return await _mutate_session(self.session_repo, chat_id, topic_id, mutate)

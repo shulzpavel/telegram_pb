@@ -13,6 +13,7 @@ from app.usecases.manage_tasks import (
     MoveTaskUseCase,
     ReorderTasksUseCase,
     TaskQueueError,
+    ReopenCompletedTaskUseCase,
     UpdateTaskUseCase,
 )
 
@@ -204,6 +205,179 @@ class TestTaskQueueManagement:
                 await ReorderTasksUseCase(repo).execute(1, None, [task2.task_id, task1.task_id], expected_version=0)
 
             assert exc.value.status_code == 409
+        finally:
+            if path.exists():
+                path.unlink()
+
+
+class TestReopenCompletedTask:
+    @pytest.mark.asyncio
+    async def test_reopen_completed_task_from_queue_slice(self):
+        repo, path = temp_repo("test_reopen_completed_queue")
+        try:
+            played = Task(summary="Played", story_points=5)
+            played.votes[1] = "5"
+            played.completed_at = "2026-01-01T00:00:00"
+            current = Task(summary="Current")
+            future = Task(summary="Future")
+            session = Session(
+                chat_id=1,
+                topic_id=None,
+                tasks_queue=[played, current, future],
+                current_task_index=1,
+            )
+            await repo.save_session(session)
+
+            result = await ReopenCompletedTaskUseCase(repo).execute(
+                1,
+                None,
+                played.task_id,
+                expected_version=0,
+            )
+
+            updated = await repo.get_session(1, None)
+            assert result.task.task_id == played.task_id
+            assert updated.current_task.task_id == played.task_id
+            assert updated.current_task.story_points == 5
+            assert updated.current_task.votes == {}
+            assert updated.current_task.completed_at is None
+            assert updated.batch_completed is False
+            assert updated.current_batch_started_at is not None
+            assert [task.summary for task in updated.tasks_queue] == ["Played", "Current", "Future"]
+            assert updated.tasks_version == 1
+        finally:
+            if path.exists():
+                path.unlink()
+
+    @pytest.mark.asyncio
+    async def test_reopen_removes_task_from_last_batch_and_history(self):
+        repo, path = temp_repo("test_reopen_completed_batch")
+        try:
+            played_batch = Task(summary="Played", story_points=3)
+            played_history = Task.from_dict(played_batch.to_dict())
+            session = Session(
+                chat_id=1,
+                topic_id=None,
+                last_batch=[played_batch],
+                history=[played_history],
+                batch_completed=True,
+            )
+            await repo.save_session(session)
+
+            await ReopenCompletedTaskUseCase(repo).execute(
+                1,
+                None,
+                played_batch.task_id,
+                expected_version=0,
+            )
+
+            updated = await repo.get_session(1, None)
+            assert updated.last_batch == []
+            assert updated.history == []
+            assert updated.current_task.summary == "Played"
+            assert updated.current_task.story_points == 3
+            assert updated.current_task.votes == {}
+        finally:
+            if path.exists():
+                path.unlink()
+
+    @pytest.mark.asyncio
+    async def test_rejects_future_queue_task(self):
+        repo, path = temp_repo("test_rejects_future_task_reopen")
+        try:
+            played = Task(summary="Played", story_points=5)
+            future = Task(summary="Future")
+            session = Session(
+                chat_id=1,
+                topic_id=None,
+                tasks_queue=[played, future],
+                current_task_index=1,
+            )
+            await repo.save_session(session)
+
+            with pytest.raises(TaskQueueError) as exc:
+                await ReopenCompletedTaskUseCase(repo).execute(
+                    1,
+                    None,
+                    future.task_id,
+                    expected_version=0,
+                )
+
+            assert exc.value.status_code == 404
+        finally:
+            if path.exists():
+                path.unlink()
+
+    @pytest.mark.asyncio
+    async def test_rejects_reopen_while_voting_active(self):
+        repo, path = temp_repo("test_rejects_reopen_while_voting")
+        try:
+            played = Task(summary="Played", story_points=5)
+            current = Task(summary="Current")
+            session = Session(
+                chat_id=1,
+                topic_id=None,
+                tasks_queue=[played, current],
+                current_task_index=1,
+                current_batch_started_at="2026-01-01T00:00:00",
+            )
+            await repo.save_session(session)
+
+            with pytest.raises(TaskQueueError) as exc:
+                await ReopenCompletedTaskUseCase(repo).execute(
+                    1,
+                    None,
+                    played.task_id,
+                    expected_version=0,
+                )
+
+            assert exc.value.status_code == 409
+        finally:
+            if path.exists():
+                path.unlink()
+
+    @pytest.mark.asyncio
+    async def test_reopen_then_recomplete_updates_summary_totals(self):
+        """Full re-estimate loop: played task reopens, gets new SP, returns to completed slice."""
+        from services.voting_service.app_api import _summary_payload
+
+        repo, path = temp_repo("test_reopen_recomplete_summary")
+        try:
+            played = Task(summary="Played", story_points=5)
+            played.votes[1] = "5"
+            played.completed_at = "2026-01-01T00:00:00"
+            current = Task(summary="Current")
+            session = Session(
+                chat_id=1,
+                topic_id=None,
+                tasks_queue=[played, current],
+                current_task_index=1,
+            )
+            await repo.save_session(session)
+
+            before = _summary_payload(session, title="Session")
+            assert before["stats"]["total_completed"] == 1
+            assert before["stats"]["total_story_points"] == 5
+
+            await ReopenCompletedTaskUseCase(repo).execute(1, None, played.task_id, expected_version=0)
+
+            mid = await repo.get_session(1, None)
+            during = _summary_payload(mid, title="Session")
+            assert during["stats"]["total_completed"] == 0
+            assert during["stats"]["total_story_points"] == 0
+            assert mid.current_task.story_points == 5
+            assert mid.current_task.votes == {}
+
+            mid.current_task.story_points = 8
+            mid.current_task.votes[1] = "8"
+            mid.current_task_index = 1
+            await repo.save_session(mid)
+
+            after = await repo.get_session(1, None)
+            final = _summary_payload(after, title="Session")
+            assert final["stats"]["total_completed"] == 1
+            assert final["stats"]["total_story_points"] == 8
+            assert final["completed_tasks"][0]["story_points"] == 8
         finally:
             if path.exists():
                 path.unlink()

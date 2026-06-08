@@ -729,6 +729,35 @@ function ManagerWorkspace({
     }
   }
 
+  async function reopenCompletedTask(taskId: string) {
+    if (!sessionRef || !session) return;
+    setBusy("reopen");
+    setError(null);
+    try {
+      const updated = await managerApi.reopenCompletedTask(
+        sessionRef.chatId,
+        taskId,
+        sessionRef.topicId,
+        session.tasks_version,
+      );
+      setSession((prev) =>
+        mergePaginatedRefresh(prev, {
+          ...updated,
+          token: sessionRef.token,
+          invite_url: sessionRef.inviteUrl,
+          title: sessionRef.title,
+        }),
+      );
+      historyPrefetchRef.current = null;
+      await loadTasks(sessionRef, "replace");
+      toast.success("Задача снова активна — обсудите и зафиксируйте новый SP");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Не удалось переоткрыть задачу");
+    } finally {
+      setBusy(null);
+    }
+  }
+
   async function finishAndOpenReport() {
     if (!sessionRef) return;
     setBusy("finish");
@@ -875,6 +904,7 @@ function ManagerWorkspace({
         onSkip={() => applyAction("skip", () => managerApi.skip(sessionRef.chatId))}
         onOpenReport={finishAndOpenReport}
         onFinalEstimate={selectFinalEstimate}
+        onReopenCompleted={reopenCompletedTask}
       />
     </div>
   );
@@ -1345,6 +1375,7 @@ function ControlRoom({
   onSkip,
   onOpenReport,
   onFinalEstimate,
+  onReopenCompleted,
 }: {
   phase: string;
   task: ManagerSession["state"]["task"];
@@ -1368,6 +1399,7 @@ function ControlRoom({
   onSkip: () => void;
   onOpenReport: () => void;
   onFinalEstimate: (value: number) => void;
+  onReopenCompleted: (taskId: string) => void;
 }) {
   const meta = PHASE_META[phase] ?? PHASE_META.waiting;
   const votedCount = participants.filter((p) => p.voted).length;
@@ -1554,7 +1586,11 @@ function ControlRoom({
                 : `Показано ${completedTasks.length} из ${completedCount}`}
             </span>
           </div>
-          <HistoryStrip entries={completedTasks} />
+          <HistoryStrip
+            entries={completedTasks}
+            busy={busy}
+            onReopen={onReopenCompleted}
+          />
           {historyError ? (
             <Alert tone="danger" className="mt-3">{historyError}</Alert>
           ) : null}
@@ -1701,7 +1737,15 @@ function FinalEstimateBlock({
   );
 }
 
-function HistoryStrip({ entries }: { entries: CompletedTask[] }) {
+function HistoryStrip({
+  entries,
+  busy,
+  onReopen,
+}: {
+  entries: CompletedTask[];
+  busy: string | null;
+  onReopen: (taskId: string) => void;
+}) {
   // Reverse-chronological: latest played task first, so the manager always
   // sees the freshest decision without scrolling.
   const ordered = [...entries].reverse();
@@ -1709,14 +1753,27 @@ function HistoryStrip({ entries }: { entries: CompletedTask[] }) {
     <div className="mt-3 overflow-x-auto">
       <div className="flex gap-3 pb-1">
         {ordered.map((entry) => (
-          <HistoryCard key={entry.task_id} entry={entry} />
+          <HistoryCard
+            key={entry.task_id}
+            entry={entry}
+            busy={busy}
+            onReopen={onReopen}
+          />
         ))}
       </div>
     </div>
   );
 }
 
-function HistoryCard({ entry }: { entry: CompletedTask }) {
+function HistoryCard({
+  entry,
+  busy,
+  onReopen,
+}: {
+  entry: CompletedTask;
+  busy: string | null;
+  onReopen: (taskId: string) => void;
+}) {
   const distribution = Object.entries(entry.distribution).sort((a, b) => b[1] - a[1]);
   const max = distribution.reduce((acc, [, count]) => Math.max(acc, count), 1);
   return (
@@ -1729,6 +1786,15 @@ function HistoryCard({ entry }: { entry: CompletedTask }) {
           <span className="text-[11px] font-semibold uppercase text-ink4">no SP</span>
         )}
       </div>
+      <Button
+        size="sm"
+        variant="secondary"
+        className="mt-2 w-full"
+        disabled={busy !== null}
+        onClick={() => onReopen(entry.task_id)}
+      >
+        Переоценить
+      </Button>
       <p className="mt-2 break-words text-sm font-semibold text-ink">{entry.summary}</p>
       {distribution.length > 0 ? (
         <div className="mt-3 space-y-1">

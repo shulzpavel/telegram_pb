@@ -164,6 +164,24 @@ export const managerApi = {
       body: JSON.stringify({ value }),
     }),
 
+  reopenCompletedTask: (
+    chatId: number,
+    taskId: string,
+    topicId: number | null = null,
+    expectedVersion?: number | null,
+  ) =>
+    appFetch<ManagerSession>(
+      `/sessions/${chatId}/completed/${encodeURIComponent(taskId)}/reopen${query({
+        topic_id: topicId,
+      })}`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          expected_version: expectedVersion ?? null,
+        }),
+      },
+    ),
+
   /**
    * Detailed report for the finished session screen. Returns completed
    * tasks with full vote breakdowns, aggregate stats and timing.

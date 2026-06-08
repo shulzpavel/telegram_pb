@@ -66,6 +66,23 @@ def test_serialize_completed_task_includes_ai_summary() -> None:
     assert payload["ai_summary"]["description"] == "OAuth rollout"
 
 
+def test_summary_payload_excludes_reopened_task_from_completed_slice() -> None:
+    session = Session(chat_id=1, topic_id=None)
+    reopened = Task(summary="One", story_points=5)
+    reopened.votes.clear()
+    reopened.completed_at = None
+    session.batch_completed = False
+    session.tasks_queue = [reopened]
+    session.current_task_index = 0
+    session.current_batch_started_at = "2026-01-01T00:00:00"
+
+    payload = _summary_payload(session, title="Session")
+
+    assert payload["stats"]["total_completed"] == 0
+    assert payload["stats"]["total_story_points"] == 0
+    assert payload["completed_tasks"] == []
+
+
 def test_summary_payload_includes_total_story_points() -> None:
     session = Session(chat_id=1, topic_id=None)
     session.batch_completed = True
