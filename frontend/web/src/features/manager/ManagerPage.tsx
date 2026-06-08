@@ -101,6 +101,7 @@ function storeSession(session: ManagerSession): ManagerSessionRef {
     title: session.title,
     token: session.token,
     inviteUrl: session.invite_url,
+    teamId: session.team_id ?? null,
   };
   window.localStorage.setItem(STORAGE_KEY, JSON.stringify(ref));
   return ref;

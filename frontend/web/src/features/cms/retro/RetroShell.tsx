@@ -20,6 +20,7 @@ import {
   MobileRecordCard,
   MobileRecordField,
   SectionHeader,
+  Toolbar,
 } from "../components/CmsPrimitives";
 import {
   cmsRetroApi,
@@ -41,11 +42,25 @@ import { useRetro } from "./useRetro";
 
 const DEFAULT_SECTIONS: RetroSectionConfig[] = DEFAULT_RETRO_SECTIONS.map((section) => ({ ...section }));
 
-export default function RetroShell({ canManage = false, canAnalyze = false }: { canManage?: boolean; canAnalyze?: boolean }) {
+import type { CmsPrincipal } from "../api/cmsTypes";
+import { TeamBadge } from "../components/TeamBadge";
+import { TeamFilter, teamFilterParams } from "../components/TeamFilter";
+import { TeamSelect, needsTeamPicker, resolveDefaultTeamId } from "../components/TeamSelect";
+import { useCmsTeams } from "../hooks/useCmsTeams";
+
+export default function RetroShell({
+  principal,
+  canManage = false,
+  canAnalyze = false,
+}: {
+  principal: CmsPrincipal;
+  canManage?: boolean;
+  canAnalyze?: boolean;
+}) {
   return (
     <Routes>
-      <Route index element={<RetroListPage canManage={canManage} />} />
-      <Route path="new" element={<RetroCreatePage canManage={canManage} />} />
+      <Route index element={<RetroListPage principal={principal} canManage={canManage} />} />
+      <Route path="new" element={<RetroCreatePage principal={principal} canManage={canManage} />} />
       <Route path=":id" element={<RetroDetailPage canManage={canManage} canAnalyze={canAnalyze} />} />
       <Route path="*" element={<Navigate to="/cms/retro" replace />} />
     </Routes>
@@ -56,9 +71,12 @@ export default function RetroShell({ canManage = false, canAnalyze = false }: { 
 // List
 // ---------------------------------------------------------------------------
 
-function RetroListPage({ canManage }: { canManage: boolean }) {
+function RetroListPage({ principal, canManage }: { principal: CmsPrincipal; canManage: boolean }) {
   const navigate = useNavigate();
   const toast = useToast();
+  const { teams } = useCmsTeams(principal);
+  const [teamFilter, setTeamFilter] = useState("");
+  const [teamSort, setTeamSort] = useState(false);
   const [items, setItems] = useState<RetroRecord[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [confirmTarget, setConfirmTarget] = useState<RetroRecord | null>(null);
@@ -66,10 +84,13 @@ function RetroListPage({ canManage }: { canManage: boolean }) {
 
   const reload = useCallback(() => {
     cmsRetroApi
-      .list()
+      .list({
+        ...teamFilterParams(teamFilter),
+        sort: teamSort && principal.is_superuser ? "team_then_updated" : undefined,
+      })
       .then((res) => setItems(res.items))
       .catch((e) => setError(e instanceof Error ? e.message : "Не удалось загрузить ретро"));
-  }, []);
+  }, [principal.is_superuser, teamFilter, teamSort]);
 
   useEffect(() => {
     reload();
@@ -106,6 +127,19 @@ function RetroListPage({ canManage }: { canManage: boolean }) {
         }
       />
       {error ? <InlineError text={error} /> : null}
+      {principal.is_superuser ? (
+        <Toolbar>
+          <TeamFilter teams={teams} value={teamFilter} onChange={setTeamFilter} />
+          <SelectField
+            aria-label="Сортировка ретро"
+            value={teamSort ? "team" : "updated"}
+            onChange={(event) => setTeamSort(event.target.value === "team")}
+          >
+            <option value="updated">По дате обновления</option>
+            <option value="team">По команде</option>
+          </SelectField>
+        </Toolbar>
+      ) : null}
       <DataTable
         columns={["Ретро", "Статус", "Секции", "AI", "Обновлено", "Действия"]}
         error={null}
@@ -139,7 +173,12 @@ function RetroListPage({ canManage }: { canManage: boolean }) {
                 {retro.title}
               </Link>
             }
-            meta={`Обновлено ${formatRetroDate(retro.updated_at)}`}
+            meta={
+              <span className="flex flex-wrap items-center gap-2">
+                <TeamBadge teamId={retro.team_id} team={retro.team} />
+                <span>Обновлено {formatRetroDate(retro.updated_at)}</span>
+              </span>
+            }
             action={<StatusBadge status={retro.status} />}
             footer={
               <>
@@ -231,16 +270,25 @@ function formatRetroDate(value: string): string {
 // Create
 // ---------------------------------------------------------------------------
 
-function RetroCreatePage({ canManage }: { canManage: boolean }) {
+function RetroCreatePage({ principal, canManage }: { principal: CmsPrincipal; canManage: boolean }) {
   const navigate = useNavigate();
   const toast = useToast();
+  const { teams } = useCmsTeams(principal);
+  const [teamId, setTeamId] = useState<number | "">(() => resolveDefaultTeamId(teams));
 
   if (!canManage) {
     return <InlineError text="Недостаточно прав для создания ретроспектив." />;
   }
 
   async function handleCreate(title: string, config: RetroConfig) {
-    const created = await cmsRetroApi.create({ title, config });
+    if (needsTeamPicker(teams, principal.is_superuser) && teamId === "") {
+      throw new Error("Выберите команду");
+    }
+    const created = await cmsRetroApi.create({
+      title,
+      config,
+      team_id: teamId === "" ? undefined : teamId,
+    });
     toast.success("Ретро создано");
     navigate(`/cms/retro/${created.id}`);
   }
@@ -248,6 +296,9 @@ function RetroCreatePage({ canManage }: { canManage: boolean }) {
   return (
     <div className="space-y-5">
       <SectionHeader title="Новое ретро" description="Задайте название и секции для обсуждения." />
+      {needsTeamPicker(teams, principal.is_superuser) ? (
+        <TeamSelect teams={teams} value={teamId} required={teams.length > 1} onChange={setTeamId} />
+      ) : null}
       <RetroConfigForm
         initialTitle=""
         initialConfig={{ sections: DEFAULT_SECTIONS, votes_per_person: 5, default_section_seconds: 300 }}

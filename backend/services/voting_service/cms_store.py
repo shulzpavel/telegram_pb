@@ -124,7 +124,7 @@ def _sprint_plan_row(row: asyncpg.Record) -> dict[str, Any]:
         payload = raw_payload or {}
     created_at = row["created_at"]
     updated_at = row["updated_at"]
-    return {
+    data = {
         "id": int(row["id"]),
         "name": row["name"],
         "payload": payload,
@@ -134,6 +134,7 @@ def _sprint_plan_row(row: asyncpg.Record) -> dict[str, Any]:
         "created_at": created_at.isoformat() if isinstance(created_at, datetime) else created_at,
         "updated_at": updated_at.isoformat() if isinstance(updated_at, datetime) else updated_at,
     }
+    return _attach_team_fields(data, row)
 
 
 def _decode_jsonb(raw: Any) -> Any:
@@ -145,11 +146,46 @@ def _decode_jsonb(raw: Any) -> Any:
     return raw
 
 
+def _team_ref_from_row(row: asyncpg.Record) -> Optional[dict[str, Any]]:
+    if "team_id" not in row.keys() or row["team_id"] is None:
+        return None
+    name = row["team_name"] if "team_name" in row.keys() else None
+    slug = row["team_slug"] if "team_slug" in row.keys() else None
+    if name is None and slug is None:
+        return {"id": int(row["team_id"])}
+    return {
+        "id": int(row["team_id"]),
+        "slug": slug,
+        "name": name,
+    }
+
+
+def _attach_team_fields(data: dict[str, Any], row: asyncpg.Record) -> dict[str, Any]:
+    team_id = row["team_id"] if "team_id" in row.keys() else None
+    data["team_id"] = int(team_id) if team_id is not None else None
+    data["team"] = _team_ref_from_row(row)
+    return data
+
+
+def _team_row(row: asyncpg.Record) -> dict[str, Any]:
+    created_at = row["created_at"]
+    updated_at = row["updated_at"]
+    return {
+        "id": int(row["id"]),
+        "slug": row["slug"],
+        "name": row["name"],
+        "description": row["description"] or "",
+        "is_active": bool(row["is_active"]),
+        "created_at": created_at.isoformat() if isinstance(created_at, datetime) else created_at,
+        "updated_at": updated_at.isoformat() if isinstance(updated_at, datetime) else updated_at,
+    }
+
+
 def _retro_row(row: asyncpg.Record) -> dict[str, Any]:
     """Serialize a cms_retros row. config/snapshot/ai_summary are JSONB."""
     created_at = row["created_at"]
     updated_at = row["updated_at"]
-    return {
+    data = {
         "id": int(row["id"]),
         "title": row["title"],
         "status": row["status"],
@@ -162,6 +198,7 @@ def _retro_row(row: asyncpg.Record) -> dict[str, Any]:
         "created_at": created_at.isoformat() if isinstance(created_at, datetime) else created_at,
         "updated_at": updated_at.isoformat() if isinstance(updated_at, datetime) else updated_at,
     }
+    return _attach_team_fields(data, row)
 
 
 def _serialize_session(session: Session) -> dict[str, Any]:
@@ -556,6 +593,43 @@ class PostgresCmsStore:
                 );
                 CREATE INDEX IF NOT EXISTS idx_cms_retros_updated
                     ON cms_retros(updated_at DESC, id DESC);
+
+                CREATE TABLE IF NOT EXISTS cms_teams (
+                    id BIGSERIAL PRIMARY KEY,
+                    slug TEXT NOT NULL UNIQUE,
+                    name TEXT NOT NULL,
+                    description TEXT NOT NULL DEFAULT '',
+                    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                );
+                CREATE INDEX IF NOT EXISTS idx_cms_teams_active_name
+                    ON cms_teams(is_active, lower(name), id);
+
+                CREATE TABLE IF NOT EXISTS cms_admin_teams (
+                    admin_id BIGINT NOT NULL REFERENCES cms_admin_accounts(id) ON DELETE CASCADE,
+                    team_id BIGINT NOT NULL REFERENCES cms_teams(id) ON DELETE CASCADE,
+                    PRIMARY KEY (admin_id, team_id)
+                );
+                CREATE INDEX IF NOT EXISTS idx_cms_admin_teams_team_admin
+                    ON cms_admin_teams(team_id, admin_id);
+                CREATE INDEX IF NOT EXISTS idx_cms_admin_teams_admin_team
+                    ON cms_admin_teams(admin_id, team_id);
+
+                ALTER TABLE cms_sessions
+                    ADD COLUMN IF NOT EXISTS team_id BIGINT REFERENCES cms_teams(id) ON DELETE SET NULL;
+                ALTER TABLE cms_sprint_plans
+                    ADD COLUMN IF NOT EXISTS team_id BIGINT REFERENCES cms_teams(id) ON DELETE SET NULL;
+                ALTER TABLE cms_retros
+                    ADD COLUMN IF NOT EXISTS team_id BIGINT REFERENCES cms_teams(id) ON DELETE SET NULL;
+
+                CREATE INDEX IF NOT EXISTS idx_cms_sessions_team_updated
+                    ON cms_sessions(team_id, updated_at DESC, id DESC)
+                    WHERE deleted_at IS NULL;
+                CREATE INDEX IF NOT EXISTS idx_cms_sprint_plans_team_updated
+                    ON cms_sprint_plans(team_id, updated_at DESC, id DESC);
+                CREATE INDEX IF NOT EXISTS idx_cms_retros_team_updated
+                    ON cms_retros(team_id, updated_at DESC, id DESC);
                 """
             )
 
@@ -1102,10 +1176,24 @@ class PostgresCmsStore:
                 permission_keys,
             )
 
+            team_rows = await conn.fetch(
+                """
+                SELECT t.id, t.slug, t.name, t.description, t.is_active,
+                       t.created_at, t.updated_at
+                FROM cms_teams t
+                JOIN cms_admin_teams at ON at.team_id = t.id
+                WHERE at.admin_id = $1 AND t.is_active
+                ORDER BY lower(t.name) ASC, t.id ASC
+                """,
+                row["id"],
+            )
+
         data = _row_to_dict(row)
         data["roles"] = [_row_to_dict(role) for role in role_rows]
         data["permissions"] = permission_keys
         data["pages"] = [_row_to_dict(page) for page in page_rows]
+        data["teams"] = [_team_row(team) for team in team_rows]
+        data["team_ids"] = [int(team["id"]) for team in team_rows]
         return data
 
     async def update_admin_theme_preference(self, admin_id: int, theme_preference: str) -> bool:
@@ -1249,6 +1337,124 @@ class PostgresCmsStore:
         item["permission_keys"] = [permission["permission_key"] for permission in permission_rows]
         return item
 
+    async def list_teams(
+        self,
+        *,
+        is_superuser: bool,
+        actor_team_ids: Optional[list[int]] = None,
+        include_inactive: bool = False,
+    ) -> list[dict[str, Any]]:
+        actor_team_ids = actor_team_ids or []
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT id, slug, name, description, is_active, created_at, updated_at
+                FROM cms_teams
+                WHERE ($1::boolean OR id = ANY($2::bigint[]))
+                  AND ($3::boolean OR is_active = TRUE)
+                ORDER BY lower(name) ASC, id ASC
+                """,
+                is_superuser,
+                actor_team_ids,
+                include_inactive,
+            )
+        return [_team_row(row) for row in rows]
+
+    async def get_team(self, team_id: int) -> Optional[dict[str, Any]]:
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT id, slug, name, description, is_active, created_at, updated_at
+                FROM cms_teams
+                WHERE id = $1
+                """,
+                team_id,
+            )
+        return _team_row(row) if row else None
+
+    async def create_team(
+        self,
+        slug: str,
+        name: str,
+        description: str = "",
+    ) -> dict[str, Any]:
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                INSERT INTO cms_teams (slug, name, description, updated_at)
+                VALUES ($1, $2, $3, NOW())
+                RETURNING id, slug, name, description, is_active, created_at, updated_at
+                """,
+                slug.strip().lower(),
+                name.strip(),
+                (description or "").strip(),
+            )
+        return _team_row(row)
+
+    async def update_team(
+        self,
+        team_id: int,
+        *,
+        name: Optional[str] = None,
+        description: Optional[str] = None,
+        is_active: Optional[bool] = None,
+    ) -> Optional[dict[str, Any]]:
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                UPDATE cms_teams
+                SET name = COALESCE($2, name),
+                    description = COALESCE($3, description),
+                    is_active = COALESCE($4, is_active),
+                    updated_at = NOW()
+                WHERE id = $1
+                RETURNING id, slug, name, description, is_active, created_at, updated_at
+                """,
+                team_id,
+                name.strip() if name is not None else None,
+                description.strip() if description is not None else None,
+                is_active,
+            )
+        return _team_row(row) if row else None
+
+    async def _load_admin_teams(self, conn: asyncpg.Connection, admin_ids: list[int]) -> dict[int, list[dict[str, Any]]]:
+        if not admin_ids:
+            return {}
+        rows = await conn.fetch(
+            """
+            SELECT at.admin_id, t.id, t.slug, t.name, t.description, t.is_active,
+                   t.created_at, t.updated_at
+            FROM cms_admin_teams at
+            JOIN cms_teams t ON t.id = at.team_id
+            WHERE at.admin_id = ANY($1::bigint[])
+            ORDER BY lower(t.name) ASC, t.id ASC
+            """,
+            admin_ids,
+        )
+        team_map: dict[int, list[dict[str, Any]]] = {}
+        for row in rows:
+            team_map.setdefault(int(row["admin_id"]), []).append(_team_row(row))
+        return team_map
+
+    async def _replace_admin_teams(
+        self,
+        conn: asyncpg.Connection,
+        admin_id: int,
+        team_ids: list[int],
+    ) -> None:
+        await conn.execute("DELETE FROM cms_admin_teams WHERE admin_id = $1", admin_id)
+        if team_ids:
+            await conn.executemany(
+                """
+                INSERT INTO cms_admin_teams (admin_id, team_id)
+                SELECT $1, id
+                FROM cms_teams
+                WHERE id = $2 AND is_active
+                ON CONFLICT DO NOTHING
+                """,
+                [(admin_id, team_id) for team_id in sorted(set(team_ids))],
+            )
+
     async def list_cms_admins(
         self,
         limit: int,
@@ -1301,6 +1507,8 @@ class PostgresCmsStore:
             page_rows = rows[:limit]
             admin_ids = [int(row["id"]) for row in page_rows]
             roles = []
+            roles = []
+            team_map: dict[int, list[dict[str, Any]]] = {}
             if admin_ids:
                 roles = await conn.fetch(
                     """
@@ -1312,6 +1520,7 @@ class PostgresCmsStore:
                     """,
                     admin_ids,
                 )
+                team_map = await self._load_admin_teams(conn, admin_ids)
         has_more = len(rows) > limit
         next_cursor = None
         if has_more and page_rows:
@@ -1330,7 +1539,11 @@ class PostgresCmsStore:
         admins = []
         for row in page_rows:
             item = _row_to_dict(row)
-            item["roles"] = role_map.get(int(row["id"]), [])
+            admin_id = int(row["id"])
+            teams = team_map.get(admin_id, [])
+            item["roles"] = role_map.get(admin_id, [])
+            item["teams"] = teams
+            item["team_ids"] = [int(team["id"]) for team in teams]
             admins.append(item)
         return {"items": admins, "next_cursor": next_cursor, "limit": limit}
 
@@ -1352,6 +1565,7 @@ class PostgresCmsStore:
                 ORDER BY r.name ASC, r.id ASC
                 """
             )
+            team_map = await self._load_admin_teams(conn, [int(row["id"]) for row in rows])
         role_map: dict[int, list[dict[str, Any]]] = {}
         for role in roles:
             role_map.setdefault(int(role["admin_id"]), []).append(
@@ -1365,7 +1579,11 @@ class PostgresCmsStore:
         admins = []
         for row in rows:
             item = _row_to_dict(row)
-            item["roles"] = role_map.get(int(row["id"]), [])
+            admin_id = int(row["id"])
+            teams = team_map.get(admin_id, [])
+            item["roles"] = role_map.get(admin_id, [])
+            item["teams"] = teams
+            item["team_ids"] = [int(team["id"]) for team in teams]
             admins.append(item)
         return admins
 
@@ -1392,7 +1610,9 @@ class PostgresCmsStore:
                 """,
                 admin_id,
             )
+            team_map = await self._load_admin_teams(conn, [admin_id])
         item = _row_to_dict(row)
+        teams = team_map.get(admin_id, [])
         item["roles"] = [
             {
                 "id": int(role["id"]),
@@ -1402,6 +1622,8 @@ class PostgresCmsStore:
             }
             for role in roles
         ]
+        item["teams"] = teams
+        item["team_ids"] = [int(team["id"]) for team in teams]
         return item
 
     async def create_cms_admin(
@@ -1411,6 +1633,7 @@ class PostgresCmsStore:
         display_name: Optional[str],
         is_active: bool,
         role_ids: list[int],
+        team_ids: Optional[list[int]] = None,
     ) -> dict[str, Any]:
         async with self.pool.acquire() as conn:
             async with conn.transaction():
@@ -1428,6 +1651,7 @@ class PostgresCmsStore:
                     is_active,
                 )
                 await self._replace_admin_roles(conn, int(admin_id), role_ids)
+                await self._replace_admin_teams(conn, int(admin_id), team_ids or [])
         return await self.get_cms_admin_account(int(admin_id)) or {}
 
     async def update_cms_admin(
@@ -1437,6 +1661,9 @@ class PostgresCmsStore:
         is_active: bool,
         role_ids: list[int],
         password: Optional[str] = None,
+        team_ids: Optional[list[int]] = None,
+        *,
+        update_teams: bool = False,
     ) -> Optional[dict[str, Any]]:
         async with self.pool.acquire() as conn:
             async with conn.transaction():
@@ -1473,6 +1700,8 @@ class PostgresCmsStore:
                 if not row:
                     return None
                 await self._replace_admin_roles(conn, admin_id, role_ids)
+                if update_teams:
+                    await self._replace_admin_teams(conn, admin_id, team_ids or [])
         return await self.get_cms_admin_account(admin_id)
 
     async def _valid_permission_keys(self, permission_keys: list[str]) -> list[str]:
@@ -1527,28 +1756,51 @@ class PostgresCmsStore:
                 [(admin_id, role_id) for role_id in sorted(set(role_ids))],
             )
 
-    async def list_sprint_plans(self) -> list[dict[str, Any]]:
+    _PLAN_SELECT = """
+        SELECT p.id, p.name, p.payload, p.created_by, p.created_at, p.updated_at,
+               p.team_id, t.name AS team_name, t.slug AS team_slug,
+               a.username AS created_by_username,
+               a.display_name AS created_by_display_name
+    """
+
+    async def list_sprint_plans(
+        self,
+        *,
+        is_superuser: bool = True,
+        actor_team_ids: Optional[list[int]] = None,
+        team_id: Optional[int] = None,
+        sort_team: bool = False,
+    ) -> list[dict[str, Any]]:
+        actor_team_ids = actor_team_ids or []
+        order_by = (
+            "lower(t.name) ASC NULLS LAST, p.updated_at DESC, p.id DESC"
+            if sort_team
+            else "p.updated_at DESC, p.id DESC"
+        )
         async with self.pool.acquire() as conn:
             rows = await conn.fetch(
-                """
-                SELECT p.id, p.name, p.payload, p.created_by, p.created_at, p.updated_at,
-                       a.username AS created_by_username,
-                       a.display_name AS created_by_display_name
+                f"""
+                {self._PLAN_SELECT}
                 FROM cms_sprint_plans p
+                LEFT JOIN cms_teams t ON t.id = p.team_id
                 LEFT JOIN cms_admin_accounts a ON a.id = p.created_by
-                ORDER BY p.updated_at DESC, p.id DESC
-                """
+                WHERE ($1::boolean OR p.team_id IS NULL OR p.team_id = ANY($2::bigint[]))
+                  AND ($3::bigint IS NULL OR p.team_id IS NOT DISTINCT FROM $3)
+                ORDER BY {order_by}
+                """,
+                is_superuser,
+                actor_team_ids,
+                team_id,
             )
         return [_sprint_plan_row(row) for row in rows]
 
     async def get_sprint_plan(self, plan_id: int) -> Optional[dict[str, Any]]:
         async with self.pool.acquire() as conn:
             row = await conn.fetchrow(
-                """
-                SELECT p.id, p.name, p.payload, p.created_by, p.created_at, p.updated_at,
-                       a.username AS created_by_username,
-                       a.display_name AS created_by_display_name
+                self._PLAN_SELECT
+                + """
                 FROM cms_sprint_plans p
+                LEFT JOIN cms_teams t ON t.id = p.team_id
                 LEFT JOIN cms_admin_accounts a ON a.id = p.created_by
                 WHERE p.id = $1
                 """,
@@ -1561,17 +1813,19 @@ class PostgresCmsStore:
         name: str,
         payload: dict[str, Any],
         created_by: Optional[int],
+        team_id: Optional[int] = None,
     ) -> dict[str, Any]:
         async with self.pool.acquire() as conn:
             row = await conn.fetchrow(
                 """
-                INSERT INTO cms_sprint_plans (name, payload, created_by)
-                VALUES ($1, $2::jsonb, $3)
+                INSERT INTO cms_sprint_plans (name, payload, created_by, team_id)
+                VALUES ($1, $2::jsonb, $3, $4)
                 RETURNING id
                 """,
                 name.strip(),
                 json.dumps(payload),
                 created_by,
+                team_id,
             )
         plan = await self.get_sprint_plan(int(row["id"]))
         assert plan is not None
@@ -1611,17 +1865,40 @@ class PostgresCmsStore:
 
     _RETRO_SELECT = """
         SELECT r.id, r.title, r.status, r.config, r.snapshot, r.ai_summary,
-               r.created_by, r.created_at, r.updated_at,
+               r.created_by, r.created_at, r.updated_at, r.team_id,
+               t.name AS team_name, t.slug AS team_slug,
                a.username AS created_by_username,
                a.display_name AS created_by_display_name
         FROM cms_retros r
+        LEFT JOIN cms_teams t ON t.id = r.team_id
         LEFT JOIN cms_admin_accounts a ON a.id = r.created_by
     """
 
-    async def list_retros(self) -> list[dict[str, Any]]:
+    async def list_retros(
+        self,
+        *,
+        is_superuser: bool = True,
+        actor_team_ids: Optional[list[int]] = None,
+        team_id: Optional[int] = None,
+        sort_team: bool = False,
+    ) -> list[dict[str, Any]]:
+        actor_team_ids = actor_team_ids or []
+        order_by = (
+            "lower(t.name) ASC NULLS LAST, r.updated_at DESC, r.id DESC"
+            if sort_team
+            else "r.updated_at DESC, r.id DESC"
+        )
         async with self.pool.acquire() as conn:
             rows = await conn.fetch(
-                self._RETRO_SELECT + " ORDER BY r.updated_at DESC, r.id DESC"
+                self._RETRO_SELECT
+                + f"""
+                 WHERE ($1::boolean OR r.team_id IS NULL OR r.team_id = ANY($2::bigint[]))
+                   AND ($3::bigint IS NULL OR r.team_id IS NOT DISTINCT FROM $3)
+                 ORDER BY {order_by}
+                """,
+                is_superuser,
+                actor_team_ids,
+                team_id,
             )
         return [_retro_row(row) for row in rows]
 
@@ -1635,17 +1912,19 @@ class PostgresCmsStore:
         title: str,
         config: dict[str, Any],
         created_by: Optional[int],
+        team_id: Optional[int] = None,
     ) -> dict[str, Any]:
         async with self.pool.acquire() as conn:
             row = await conn.fetchrow(
                 """
-                INSERT INTO cms_retros (title, config, status, created_by)
-                VALUES ($1, $2::jsonb, 'draft', $3)
+                INSERT INTO cms_retros (title, config, status, created_by, team_id)
+                VALUES ($1, $2::jsonb, 'draft', $3, $4)
                 RETURNING id
                 """,
                 title.strip(),
                 json.dumps(config),
                 created_by,
+                team_id,
             )
         retro = await self.get_retro(int(row["id"]))
         assert retro is not None
@@ -1731,18 +2010,50 @@ class PostgresCmsStore:
             )
         return row is not None
 
-    async def overview(self) -> dict[str, Any]:
+    _SESSION_SCOPE = """
+        ($1::boolean OR s.team_id IS NULL OR s.team_id = ANY($2::bigint[]))
+        AND ($3::bigint IS NULL OR s.team_id IS NOT DISTINCT FROM $3)
+    """
+
+    _SESSION_SELECT = """
+        SELECT s.id, s.session_key, s.chat_id, s.topic_id, s.title, s.current_task_index,
+               s.participants_count, s.tasks_queue_count, s.history_count,
+               s.last_batch_count, s.total_tasks, s.total_votes, s.batch_completed,
+               s.is_active, s.current_batch_id, s.current_batch_started_at,
+               s.current_task_id, s.tasks_version, s.updated_at, s.team_id,
+               t.name AS team_name, t.slug AS team_slug
+    """
+
+    def _session_row(self, row: asyncpg.Record, *, extra: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+        data = _row_to_dict(row)
+        if extra:
+            data.update(extra)
+        return _attach_team_fields(data, row)
+
+    async def overview(
+        self,
+        *,
+        is_superuser: bool = True,
+        actor_team_ids: Optional[list[int]] = None,
+        team_id: Optional[int] = None,
+    ) -> dict[str, Any]:
+        actor_team_ids = actor_team_ids or []
+        scope = self._SESSION_SCOPE
         async with self.pool.acquire() as conn:
             sessions = await conn.fetchrow(
-                """
+                f"""
                 SELECT
                     COUNT(*)::bigint AS total_sessions,
-                    COUNT(*) FILTER (WHERE is_active)::bigint AS active_sessions,
-                    COALESCE(SUM(total_votes), 0)::bigint AS total_votes,
-                    COALESCE(SUM(total_tasks), 0)::bigint AS total_tasks
-                FROM cms_sessions
-                WHERE deleted_at IS NULL
-                """
+                    COUNT(*) FILTER (WHERE s.is_active)::bigint AS active_sessions,
+                    COALESCE(SUM(s.total_votes), 0)::bigint AS total_votes,
+                    COALESCE(SUM(s.total_tasks), 0)::bigint AS total_tasks
+                FROM cms_sessions s
+                WHERE s.deleted_at IS NULL
+                  AND {scope}
+                """,
+                is_superuser,
+                actor_team_ids,
+                team_id,
             )
             users = await conn.fetchrow(
                 """
@@ -1755,36 +2066,54 @@ class PostgresCmsStore:
             # Tokens tied to deleted sessions are excluded so the overview
             # stays consistent with the visible session list.
             tokens = await conn.fetchrow(
-                """
+                f"""
                 SELECT
                     COUNT(*) FILTER (WHERE wt.expires_at > NOW())::bigint AS active_web_tokens,
                     COUNT(*)::bigint AS total_web_tokens
                 FROM cms_web_tokens wt
                 LEFT JOIN cms_sessions s ON s.session_key = wt.session_key
-                WHERE s.id IS NULL OR s.deleted_at IS NULL
-                """
+                WHERE (s.id IS NULL OR s.deleted_at IS NULL)
+                  AND (s.id IS NULL OR {scope})
+                """,
+                is_superuser,
+                actor_team_ids,
+                team_id,
             )
             sprint_plans = await conn.fetchval(
                 """
                 SELECT COUNT(*)::bigint
-                FROM cms_sprint_plans
-                """
+                FROM cms_sprint_plans p
+                WHERE ($1::boolean OR p.team_id IS NULL OR p.team_id = ANY($2::bigint[]))
+                  AND ($3::bigint IS NULL OR p.team_id IS NOT DISTINCT FROM $3)
+                """,
+                is_superuser,
+                actor_team_ids,
+                team_id,
             )
             retros = await conn.fetchrow(
                 """
                 SELECT
                     COUNT(*)::bigint AS total_retros,
                     COUNT(*) FILTER (WHERE status = 'live')::bigint AS live_retros
-                FROM cms_retros
-                """
+                FROM cms_retros r
+                WHERE ($1::boolean OR r.team_id IS NULL OR r.team_id = ANY($2::bigint[]))
+                  AND ($3::bigint IS NULL OR r.team_id IS NOT DISTINCT FROM $3)
+                """,
+                is_superuser,
+                actor_team_ids,
+                team_id,
             )
             votes = await conn.fetchval(
-                """
+                f"""
                 SELECT COUNT(*)::bigint
                 FROM cms_votes v
                 JOIN cms_sessions s ON s.id = v.session_id
                 WHERE s.deleted_at IS NULL
-                """
+                  AND {scope}
+                """,
+                is_superuser,
+                actor_team_ids,
+                team_id,
             )
             return {
                 **_row_to_dict(sessions),
@@ -1803,47 +2132,86 @@ class PostgresCmsStore:
         active: Optional[bool] = None,
         chat_id: Optional[int] = None,
         topic_id: Optional[int] = None,
+        *,
+        is_superuser: bool = True,
+        actor_team_ids: Optional[list[int]] = None,
+        team_id: Optional[int] = None,
+        sort_team: bool = False,
     ) -> dict[str, Any]:
         limit = clamp_limit(limit)
+        actor_team_ids = actor_team_ids or []
         cur = decode_cursor(cursor)
         cursor_ts = _decode_cursor_timestamp(cur.get("updated_at"))
         cursor_id = cur.get("id")
+        cursor_team_name = cur.get("team_name")
         pattern = f"%{q.strip()}%" if q and q.strip() else None
+        scope = self._SESSION_SCOPE
+        if sort_team:
+            order_by = "lower(t.name) ASC NULLS LAST, s.updated_at DESC, s.id DESC"
+            cursor_clause = """
+                  AND (
+                      $8::text IS NULL
+                      OR (lower(t.name), s.updated_at, s.id) > ($8::text, $9::timestamptz, $10::bigint)
+                  )
+            """
+        else:
+            order_by = "s.updated_at DESC, s.id DESC"
+            cursor_clause = """
+                  AND (
+                      $8::timestamptz IS NULL
+                      OR (s.updated_at, s.id) < ($8::timestamptz, $9::bigint)
+                  )
+            """
         async with self.pool.acquire() as conn:
             rows = await conn.fetch(
-                """
-                SELECT id, session_key, chat_id, topic_id, title, current_task_index,
-                       participants_count, tasks_queue_count, history_count,
-                       last_batch_count, total_tasks, total_votes, batch_completed,
-                       is_active, current_batch_id, current_batch_started_at,
-                       current_task_id, tasks_version, updated_at
-                FROM cms_sessions
-                WHERE deleted_at IS NULL
+                f"""
+                {self._SESSION_SELECT}
+                FROM cms_sessions s
+                LEFT JOIN cms_teams t ON t.id = s.team_id
+                WHERE s.deleted_at IS NULL
+                  AND {scope}
                   AND (
-                      $1::text IS NULL
-                      OR session_key ILIKE $1
-                      OR current_batch_id ILIKE $1
-                      OR title ILIKE $1
+                      $4::text IS NULL
+                      OR s.session_key ILIKE $4
+                      OR s.current_batch_id ILIKE $4
+                      OR s.title ILIKE $4
                   )
-                  AND ($2::boolean IS NULL OR is_active = $2)
-                  AND ($3::bigint IS NULL OR chat_id = $3)
-                  AND ($4::bigint IS NULL OR topic_id IS NOT DISTINCT FROM $4)
-                  AND (
-                      $5::timestamptz IS NULL
-                      OR (updated_at, id) < ($5::timestamptz, $6::bigint)
-                  )
-                ORDER BY updated_at DESC, id DESC
-                LIMIT $7
+                  AND ($5::boolean IS NULL OR s.is_active = $5)
+                  AND ($6::bigint IS NULL OR s.chat_id = $6)
+                  AND ($7::bigint IS NULL OR s.topic_id IS NOT DISTINCT FROM $7)
+                  {cursor_clause}
+                ORDER BY {order_by}
+                LIMIT $11
                 """,
+                is_superuser,
+                actor_team_ids,
+                team_id,
                 pattern,
                 active,
                 chat_id,
                 topic_id,
-                cursor_ts,
-                cursor_id,
+                cursor_team_name if sort_team else cursor_ts,
+                cursor_ts if sort_team else cursor_id,
+                cursor_id if sort_team else None,
                 limit + 1,
             )
-        return self._paged_rows(rows, limit, "updated_at")
+        has_more = len(rows) > limit
+        page_rows = rows[:limit]
+        items = [self._session_row(row) for row in page_rows]
+        next_cursor = None
+        if has_more and page_rows:
+            last = page_rows[-1]
+            if sort_team:
+                next_cursor = encode_cursor(
+                    {
+                        "team_name": (last["team_name"] or "").lower(),
+                        "updated_at": last["updated_at"],
+                        "id": int(last["id"]),
+                    }
+                )
+            else:
+                next_cursor = encode_cursor({"updated_at": last["updated_at"], "id": int(last["id"])})
+        return {"items": items, "next_cursor": next_cursor, "limit": limit}
 
     async def get_session(
         self,
@@ -1853,20 +2221,17 @@ class PostgresCmsStore:
     ) -> Optional[dict[str, Any]]:
         async with self.pool.acquire() as conn:
             row = await conn.fetchrow(
-                """
-                SELECT id, session_key, chat_id, topic_id, title, current_task_index,
-                       participants_count, tasks_queue_count, history_count,
-                       last_batch_count, total_tasks, total_votes, batch_completed,
-                       is_active, current_batch_id, current_batch_started_at,
-                       current_task_id, tasks_version, updated_at, deleted_at, raw
-                FROM cms_sessions
-                WHERE id = $1
-                  AND ($2::boolean OR deleted_at IS NULL)
+                f"""
+                {self._SESSION_SELECT}, s.deleted_at, s.raw
+                FROM cms_sessions s
+                LEFT JOIN cms_teams t ON t.id = s.team_id
+                WHERE s.id = $1
+                  AND ($2::boolean OR s.deleted_at IS NULL)
                 """,
                 session_id,
                 include_deleted,
             )
-        return _row_to_dict(row) if row else None
+        return self._session_row(row) if row else None
 
     async def soft_delete_session(self, session_id: int) -> Optional[tuple[int, Optional[int]]]:
         """Mark a session as deleted. Returns (chat_id, topic_id) for callers
@@ -1901,18 +2266,44 @@ class PostgresCmsStore:
         Returns ``None`` for missing or soft-deleted sessions."""
         async with self.pool.acquire() as conn:
             row = await conn.fetchrow(
-                """
-                SELECT id, session_key, chat_id, topic_id, title, is_active,
-                       batch_completed, updated_at
-                FROM cms_sessions
-                WHERE chat_id = $1
-                  AND topic_id IS NOT DISTINCT FROM $2
-                  AND deleted_at IS NULL
+                f"""
+                {self._SESSION_SELECT}, s.is_active, s.batch_completed
+                FROM cms_sessions s
+                LEFT JOIN cms_teams t ON t.id = s.team_id
+                WHERE s.chat_id = $1
+                  AND s.topic_id IS NOT DISTINCT FROM $2
+                  AND s.deleted_at IS NULL
                 """,
                 chat_id,
                 topic_id,
             )
-        return _row_to_dict(row) if row else None
+        return self._session_row(row) if row else None
+
+    async def set_session_team_by_chat(
+        self,
+        chat_id: int,
+        topic_id: Optional[int],
+        team_id: Optional[int],
+    ) -> bool:
+        """Persist team_id on the cms_sessions row for a live session."""
+        key = session_key(chat_id, topic_id)
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                INSERT INTO cms_sessions (session_key, chat_id, topic_id, team_id, raw)
+                VALUES ($1, $2, $3, $4, '{}'::jsonb)
+                ON CONFLICT (session_key) DO UPDATE SET
+                    team_id = COALESCE(EXCLUDED.team_id, cms_sessions.team_id),
+                    updated_at = NOW()
+                WHERE cms_sessions.deleted_at IS NULL
+                RETURNING id
+                """,
+                key,
+                chat_id,
+                topic_id,
+                team_id,
+            )
+        return row is not None
 
     async def set_session_title_by_chat(
         self,
@@ -1921,6 +2312,7 @@ class PostgresCmsStore:
         title: Optional[str],
         *,
         only_if_empty: bool = True,
+        team_id: Optional[int] = None,
     ) -> bool:
         """Write a human-readable title onto the cms_sessions row for the given
         chat+topic. Idempotent — safe to call from session-create paths even
@@ -1938,15 +2330,16 @@ class PostgresCmsStore:
         async with self.pool.acquire() as conn:
             row = await conn.fetchrow(
                 """
-                INSERT INTO cms_sessions (session_key, chat_id, topic_id, title, raw)
-                VALUES ($1, $2, $3, $4, '{}'::jsonb)
+                INSERT INTO cms_sessions (session_key, chat_id, topic_id, title, team_id, raw)
+                VALUES ($1, $2, $3, $4, $5, '{}'::jsonb)
                 ON CONFLICT (session_key) DO UPDATE SET
                     title = CASE
-                        WHEN $5::boolean = FALSE THEN EXCLUDED.title
+                        WHEN $6::boolean = FALSE THEN EXCLUDED.title
                         WHEN cms_sessions.title IS NULL OR cms_sessions.title = ''
                             THEN EXCLUDED.title
                         ELSE cms_sessions.title
                     END,
+                    team_id = COALESCE(EXCLUDED.team_id, cms_sessions.team_id),
                     updated_at = NOW()
                 WHERE cms_sessions.deleted_at IS NULL
                 RETURNING id
@@ -1955,6 +2348,7 @@ class PostgresCmsStore:
                 chat_id,
                 topic_id,
                 normalized,
+                team_id,
                 only_if_empty,
             )
         return row is not None

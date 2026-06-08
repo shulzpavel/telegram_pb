@@ -57,6 +57,7 @@ from services.voting_service._http_shared import (
 )
 from services.voting_service.cms_store import DEFAULT_LIMIT, MAX_LIMIT
 from services.voting_service.cms_rbac import PERM_APP_SESSIONS_MANAGE
+from services.voting_service.cms_team_access import assert_record_access, resolve_create_team_id
 from services.voting_service.ai_summary_llm import (
     LlmSummaryError,
     fetch_jira_issue_context,
@@ -111,6 +112,7 @@ DEMO_TASKS = [
 
 class AppSessionCreateRequest(BaseModel):
     title: str = Field(default="Planning Poker", min_length=1, max_length=120)
+    team_id: Optional[int] = None
 
 
 class AppSessionRenameRequest(BaseModel):
@@ -144,6 +146,30 @@ def _manager_dep(actor: CmsPrincipal = Depends(require_permission(PERM_APP_SESSI
     return actor
 
 
+async def _require_manager_session_access(
+    request: Request,
+    chat_id: int,
+    topic_id: Optional[int],
+    actor: CmsPrincipal,
+) -> None:
+    cms_store = getattr(request.app.state, "cms_store", None)
+    if cms_store is None:
+        return
+    row = await cms_store.get_session_by_chat(chat_id, topic_id)
+    if row:
+        assert_record_access(actor, row)
+
+
+async def _require_manager_session(
+    request: Request,
+    chat_id: int,
+    actor: CmsPrincipal = Depends(_manager_dep),
+    topic_id: Optional[int] = None,
+) -> CmsPrincipal:
+    await _require_manager_session_access(request, chat_id, topic_id, actor)
+    return actor
+
+
 def _public_url(path: str) -> str:
     base = os.getenv("WEB_UI_URL", "").rstrip("/")
     return f"{base}{path}" if base else path
@@ -157,6 +183,29 @@ def _demo_enabled() -> bool:
     return os.getenv("ENABLE_DEMO_SESSION", "true").lower() in {"1", "true", "yes", "on"}
 
 
+async def _stored_session_row(
+    request: Request,
+    chat_id: int,
+    topic_id: Optional[int],
+) -> Optional[dict]:
+    """Best-effort lookup of the CMS read-model row for a live session."""
+    cms_store = getattr(request.app.state, "cms_store", None)
+    if cms_store is None:
+        return None
+    try:
+        return await cms_store.get_session_by_chat(chat_id, topic_id)
+    except AttributeError:
+        return None
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "stored_session_row lookup failed chat_id=%s topic_id=%s err=%r",
+            chat_id,
+            topic_id,
+            exc,
+        )
+        return None
+
+
 async def _stored_session_title(
     request: Request,
     chat_id: int,
@@ -165,21 +214,7 @@ async def _stored_session_title(
     """Best-effort lookup of the human-readable session title from the CMS
     read model. Returns ``None`` when the store is unavailable, the row
     doesn't exist yet, or the stored title is empty."""
-    cms_store = getattr(request.app.state, "cms_store", None)
-    if cms_store is None:
-        return None
-    try:
-        row = await cms_store.get_session_by_chat(chat_id, topic_id)
-    except AttributeError:
-        return None
-    except Exception as exc:  # noqa: BLE001
-        logger.warning(
-            "stored_session_title lookup failed chat_id=%s topic_id=%s err=%r",
-            chat_id,
-            topic_id,
-            exc,
-        )
-        return None
+    row = await _stored_session_row(request, chat_id, topic_id)
     if not row:
         return None
     title = (row.get("title") or "").strip()
@@ -208,6 +243,8 @@ async def _create_invite_token(
     chat_id: int,
     topic_id: Optional[int],
     title: str,
+    *,
+    team_id: Optional[int] = None,
 ) -> tuple[str, str]:
     token = secrets.token_urlsafe(18)
     payload = json.dumps({"chat_id": chat_id, "topic_id": topic_id, "title": title})
@@ -222,7 +259,12 @@ async def _create_invite_token(
         # We only overwrite empty titles, so manual renames in CMS survive
         # invite regeneration.
         try:
-            await cms_store.set_session_title_by_chat(chat_id, topic_id, title)
+            await cms_store.set_session_title_by_chat(
+                chat_id,
+                topic_id,
+                title,
+                team_id=team_id,
+            )
         except Exception as exc:  # noqa: BLE001
             logger.warning(
                 "set_session_title failed chat_id=%s topic_id=%s err=%r",
@@ -359,6 +401,8 @@ def _manager_session_payload(
     invite_url: Optional[str] = None,
     token: Optional[str] = None,
     completed_limit: Optional[int] = None,
+    team_id: Optional[int] = None,
+    team: Optional[dict] = None,
 ) -> dict:
     """Manager-facing snapshot of the session.
 
@@ -395,6 +439,8 @@ def _manager_session_payload(
         "completed_tasks": completed,
         "completed_count": completed_total,
         "completed_next_cursor": completed_next_cursor,
+        "team_id": team_id,
+        "team": team,
     }
 
 
@@ -450,13 +496,35 @@ async def create_app_session(
     request: Request,
     actor: CmsPrincipal = Depends(_manager_dep),
 ) -> dict:
+    resolved_team_id = resolve_create_team_id(actor, body.team_id)
     repo = request.app.state.repository
     chat_id = _new_app_chat_id()
     topic_id = None
     session = await _get_repo_session(repo, chat_id, topic_id)
-    token, invite_url = await _create_invite_token(request, chat_id, topic_id, body.title)
-    await _audit(request, "app.session.create", actor.username, "ok", {"chat_id": chat_id, "title": body.title})
-    return _manager_session_payload(session, title=body.title, invite_url=invite_url, token=token)
+    cms_store = getattr(request.app.state, "cms_store", None)
+    if cms_store is not None:
+        await cms_store.set_session_team_by_chat(chat_id, topic_id, resolved_team_id)
+    token, invite_url = await _create_invite_token(
+        request,
+        chat_id,
+        topic_id,
+        body.title,
+        team_id=resolved_team_id,
+    )
+    await _audit(
+        request,
+        "app.session.create",
+        actor.username,
+        "ok",
+        {"chat_id": chat_id, "title": body.title, "team_id": resolved_team_id},
+    )
+    return _manager_session_payload(
+        session,
+        title=body.title,
+        invite_url=invite_url,
+        token=token,
+        team_id=resolved_team_id,
+    )
 
 
 @app_router.post("/app/demo-session")
@@ -519,7 +587,7 @@ async def app_session_state(
     topic_id: Optional[int] = None,
     title: Optional[str] = None,
     completed_limit: Optional[int] = Query(default=None, ge=1, le=COMPLETED_MAX_LIMIT),
-    _: CmsPrincipal = Depends(_manager_dep),
+    _: CmsPrincipal = Depends(_require_manager_session),
 ) -> dict:
     # Backfill description for the current Jira task when it wasn't
     # captured at import time (sessions imported before the field
@@ -527,9 +595,16 @@ async def app_session_state(
     # the helper short-circuits without doing any I/O.
     await _ensure_current_task_description(request, chat_id, topic_id)
     session = await _get_repo_session(request.app.state.repository, chat_id, topic_id)
-    stored_title = await _stored_session_title(request, chat_id, topic_id)
-    resolved_title = _resolve_session_title(title, stored_title)
-    return _manager_session_payload(session, title=resolved_title, completed_limit=completed_limit)
+    stored_row = await _stored_session_row(request, chat_id, topic_id)
+    stored_title = (stored_row.get("title") or "").strip() if stored_row else None
+    resolved_title = _resolve_session_title(title, stored_title or None)
+    return _manager_session_payload(
+        session,
+        title=resolved_title,
+        completed_limit=completed_limit,
+        team_id=stored_row.get("team_id") if stored_row else None,
+        team=stored_row.get("team") if stored_row else None,
+    )
 
 
 @app_router.get("/app/sessions/{chat_id}/completed")
@@ -539,7 +614,7 @@ async def app_session_completed(
     topic_id: Optional[int] = None,
     limit: int = Query(default=COMPLETED_DEFAULT_LIMIT, ge=1, le=COMPLETED_MAX_LIMIT),
     cursor: Optional[str] = None,
-    _: CmsPrincipal = Depends(_manager_dep),
+    _: CmsPrincipal = Depends(_require_manager_session),
 ) -> dict:
     """Paginated, oldest-first slice of tasks already played in the active
     batch. Use it to lazy-load Manager's HistoryStrip and the Finished-session
@@ -554,7 +629,7 @@ async def app_regenerate_invite(
     request: Request,
     topic_id: Optional[int] = None,
     title: Optional[str] = Query(default=None),
-    actor: CmsPrincipal = Depends(_manager_dep),
+    actor: CmsPrincipal = Depends(_require_manager_session),
 ) -> dict:
     """Mint a fresh invite token for an existing manager session.
 
@@ -598,7 +673,7 @@ async def app_rename_session(
     body: AppSessionRenameRequest,
     request: Request,
     topic_id: Optional[int] = None,
-    actor: CmsPrincipal = Depends(_manager_dep),
+    actor: CmsPrincipal = Depends(_require_manager_session),
 ) -> dict:
     """Rename an active manager session.
 
@@ -642,7 +717,7 @@ async def app_session_tasks(
     limit: int = Query(DEFAULT_LIMIT, ge=1, le=MAX_LIMIT),
     cursor: Optional[str] = None,
     q: Optional[str] = None,
-    _: CmsPrincipal = Depends(_manager_dep),
+    _: CmsPrincipal = Depends(_require_manager_session),
 ) -> dict:
     session = await _get_repo_session(request.app.state.repository, chat_id, topic_id)
     return _task_page(session, limit, cursor, q)
@@ -654,7 +729,7 @@ async def app_create_task(
     body: TaskCreateRequest,
     request: Request,
     topic_id: Optional[int] = None,
-    actor: CmsPrincipal = Depends(_manager_dep),
+    actor: CmsPrincipal = Depends(_require_manager_session),
 ) -> dict:
     use_case = AddManualTaskUseCase(request.app.state.repository)
     try:
@@ -682,7 +757,7 @@ async def app_update_task(
     body: TaskUpdateRequest,
     request: Request,
     topic_id: Optional[int] = None,
-    actor: CmsPrincipal = Depends(_manager_dep),
+    actor: CmsPrincipal = Depends(_require_manager_session),
 ) -> dict:
     use_case = UpdateTaskUseCase(request.app.state.repository)
     try:
@@ -711,7 +786,7 @@ async def app_delete_task(
     request: Request,
     topic_id: Optional[int] = None,
     expected_version: Optional[int] = Query(default=None, ge=0),
-    actor: CmsPrincipal = Depends(_manager_dep),
+    actor: CmsPrincipal = Depends(_require_manager_session),
 ) -> dict:
     use_case = DeleteTaskUseCase(request.app.state.repository)
     try:
@@ -731,7 +806,7 @@ async def app_move_task(
     body: TaskMoveRequest,
     request: Request,
     topic_id: Optional[int] = None,
-    actor: CmsPrincipal = Depends(_manager_dep),
+    actor: CmsPrincipal = Depends(_require_manager_session),
 ) -> dict:
     use_case = MoveTaskUseCase(request.app.state.repository)
     try:
@@ -755,7 +830,7 @@ async def app_reorder_tasks(
     body: TaskReorderRequest,
     request: Request,
     topic_id: Optional[int] = None,
-    actor: CmsPrincipal = Depends(_manager_dep),
+    actor: CmsPrincipal = Depends(_require_manager_session),
 ) -> dict:
     use_case = ReorderTasksUseCase(request.app.state.repository)
     try:
@@ -778,7 +853,7 @@ async def app_preview_jira_tasks(
     body: JiraPreviewRequest,
     request: Request,
     topic_id: Optional[int] = None,
-    _: CmsPrincipal = Depends(_manager_dep),
+    _: CmsPrincipal = Depends(_require_manager_session),
 ) -> dict:
     session = await _get_repo_session(request.app.state.repository, chat_id, topic_id)
     issues = await _jira_preview(request.app.state.http_session, body.jql, body.max_results)
@@ -789,7 +864,7 @@ async def app_preview_jira_tasks(
 async def app_debug_jira_description(
     issue_key: str,
     request: Request,
-    _: CmsPrincipal = Depends(_manager_dep),
+    _: CmsPrincipal = Depends(_require_manager_session),
 ) -> dict:
     """Diagnostic endpoint: ask jira-service for the description of a key.
 
@@ -833,7 +908,7 @@ async def app_import_jira_tasks(
     body: JiraImportRequest,
     request: Request,
     topic_id: Optional[int] = None,
-    actor: CmsPrincipal = Depends(_manager_dep),
+    actor: CmsPrincipal = Depends(_require_manager_session),
 ) -> dict:
     selected = {key.strip().upper() for key in body.selected_keys if key.strip()}
     issues = await _jira_preview(request.app.state.http_session, body.jql, body.max_results)
@@ -923,7 +998,7 @@ async def app_start_session(
     chat_id: int,
     request: Request,
     topic_id: Optional[int] = None,
-    actor: CmsPrincipal = Depends(_manager_dep),
+    actor: CmsPrincipal = Depends(_require_manager_session),
 ) -> dict:
     def mutate(session: Session) -> Optional[str]:
         if not session.tasks_queue:
@@ -957,7 +1032,7 @@ async def app_generate_ai_summary(
     chat_id: int,
     request: Request,
     topic_id: Optional[int] = None,
-    actor: CmsPrincipal = Depends(_manager_dep),
+    actor: CmsPrincipal = Depends(_require_manager_session),
 ) -> dict:
     """Generate a facilitator-facing AI hint for the current voting task via Anthropic.
 
@@ -1033,7 +1108,7 @@ async def app_next_task(
     chat_id: int,
     request: Request,
     topic_id: Optional[int] = None,
-    actor: CmsPrincipal = Depends(_manager_dep),
+    actor: CmsPrincipal = Depends(_require_manager_session),
 ) -> dict:
     def mutate(session: Session) -> None:
         if session.current_task:
@@ -1063,7 +1138,7 @@ async def app_skip_task(
     chat_id: int,
     request: Request,
     topic_id: Optional[int] = None,
-    actor: CmsPrincipal = Depends(_manager_dep),
+    actor: CmsPrincipal = Depends(_require_manager_session),
 ) -> dict:
     # Skip == advance to next task. Run the same mutation as `next` but only
     # record a single `skip` audit event so the audit log isn't polluted with
@@ -1097,7 +1172,7 @@ async def app_reopen_completed_task(
     body: ReopenCompletedRequest,
     request: Request,
     topic_id: Optional[int] = None,
-    actor: CmsPrincipal = Depends(_manager_dep),
+    actor: CmsPrincipal = Depends(_require_manager_session),
 ) -> dict:
     use_case = ReopenCompletedTaskUseCase(request.app.state.repository)
     try:
@@ -1134,7 +1209,7 @@ async def app_set_final_estimate(
     body: FinalEstimateRequest,
     request: Request,
     topic_id: Optional[int] = None,
-    actor: CmsPrincipal = Depends(_manager_dep),
+    actor: CmsPrincipal = Depends(_require_manager_session),
 ) -> dict:
     def mutate(session: Session) -> Optional[str]:
         if not session.current_task:
@@ -1157,7 +1232,7 @@ async def app_finish_session(
     chat_id: int,
     request: Request,
     topic_id: Optional[int] = None,
-    actor: CmsPrincipal = Depends(_manager_dep),
+    actor: CmsPrincipal = Depends(_require_manager_session),
 ) -> dict:
     """Finalize the session. Idempotent: safe to call after auto-next-on-last.
 
@@ -1318,7 +1393,7 @@ async def app_session_summary(
     topic_id: Optional[int] = None,
     title: Optional[str] = Query(default=None),
     tasks_limit: Optional[int] = Query(default=None, ge=1, le=COMPLETED_MAX_LIMIT),
-    _: CmsPrincipal = Depends(_manager_dep),
+    _: CmsPrincipal = Depends(_require_manager_session),
 ) -> dict:
     """JSON-summary for the Finished-session page. Pass ``tasks_limit`` to
     inline only the first slice of completed tasks; remaining pages are
@@ -1336,7 +1411,7 @@ async def app_session_summary_tasks(
     topic_id: Optional[int] = None,
     limit: int = Query(default=COMPLETED_DEFAULT_LIMIT, ge=1, le=COMPLETED_MAX_LIMIT),
     cursor: Optional[str] = None,
-    _: CmsPrincipal = Depends(_manager_dep),
+    _: CmsPrincipal = Depends(_require_manager_session),
 ) -> dict:
     """Page through the completed-tasks list for the Finished-session report.
 
@@ -1637,7 +1712,7 @@ async def app_session_summary_csv(
     request: Request,
     topic_id: Optional[int] = None,
     title: Optional[str] = Query(default=None),
-    actor: CmsPrincipal = Depends(_manager_dep),
+    actor: CmsPrincipal = Depends(_require_manager_session),
 ) -> StreamingResponse:
     """Export the session summary as a structured, human-readable CSV."""
     session = await _get_repo_session(request.app.state.repository, chat_id, topic_id)
@@ -1669,7 +1744,7 @@ async def app_session_summary_markdown(
     request: Request,
     topic_id: Optional[int] = None,
     title: Optional[str] = Query(default=None),
-    actor: CmsPrincipal = Depends(_manager_dep),
+    actor: CmsPrincipal = Depends(_require_manager_session),
 ) -> StreamingResponse:
     """Export a Confluence-friendly Markdown report for a planning session."""
     session = await _get_repo_session(request.app.state.repository, chat_id, topic_id)

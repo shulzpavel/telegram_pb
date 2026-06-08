@@ -1,7 +1,18 @@
 import { CMS_PAGE_LIMIT, cmsUrl } from "../../../app/config";
 import { ApiError, requestJson } from "../../../shared/api/http";
 import type { Page, ParamValue } from "../../../shared/types/pagination";
-import type { AuditEvent, CmsAdmin, CmsPageAccess, CmsPermission, CmsPrincipal, CmsRole, JiraPreview, TaskItem, ThemeMode } from "./cmsTypes";
+import type {
+  AuditEvent,
+  CmsAdmin,
+  CmsPageAccess,
+  CmsPermission,
+  CmsPrincipal,
+  CmsRole,
+  CmsTeam,
+  JiraPreview,
+  TaskItem,
+  ThemeMode,
+} from "./cmsTypes";
 import type { RetroAiSummary, RetroLiveState } from "../retro/retroLogic";
 
 const CMS_AUTH_HINT_KEY = "planning_poker_cms_auth";
@@ -135,6 +146,7 @@ export const cmsAccessApi = {
     display_name: string | null;
     is_active: boolean;
     role_ids: number[];
+    team_ids?: number[];
   }) =>
     cmsFetch<CmsAdmin>("/access/admins", {
       method: "POST",
@@ -146,6 +158,7 @@ export const cmsAccessApi = {
       display_name: string | null;
       is_active: boolean;
       role_ids: number[];
+      team_ids?: number[];
       password?: string;
     }
   ) =>
@@ -289,6 +302,8 @@ export interface SprintPlanRecord {
   id: number;
   name: string;
   payload: SprintPlanPayload;
+  team_id: number | null;
+  team: { id: number; slug?: string; name?: string } | null;
   created_by: number | null;
   created_by_username: string | null;
   created_by_display_name: string | null;
@@ -296,10 +311,32 @@ export interface SprintPlanRecord {
   updated_at: string;
 }
 
+export interface CmsListTeamParams {
+  team_id?: number;
+  sort?: "team_then_updated";
+}
+
+export const cmsTeamsApi = {
+  list: () => cmsFetch<{ items: CmsTeam[] }>("/teams"),
+  create: (body: { slug: string; name: string; description?: string }) =>
+    cmsFetch<CmsTeam>("/teams", { method: "POST", body: JSON.stringify(body) }),
+  update: (
+    teamId: number,
+    body: { name?: string; description?: string; is_active?: boolean }
+  ) =>
+    cmsFetch<CmsTeam>(`/teams/${teamId}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    }),
+};
+
 export const cmsPlannerApi = {
-  list: () => cmsFetch<{ items: SprintPlanRecord[] }>("/sprint-plans"),
+  list: (params: CmsListTeamParams = {}) => {
+    const query = buildQuery(params as Record<string, ParamValue>, null);
+    return cmsFetch<{ items: SprintPlanRecord[] }>(`/sprint-plans?${query}`);
+  },
   get: (planId: number) => cmsFetch<SprintPlanRecord>(`/sprint-plans/${planId}`),
-  create: (body: { name: string; payload: SprintPlanPayload }) =>
+  create: (body: { name: string; payload: SprintPlanPayload; team_id?: number | null }) =>
     cmsFetch<SprintPlanRecord>("/sprint-plans", {
       method: "POST",
       body: JSON.stringify(body),
@@ -330,6 +367,8 @@ export interface RetroRecord {
   id: number;
   title: string;
   status: "draft" | "live" | "done" | string;
+  team_id: number | null;
+  team: { id: number; slug?: string; name?: string } | null;
   config: RetroConfig;
   snapshot: Record<string, unknown> | null;
   ai_summary: RetroAiSummary | null;
@@ -343,9 +382,12 @@ export interface RetroRecord {
 }
 
 export const cmsRetroApi = {
-  list: () => cmsFetch<{ items: RetroRecord[] }>("/retros"),
+  list: (params: CmsListTeamParams = {}) => {
+    const query = buildQuery(params as Record<string, ParamValue>, null);
+    return cmsFetch<{ items: RetroRecord[] }>(`/retros?${query}`);
+  },
   get: (retroId: number) => cmsFetch<RetroRecord>(`/retros/${retroId}`),
-  create: (body: { title: string; config: RetroConfig }) =>
+  create: (body: { title: string; config: RetroConfig; team_id?: number | null }) =>
     cmsFetch<RetroRecord>("/retros", { method: "POST", body: JSON.stringify(body) }),
   update: (retroId: number, body: { title: string; config: RetroConfig }) =>
     cmsFetch<RetroRecord>(`/retros/${retroId}`, { method: "PUT", body: JSON.stringify(body) }),

@@ -10,15 +10,18 @@ const RoleDetailPage = lazy(() => import("./RoleDetailPage"));
 const UsersListPage = lazy(() => import("./UsersListPage"));
 const UserDetailPage = lazy(() => import("./UserDetailPage"));
 const PermissionsRefPage = lazy(() => import("./PermissionsRefPage"));
+const TeamsListPage = lazy(() => import("./TeamsListPage"));
 
 interface AccessShellProps {
   canManage: boolean;
   currentAdminId: number;
+  isSuperuser: boolean;
 }
 
 interface AccessContextValue {
   canManage: boolean;
   currentAdminId: number;
+  isSuperuser: boolean;
   permissions: CmsPermission[];
   pages: CmsPageAccess[];
   roles: CmsRole[];
@@ -42,7 +45,7 @@ export function useAccessContext(): AccessContextValue {
 }
 
 interface SubTab {
-  key: "roles" | "users" | "permissions";
+  key: "roles" | "users" | "permissions" | "teams";
   label: string;
   to: string;
   // Pathname prefixes that should highlight this tab.
@@ -71,9 +74,15 @@ const SUB_TABS: SubTab[] = [
     to: "/cms/access/permissions",
     match: (pathname) => pathname.startsWith("/cms/access/permissions"),
   },
+  {
+    key: "teams",
+    label: "Команды",
+    to: "/cms/access/teams",
+    match: (pathname) => pathname.startsWith("/cms/access/teams"),
+  },
 ];
 
-export default function AccessShell({ canManage, currentAdminId }: AccessShellProps) {
+export default function AccessShell({ canManage, currentAdminId, isSuperuser }: AccessShellProps) {
   const [permissions, setPermissions] = useState<CmsPermission[]>([]);
   const [pages, setPages] = useState<CmsPageAccess[]>([]);
   const [roles, setRoles] = useState<CmsRole[]>([]);
@@ -128,6 +137,7 @@ export default function AccessShell({ canManage, currentAdminId }: AccessShellPr
     () => ({
       canManage,
       currentAdminId,
+      isSuperuser,
       permissions,
       pages,
       roles,
@@ -142,6 +152,7 @@ export default function AccessShell({ canManage, currentAdminId }: AccessShellPr
     [
       canManage,
       currentAdminId,
+      isSuperuser,
       permissions,
       pages,
       roles,
@@ -167,6 +178,7 @@ export default function AccessShell({ canManage, currentAdminId }: AccessShellPr
           <Route path="users/new" element={<UserDetailPage />} />
           <Route path="users/:userId" element={<UserDetailPage />} />
           <Route path="permissions" element={<PermissionsRefPage />} />
+          <Route path="teams" element={<TeamsListPage />} />
           <Route path="*" element={<Navigate to="roles" replace />} />
         </Route>
       </Routes>
@@ -207,13 +219,15 @@ function AccessLayout() {
 }
 
 function AccessSubTabs() {
+  const { isSuperuser } = useAccessContext();
   const { pathname } = useLocation();
+  const tabs = isSuperuser ? SUB_TABS : SUB_TABS.filter((tab) => tab.key !== "teams");
   return (
     <nav
       aria-label="Подразделы Доступов"
       className="flex border-b border-line"
     >
-      {SUB_TABS.map((tab) => {
+      {tabs.map((tab) => {
         const isActive = tab.match(pathname);
         return (
           <NavLink

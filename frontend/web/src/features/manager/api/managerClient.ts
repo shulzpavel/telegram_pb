@@ -27,10 +27,10 @@ function query(params: Record<string, string | number | null | undefined>): stri
 }
 
 export const managerApi = {
-  createSession: (title: string) =>
+  createSession: (title: string, teamId?: number | null) =>
     appFetch<ManagerSession>("/sessions", {
       method: "POST",
-      body: JSON.stringify({ title }),
+      body: JSON.stringify({ title, team_id: teamId ?? undefined }),
     }),
 
   demoSession: (reset = false) =>

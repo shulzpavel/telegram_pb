@@ -232,7 +232,7 @@ export default function CmsShell({
         >
           <RouteTransition transitionKey={location.pathname}>
             <Routes>
-              <Route index element={<CmsIndexRedirect firstPath={visibleTabs[0]?.path} />} />
+              <Route index element={<CmsIndexRedirect firstPath={visibleTabs[0]?.path} principal={principal} />} />
               {hasPermission(principal, CMS_PERMISSIONS.overview) ? (
                 <Route path="overview" element={<Navigate to="/cms" replace />} />
               ) : null}
@@ -240,7 +240,11 @@ export default function CmsShell({
                 <Route
                   path="sessions"
                   element={
-                    <SessionsPage canManageTasks={canManageTasks} canManageSessions={canManageSessions} />
+                    <SessionsPage
+                      principal={principal}
+                      canManageTasks={canManageTasks}
+                      canManageSessions={canManageSessions}
+                    />
                   }
                 />
               ) : null}
@@ -252,20 +256,35 @@ export default function CmsShell({
               {hasPermission(principal, CMS_PERMISSIONS.access) ? (
                 <Route
                   path="access/*"
-                  element={<AccessShell canManage={canManageAccess} currentAdminId={principal.id} />}
+                  element={
+                    <AccessShell
+                      canManage={canManageAccess}
+                      currentAdminId={principal.id}
+                      isSuperuser={principal.is_superuser}
+                    />
+                  }
                 />
               ) : null}
               {hasPermission(principal, CMS_PERMISSIONS.planner) ? (
-                <Route path="planner/*" element={<PlannerShell canManage />} />
+                <Route path="planner/*" element={<PlannerShell principal={principal} canManage />} />
               ) : null}
               {hasPermission(principal, CMS_PERMISSIONS.retro) ? (
-                <Route path="retro/*" element={<RetroShell canManage={canManageRetro} canAnalyze={canAnalyzeRetro} />} />
+                <Route
+                  path="retro/*"
+                  element={
+                    <RetroShell
+                      principal={principal}
+                      canManage={canManageRetro}
+                      canAnalyze={canAnalyzeRetro}
+                    />
+                  }
+                />
               ) : null}
               {/* Deprecated routes from the Telegram-era console: route any
                   lingering bookmarks back to the active landing page. */}
               <Route path="votes" element={<Navigate to="/cms/sessions" replace />} />
               <Route path="web" element={<Navigate to="/cms/sessions" replace />} />
-              <Route path="*" element={<CmsIndexRedirect firstPath={visibleTabs[0]?.path} />} />
+              <Route path="*" element={<CmsIndexRedirect firstPath={visibleTabs[0]?.path} principal={principal} />} />
             </Routes>
           </RouteTransition>
         </Suspense>
@@ -274,12 +293,18 @@ export default function CmsShell({
   );
 }
 
-function CmsIndexRedirect({ firstPath }: { firstPath: string | undefined }) {
+function CmsIndexRedirect({
+  firstPath,
+  principal,
+}: {
+  firstPath: string | undefined;
+  principal: CmsPrincipal;
+}) {
   if (!firstPath) {
     return null;
   }
   if (firstPath === "/cms") {
-    return <OverviewPage />;
+    return <OverviewPage principal={principal} />;
   }
   return <Navigate to={firstPath} replace />;
 }

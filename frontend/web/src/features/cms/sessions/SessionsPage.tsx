@@ -23,6 +23,7 @@ import { cmsFetch, cmsSessionsApi, cmsTasksApi, type CmsTaskBody } from "../api/
 import { managerApi } from "../../manager/api/managerClient";
 import { storeManagerSession } from "../../manager/ManagerPage";
 import type {
+  CmsPrincipal,
   JiraPreview,
   ParticipantItem,
   SessionDetail,
@@ -30,6 +31,10 @@ import type {
   TaskItem,
   WebParticipantItem,
 } from "../api/cmsTypes";
+import { TeamBadge } from "../components/TeamBadge";
+import { TeamFilter, teamFilterParams } from "../components/TeamFilter";
+import { TeamSelect, needsTeamPicker, resolveDefaultTeamId } from "../components/TeamSelect";
+import { useCmsTeams } from "../hooks/useCmsTeams";
 import { Alert, Badge, BottomSheet, Button, ConfirmDialog, EmptyState, ScrollArea, SelectField, Surface, TextField } from "../../../design-system";
 import {
   CompactList,
@@ -53,13 +58,17 @@ import { normalizeOptionalNumber, normalizeOptionalText } from "./taskInput";
 import { canUseFullReorder, reorderedTaskIds } from "./taskQueueList";
 
 interface SessionsPageProps {
+  principal: CmsPrincipal;
   canManageTasks: boolean;
   canManageSessions: boolean;
 }
 
-export default function SessionsPage({ canManageTasks, canManageSessions }: SessionsPageProps) {
+export default function SessionsPage({ principal, canManageTasks, canManageSessions }: SessionsPageProps) {
+  const { teams } = useCmsTeams(principal);
   const [q, setQ] = useState("");
   const [active, setActive] = useState("");
+  const [teamFilter, setTeamFilter] = useState("");
+  const [teamSort, setTeamSort] = useState(false);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [confirmAction, setConfirmAction] = useState<
     | { kind: "close"; item: SessionItem }
@@ -78,13 +87,19 @@ export default function SessionsPage({ canManageTasks, canManageSessions }: Sess
   const [createTitle, setCreateTitle] = useState("");
   const [createBusy, setCreateBusy] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
+  const [createTeamId, setCreateTeamId] = useState<number | "">("");
   const createSessionGuard = useUnsavedChangesGuard({
-    when: createOpen && createTitle.trim().length > 0 && !createBusy,
+    when: createOpen && (createTitle.trim().length > 0 || createTeamId !== "") && !createBusy,
   });
   const debouncedQ = useDebouncedValue(q);
   const params = useMemo(
-    () => ({ q: debouncedQ, active: active === "" ? undefined : active === "true" }),
-    [active, debouncedQ]
+    () => ({
+      q: debouncedQ,
+      active: active === "" ? undefined : active === "true",
+      ...teamFilterParams(teamFilter),
+      sort: teamSort && principal.is_superuser ? "team_then_updated" : undefined,
+    }),
+    [active, debouncedQ, principal.is_superuser, teamFilter, teamSort]
   );
   const list = useCmsList<SessionItem>("/sessions", params, { scrollKey: "cms-sessions" });
   const navigate = useNavigate();
@@ -109,8 +124,14 @@ export default function SessionsPage({ canManageTasks, canManageSessions }: Sess
     setCreateBusy(true);
     setCreateError(null);
     const title = createTitle.trim() || "Planning Poker";
+    const teamId = createTeamId === "" ? undefined : createTeamId;
+    if (needsTeamPicker(teams, principal.is_superuser) && teamId == null) {
+      setCreateError("Выберите команду");
+      setCreateBusy(false);
+      return;
+    }
     try {
-      const session = await managerApi.createSession(title);
+      const session = await managerApi.createSession(title, teamId);
       // Cache the just-minted invite token so the cockpit doesn't
       // immediately call regenerate-invite (which would burn the
       // token we just got from the create response).
@@ -160,6 +181,7 @@ export default function SessionsPage({ canManageTasks, canManageSessions }: Sess
             size="sm"
             onClick={() => {
               setCreateTitle("");
+              setCreateTeamId(resolveDefaultTeamId(teams));
               setCreateError(null);
               setCreateOpen(true);
             }}
@@ -196,6 +218,20 @@ export default function SessionsPage({ canManageTasks, canManageSessions }: Sess
           <option value="true">Идут сейчас</option>
           <option value="false">Завершены / не запущены</option>
         </SelectField>
+        {principal.is_superuser ? (
+          <>
+            <TeamFilter teams={teams} value={teamFilter} onChange={setTeamFilter} />
+            <SelectField
+              className="md:max-w-[220px]"
+              aria-label="Сортировка"
+              value={teamSort ? "team" : "updated"}
+              onChange={(event) => setTeamSort(event.target.value === "team")}
+            >
+              <option value="updated">По дате обновления</option>
+              <option value="team">По команде</option>
+            </SelectField>
+          </>
+        ) : null}
         <Button variant="ghost" size="sm" className="whitespace-nowrap" onClick={list.reload}>Обновить</Button>
       </Toolbar>
 
@@ -266,6 +302,7 @@ export default function SessionsPage({ canManageTasks, canManageSessions }: Sess
             }
             meta={
               <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-ink3">
+                <TeamBadge teamId={item.team_id} team={item.team} />
                 <span>id {item.id}</span>
                 <span aria-hidden>·</span>
                 <span>{sessionKeyChip(item)}</span>
@@ -316,7 +353,10 @@ export default function SessionsPage({ canManageTasks, canManageSessions }: Sess
               >
                 {displaySessionTitle(item)}
               </button>
-              <p className="text-xs text-ink3">id {item.id} · {sessionKeyChip(item)}</p>
+              <p className="mt-1 flex flex-wrap items-center gap-2 text-xs text-ink3">
+                <TeamBadge teamId={item.team_id} team={item.team} />
+                <span>id {item.id} · {sessionKeyChip(item)}</span>
+              </p>
             </td>
             <td className="px-3 py-2 align-top tabular-nums">{item.participants_count}</td>
             <td className="px-3 py-2 align-top tabular-nums">{item.total_tasks}</td>
@@ -382,9 +422,13 @@ export default function SessionsPage({ canManageTasks, canManageSessions }: Sess
       <CreateSessionDialog
         open={createOpen}
         title={createTitle}
+        teamId={createTeamId}
+        teams={teams}
+        showTeamPicker={needsTeamPicker(teams, principal.is_superuser)}
         busy={createBusy}
         error={createError}
         onTitleChange={setCreateTitle}
+        onTeamIdChange={setCreateTeamId}
         onCancel={() => createSessionGuard.confirmIfNeeded(() => {
           if (createBusy) return;
           setCreateOpen(false);
@@ -432,17 +476,25 @@ export default function SessionsPage({ canManageTasks, canManageSessions }: Sess
 function CreateSessionDialog({
   open,
   title,
+  teamId,
+  teams,
+  showTeamPicker,
   busy,
   error,
   onTitleChange,
+  onTeamIdChange,
   onCancel,
   onSubmit,
 }: {
   open: boolean;
   title: string;
+  teamId: number | "";
+  teams: import("../api/cmsTypes").CmsTeam[];
+  showTeamPicker: boolean;
   busy: boolean;
   error: string | null;
   onTitleChange: (next: string) => void;
+  onTeamIdChange: (next: number | "") => void;
   onCancel: () => void;
   onSubmit: (event: FormEvent) => void;
 }) {
@@ -495,6 +547,16 @@ function CreateSessionDialog({
           onChange={(event) => onTitleChange(event.target.value)}
           hint="Можно оставить пустым — подставим «Planning Poker»."
         />
+        {showTeamPicker ? (
+          <TeamSelect
+            teams={teams}
+            value={teamId}
+            required={teams.length > 1}
+            disabled={busy}
+            allowEmpty={teams.length === 0}
+            onChange={onTeamIdChange}
+          />
+        ) : null}
         {error ? <Alert tone="danger">{error}</Alert> : null}
       </form>
     </BottomSheet>

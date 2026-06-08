@@ -28,6 +28,22 @@ export interface CmsPageAccess {
   is_enabled?: boolean;
 }
 
+export interface TeamRef {
+  id: number;
+  slug?: string;
+  name?: string;
+}
+
+export interface CmsTeam {
+  id: number;
+  slug: string;
+  name: string;
+  description: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface CmsPrincipal {
   id: number;
   username: string;
@@ -36,6 +52,8 @@ export interface CmsPrincipal {
   permissions: string[];
   roles: CmsRoleRef[];
   pages: CmsPageAccess[];
+  teams?: CmsTeam[];
+  team_ids?: number[];
   theme_preference?: ThemeMode;
 }
 
@@ -66,6 +84,8 @@ export interface CmsAdmin {
   updated_at: string;
   last_login_at: string | null;
   roles: CmsRoleRef[];
+  teams?: CmsTeam[];
+  team_ids?: number[];
 }
 
 export interface Overview {
@@ -87,6 +107,8 @@ export interface SessionItem {
   id: number;
   session_key: string;
   title: string | null;
+  team_id: number | null;
+  team: TeamRef | null;
   chat_id: number;
   topic_id: number | null;
   current_task_id: string | null;

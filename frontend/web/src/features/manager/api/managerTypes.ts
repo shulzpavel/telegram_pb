@@ -47,6 +47,8 @@ export interface ManagerSession {
   chat_id: number;
   topic_id: number | null;
   title: string;
+  team_id?: number | null;
+  team?: { id: number; slug?: string; name?: string } | null;
   token: string | null;
   invite_url: string | null;
   tasks_version: number;
@@ -122,6 +124,7 @@ export interface ManagerSessionRef {
   title: string;
   token: string | null;
   inviteUrl: string | null;
+  teamId?: number | null;
 }
 
 export interface TaskMutation {

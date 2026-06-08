@@ -35,6 +35,12 @@ from app.usecases.manage_tasks import (
     UpdateTaskUseCase,
 )
 from services.voting_service.cms_store import DEFAULT_LIMIT, MAX_LIMIT, token_hash as compute_token_hash
+from services.voting_service.cms_team_access import (
+    assert_record_access,
+    require_superuser,
+    resolve_create_team_id,
+    team_scope,
+)
 from services.voting_service.rate_limit import enforce_rate_limit
 from services.voting_service.cms_rbac import (
     PERM_ACCESS_MANAGE,
@@ -145,13 +151,27 @@ class AdminCreateRequest(BaseModel):
     display_name: Optional[str] = Field(default=None, max_length=120)
     is_active: bool = True
     role_ids: list[int] = Field(default_factory=list)
+    team_ids: list[int] = Field(default_factory=list)
 
 
 class AdminUpdateRequest(BaseModel):
     display_name: Optional[str] = Field(default=None, max_length=120)
     is_active: bool = True
     role_ids: list[int] = Field(default_factory=list)
+    team_ids: list[int] = Field(default_factory=list)
     password: Optional[str] = Field(default=None, min_length=8, max_length=256)
+
+
+class TeamCreateRequest(BaseModel):
+    slug: str = Field(min_length=2, max_length=64, pattern=r"^[a-z][a-z0-9_-]{1,63}$")
+    name: str = Field(min_length=1, max_length=120)
+    description: str = Field(default="", max_length=500)
+
+
+class TeamUpdateRequest(BaseModel):
+    name: Optional[str] = Field(default=None, min_length=1, max_length=120)
+    description: Optional[str] = Field(default=None, max_length=500)
+    is_active: Optional[bool] = None
 
 
 class SessionRenameRequest(BaseModel):
@@ -233,6 +253,7 @@ class SprintPlanPayload(BaseModel):
 class SprintPlanCreateRequest(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     payload: SprintPlanPayload
+    team_id: Optional[int] = None
 
 
 class SprintPlanUpdateRequest(BaseModel):
@@ -240,10 +261,15 @@ class SprintPlanUpdateRequest(BaseModel):
     payload: SprintPlanPayload
 
 
-async def _session_ref(request: Request, session_id: int) -> tuple[int, Optional[int]]:
+async def _session_ref(
+    request: Request,
+    session_id: int,
+    actor: CmsPrincipal,
+) -> tuple[int, Optional[int]]:
     detail = await _get_cms_store(request).get_session(session_id)
     if not detail:
         raise HTTPException(status_code=404, detail="Session not found")
+    assert_record_access(actor, detail)
     return int(detail["chat_id"]), detail.get("topic_id")
 
 
@@ -331,6 +357,8 @@ async def cms_me(actor: CmsPrincipal = AuthDep) -> dict:
         "permissions": sorted(actor.permissions),
         "roles": list(actor.roles),
         "pages": list(actor.pages),
+        "teams": list(actor.teams),
+        "team_ids": sorted(actor.team_ids),
         "theme_preference": actor.theme_preference,
     }
 
@@ -371,9 +399,62 @@ async def cms_update_preferences(
 @cms_router.get("/cms/overview")
 async def cms_overview(
     request: Request,
-    _: CmsPrincipal = Depends(require_permission(PERM_OVERVIEW_VIEW)),
+    team_id: Optional[int] = None,
+    actor: CmsPrincipal = Depends(require_permission(PERM_OVERVIEW_VIEW)),
 ) -> dict:
-    return await _get_cms_store(request).overview()
+    scope = team_scope(actor)
+    if team_id is not None and not actor.is_superuser:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    return await _get_cms_store(request).overview(team_id=team_id, **scope)
+
+
+@cms_router.get("/cms/teams")
+async def cms_list_teams(
+    request: Request,
+    actor: CmsPrincipal = AuthDep,
+) -> dict:
+    items = await _get_cms_store(request).list_teams(**team_scope(actor))
+    return {"items": items}
+
+
+@cms_router.post("/cms/teams")
+async def cms_create_team(
+    body: TeamCreateRequest,
+    request: Request,
+    actor: CmsPrincipal = AuthDep,
+) -> dict:
+    require_superuser(actor)
+    try:
+        team = await _get_cms_store(request).create_team(
+            slug=body.slug,
+            name=body.name,
+            description=body.description,
+        )
+    except Exception as exc:
+        await _audit(request, "cms.team.create", actor.username, "failed", {"error": str(exc)})
+        raise HTTPException(status_code=400, detail="Team could not be created") from exc
+    await _audit(request, "cms.team.create", actor.username, "ok", {"team_id": team["id"]})
+    return team
+
+
+@cms_router.patch("/cms/teams/{team_id}")
+async def cms_update_team(
+    team_id: int,
+    body: TeamUpdateRequest,
+    request: Request,
+    actor: CmsPrincipal = AuthDep,
+) -> dict:
+    require_superuser(actor)
+    team = await _get_cms_store(request).update_team(
+        team_id,
+        name=body.name,
+        description=body.description,
+        is_active=body.is_active,
+    )
+    if not team:
+        raise HTTPException(status_code=404, detail="Team not found")
+    await _audit(request, "cms.team.update", actor.username, "ok", {"team_id": team_id})
+    return team
 
 
 @cms_router.get("/cms/sessions")
@@ -385,8 +466,13 @@ async def cms_sessions(
     active: Optional[bool] = None,
     chat_id: Optional[int] = None,
     topic_id: Optional[int] = None,
-    _: CmsPrincipal = Depends(require_permission(PERM_SESSIONS_VIEW)),
+    team_id: Optional[int] = None,
+    sort: Optional[str] = Query(default=None, pattern="^(team_then_updated)?$"),
+    actor: CmsPrincipal = Depends(require_permission(PERM_SESSIONS_VIEW)),
 ) -> dict:
+    if team_id is not None and not actor.is_superuser:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    scope = team_scope(actor)
     return await _get_cms_store(request).list_sessions(
         limit=limit,
         cursor=cursor,
@@ -394,6 +480,9 @@ async def cms_sessions(
         active=active,
         chat_id=chat_id,
         topic_id=topic_id,
+        team_id=team_id,
+        sort_team=sort == "team_then_updated" and actor.is_superuser,
+        **scope,
     )
 
 
@@ -401,11 +490,12 @@ async def cms_sessions(
 async def cms_session_detail(
     session_id: int,
     request: Request,
-    _: CmsPrincipal = Depends(require_permission(PERM_SESSIONS_VIEW)),
+    actor: CmsPrincipal = Depends(require_permission(PERM_SESSIONS_VIEW)),
 ) -> dict:
     session = await _get_cms_store(request).get_session(session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
+    assert_record_access(actor, session)
     return session
 
 
@@ -420,6 +510,10 @@ async def cms_rename_session(
     place of the technical ``chat_id:topic_id`` key. Sending ``null`` or an
     empty string clears the custom title."""
     store = _get_cms_store(request)
+    existing = await store.get_session(session_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Session not found or already deleted")
+    assert_record_access(actor, existing)
     result = await store.rename_session(session_id, body.title)
     if result is None:
         raise HTTPException(status_code=404, detail="Session not found or already deleted")
@@ -444,8 +538,9 @@ async def cms_session_participants(
     request: Request,
     limit: int = Query(DEFAULT_LIMIT, ge=1, le=MAX_LIMIT),
     cursor: Optional[str] = None,
-    _: CmsPrincipal = Depends(require_permission(PERM_SESSIONS_VIEW)),
+    actor: CmsPrincipal = Depends(require_permission(PERM_SESSIONS_VIEW)),
 ) -> dict:
+    await _session_ref(request, session_id, actor)
     return await _get_cms_store(request).list_session_participants(session_id, limit, cursor)
 
 
@@ -457,8 +552,9 @@ async def cms_session_tasks(
     cursor: Optional[str] = None,
     bucket: Optional[str] = Query(None, pattern="^(tasks_queue|history|last_batch)$"),
     q: Optional[str] = None,
-    _: CmsPrincipal = Depends(require_permission(PERM_SESSIONS_VIEW)),
+    actor: CmsPrincipal = Depends(require_permission(PERM_SESSIONS_VIEW)),
 ) -> dict:
+    await _session_ref(request, session_id, actor)
     return await _get_cms_store(request).list_session_tasks(session_id, limit, cursor, bucket, q)
 
 
@@ -469,7 +565,7 @@ async def cms_create_session_task(
     request: Request,
     actor: CmsPrincipal = Depends(require_permission(PERM_TASKS_MANAGE)),
 ) -> dict:
-    chat_id, topic_id = await _session_ref(request, session_id)
+    chat_id, topic_id = await _session_ref(request, session_id, actor)
     use_case = AddManualTaskUseCase(request.app.state.repository)
     try:
         result = await use_case.execute(
@@ -496,7 +592,7 @@ async def cms_update_session_task(
     request: Request,
     actor: CmsPrincipal = Depends(require_permission(PERM_TASKS_MANAGE)),
 ) -> dict:
-    chat_id, topic_id = await _session_ref(request, session_id)
+    chat_id, topic_id = await _session_ref(request, session_id, actor)
     use_case = UpdateTaskUseCase(request.app.state.repository)
     try:
         result = await use_case.execute(
@@ -524,7 +620,7 @@ async def cms_delete_session_task(
     expected_version: Optional[int] = Query(default=None, ge=0),
     actor: CmsPrincipal = Depends(require_permission(PERM_TASKS_MANAGE)),
 ) -> dict:
-    chat_id, topic_id = await _session_ref(request, session_id)
+    chat_id, topic_id = await _session_ref(request, session_id, actor)
     use_case = DeleteTaskUseCase(request.app.state.repository)
     try:
         result = await use_case.execute(
@@ -548,7 +644,7 @@ async def cms_move_session_task(
     request: Request,
     actor: CmsPrincipal = Depends(require_permission(PERM_TASKS_MANAGE)),
 ) -> dict:
-    chat_id, topic_id = await _session_ref(request, session_id)
+    chat_id, topic_id = await _session_ref(request, session_id, actor)
     use_case = MoveTaskUseCase(request.app.state.repository)
     try:
         result = await use_case.execute(
@@ -578,7 +674,7 @@ async def cms_reorder_session_tasks(
     request: Request,
     actor: CmsPrincipal = Depends(require_permission(PERM_TASKS_MANAGE)),
 ) -> dict:
-    chat_id, topic_id = await _session_ref(request, session_id)
+    chat_id, topic_id = await _session_ref(request, session_id, actor)
     use_case = ReorderTasksUseCase(request.app.state.repository)
     try:
         result = await use_case.execute(
@@ -599,9 +695,9 @@ async def cms_preview_jira_tasks(
     session_id: int,
     body: JiraPreviewRequest,
     request: Request,
-    _: CmsPrincipal = Depends(require_permission(PERM_TASKS_MANAGE)),
+    actor: CmsPrincipal = Depends(require_permission(PERM_TASKS_MANAGE)),
 ) -> dict:
-    chat_id, topic_id = await _session_ref(request, session_id)
+    chat_id, topic_id = await _session_ref(request, session_id, actor)
     session = await _get_repo_session(request.app.state.repository, chat_id, topic_id)
     issues = await _jira_preview(request.app.state.http_session, body.jql, body.max_results)
     return _jira_preview_payload(issues, _existing_jira_keys(session))
@@ -614,7 +710,7 @@ async def cms_import_jira_tasks(
     request: Request,
     actor: CmsPrincipal = Depends(require_permission(PERM_TASKS_MANAGE)),
 ) -> dict:
-    chat_id, topic_id = await _session_ref(request, session_id)
+    chat_id, topic_id = await _session_ref(request, session_id, actor)
     try:
         selected = {key.strip().upper() for key in body.selected_keys if key.strip()}
         issues = await _jira_preview(request.app.state.http_session, body.jql, body.max_results)
@@ -755,7 +851,7 @@ async def cms_close_session(
     Behaves identically to the manager-driven ``POST /app/sessions/{chat_id}/finish``
     — both delegate to ``CloseSessionUseCase``.
     """
-    chat_id, topic_id = await _session_ref(request, session_id)
+    chat_id, topic_id = await _session_ref(request, session_id, actor)
     use_case = CloseSessionUseCase(request.app.state.repository)
     refreshed_session, completed = await use_case.execute(chat_id, topic_id)
     await _broadcast_session_state(request, refreshed_session)
@@ -789,7 +885,7 @@ async def cms_delete_session(
     Redis state and any pending invite tokens are also dropped so the deleted
     session cannot be reopened by a stale browser tab.
     """
-    chat_id, topic_id = await _session_ref(request, session_id)
+    chat_id, topic_id = await _session_ref(request, session_id, actor)
     store = _get_cms_store(request)
     deleted_ref = await store.soft_delete_session(session_id)
     if deleted_ref is None:
@@ -1067,12 +1163,15 @@ async def cms_access_create_admin(
     actor: CmsPrincipal = Depends(require_permission(PERM_ACCESS_MANAGE)),
 ) -> dict:
     try:
+        if not actor.is_superuser and body.team_ids:
+            raise HTTPException(status_code=403, detail="Forbidden")
         admin = await _get_cms_store(request).create_cms_admin(
             username=body.username,
             password=body.password,
             display_name=body.display_name,
             is_active=body.is_active,
             role_ids=body.role_ids,
+            team_ids=body.team_ids if actor.is_superuser else [],
         )
     except Exception as exc:
         await _audit(request, "cms.access.admin.create", actor.username, "failed", {"error": str(exc)})
@@ -1090,12 +1189,16 @@ async def cms_access_update_admin(
 ) -> dict:
     if admin_id == actor.id and not body.is_active:
         raise HTTPException(status_code=400, detail="You cannot deactivate your own admin account")
+    if not actor.is_superuser and body.team_ids:
+        raise HTTPException(status_code=403, detail="Forbidden")
     admin = await _get_cms_store(request).update_cms_admin(
         admin_id=admin_id,
         display_name=body.display_name,
         is_active=body.is_active,
         role_ids=body.role_ids,
         password=body.password,
+        team_ids=body.team_ids if actor.is_superuser else None,
+        update_teams=actor.is_superuser,
     )
     if not admin:
         raise HTTPException(status_code=404, detail="Admin not found")
@@ -1111,9 +1214,18 @@ async def cms_access_update_admin(
 @cms_router.get("/cms/sprint-plans")
 async def cms_list_sprint_plans(
     request: Request,
-    _: CmsPrincipal = Depends(require_permission(PERM_PLANNER_VIEW)),
+    team_id: Optional[int] = None,
+    sort: Optional[str] = Query(default=None, pattern="^(team_then_updated)?$"),
+    actor: CmsPrincipal = Depends(require_permission(PERM_PLANNER_VIEW)),
 ) -> dict:
-    items = await _get_cms_store(request).list_sprint_plans()
+    if team_id is not None and not actor.is_superuser:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    scope = team_scope(actor)
+    items = await _get_cms_store(request).list_sprint_plans(
+        team_id=team_id,
+        sort_team=sort == "team_then_updated" and actor.is_superuser,
+        **scope,
+    )
     return {"items": items}
 
 
@@ -1123,10 +1235,12 @@ async def cms_create_sprint_plan(
     request: Request,
     actor: CmsPrincipal = Depends(require_permission(PERM_PLANNER_VIEW)),
 ) -> dict:
+    resolved_team_id = resolve_create_team_id(actor, body.team_id)
     plan = await _get_cms_store(request).create_sprint_plan(
         name=body.name,
         payload=body.payload.model_dump(),
         created_by=actor.id,
+        team_id=resolved_team_id,
     )
     await _audit(
         request,
@@ -1142,11 +1256,12 @@ async def cms_create_sprint_plan(
 async def cms_get_sprint_plan(
     plan_id: int,
     request: Request,
-    _: CmsPrincipal = Depends(require_permission(PERM_PLANNER_VIEW)),
+    actor: CmsPrincipal = Depends(require_permission(PERM_PLANNER_VIEW)),
 ) -> dict:
     plan = await _get_cms_store(request).get_sprint_plan(plan_id)
     if not plan:
         raise HTTPException(status_code=404, detail="Sprint plan not found")
+    assert_record_access(actor, plan)
     return plan
 
 
@@ -1157,6 +1272,10 @@ async def cms_update_sprint_plan(
     request: Request,
     actor: CmsPrincipal = Depends(require_permission(PERM_PLANNER_VIEW)),
 ) -> dict:
+    existing = await _get_cms_store(request).get_sprint_plan(plan_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Sprint plan not found")
+    assert_record_access(actor, existing)
     plan = await _get_cms_store(request).update_sprint_plan(
         plan_id=plan_id,
         name=body.name,
@@ -1180,6 +1299,10 @@ async def cms_delete_sprint_plan(
     request: Request,
     actor: CmsPrincipal = Depends(require_permission(PERM_PLANNER_VIEW)),
 ) -> dict:
+    existing = await _get_cms_store(request).get_sprint_plan(plan_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Sprint plan not found")
+    assert_record_access(actor, existing)
     deleted = await _get_cms_store(request).delete_sprint_plan(plan_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Sprint plan not found")

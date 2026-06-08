@@ -53,6 +53,11 @@ from services.voting_service._http_shared import (
     require_permission,
 )
 from services.voting_service.cms_rbac import PERM_RETRO_ANALYZE, PERM_RETRO_MANAGE, PERM_RETRO_VIEW
+from services.voting_service.cms_team_access import (
+    assert_record_access,
+    resolve_create_team_id,
+    team_scope,
+)
 from services.voting_service.participant_identity import (
     stable_user_id_from_email,
     validate_participant_email,
@@ -106,6 +111,7 @@ class RetroConfigInput(BaseModel):
 class RetroCreateRequest(BaseModel):
     title: str = Field(min_length=1, max_length=200)
     config: RetroConfigInput = Field(default_factory=RetroConfigInput)
+    team_id: Optional[int] = None
 
 
 class RetroUpdateRequest(BaseModel):
@@ -667,9 +673,18 @@ async def repo_mutate(request: Request, retro_id: int, mutator):
 @retro_router.get("/cms/retros")
 async def cms_list_retros(
     request: Request,
-    _: CmsPrincipal = Depends(require_permission(PERM_RETRO_VIEW)),
+    team_id: Optional[int] = None,
+    sort: Optional[str] = None,
+    actor: CmsPrincipal = Depends(require_permission(PERM_RETRO_VIEW)),
 ) -> dict:
-    items = await _get_cms_store(request).list_retros()
+    if team_id is not None and not actor.is_superuser:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    scope = team_scope(actor)
+    items = await _get_cms_store(request).list_retros(
+        team_id=team_id,
+        sort_team=sort == "team_then_updated" and actor.is_superuser,
+        **scope,
+    )
     return {"items": [_redact_retro_row(item) for item in items]}
 
 
@@ -679,24 +694,32 @@ async def cms_create_retro(
     request: Request,
     actor: CmsPrincipal = Depends(require_permission(PERM_RETRO_MANAGE)),
 ) -> dict:
+    resolved_team_id = resolve_create_team_id(actor, body.team_id)
     retro = await _get_cms_store(request).create_retro(
         title=_clean_title(body.title),
         config=body.config.model_dump(),
         created_by=actor.id,
+        team_id=resolved_team_id,
     )
     await _audit(request, "cms.retro.create", actor.username, "ok", {"retro_id": retro["id"]})
     return retro
+
+
+async def _require_retro_access(request: Request, retro_id: int, actor: CmsPrincipal) -> dict:
+    row = await _get_cms_store(request).get_retro(retro_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Retro not found")
+    assert_record_access(actor, row)
+    return row
 
 
 @retro_router.get("/cms/retros/{retro_id}")
 async def cms_get_retro(
     retro_id: int,
     request: Request,
-    _: CmsPrincipal = Depends(require_permission(PERM_RETRO_VIEW)),
+    actor: CmsPrincipal = Depends(require_permission(PERM_RETRO_VIEW)),
 ) -> dict:
-    row = await _get_cms_store(request).get_retro(retro_id)
-    if not row:
-        raise HTTPException(status_code=404, detail="Retro not found")
+    row = await _require_retro_access(request, retro_id, actor)
     row = _redact_retro_row(row)
     # Attach live state when the session has been started.
     live = await _get_retro_repo(request).get_retro(retro_id)
@@ -712,9 +735,7 @@ async def cms_update_retro(
     actor: CmsPrincipal = Depends(require_permission(PERM_RETRO_MANAGE)),
 ) -> dict:
     store = _get_cms_store(request)
-    existing = await store.get_retro(retro_id)
-    if not existing:
-        raise HTTPException(status_code=404, detail="Retro not found")
+    existing = await _require_retro_access(request, retro_id, actor)
     if existing["status"] not in ("draft",):
         raise HTTPException(status_code=409, detail="Нельзя менять конфигурацию запущенного ретро")
     retro = await store.update_retro_config(retro_id, _clean_title(body.title), body.config.model_dump())
@@ -728,6 +749,7 @@ async def cms_delete_retro(
     request: Request,
     actor: CmsPrincipal = Depends(require_permission(PERM_RETRO_MANAGE)),
 ) -> dict:
+    await _require_retro_access(request, retro_id, actor)
     deleted = await _get_cms_store(request).delete_retro(retro_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Retro not found")
@@ -744,9 +766,7 @@ async def cms_retro_invite(
 ) -> dict:
     """Bootstrap live state from config and mint a public participant link."""
     store = _get_cms_store(request)
-    row = await store.get_retro(retro_id)
-    if not row:
-        raise HTTPException(status_code=404, detail="Retro not found")
+    row = await _require_retro_access(request, retro_id, actor)
 
     repo = _get_retro_repo(request)
     default = _retro_from_config(retro_id, row["title"], row.get("config") or {})
@@ -784,7 +804,7 @@ async def cms_retro_open_section(
             deadline = (datetime.now(timezone.utc) + timedelta(seconds=seconds)).isoformat()
         r.open_section(body.section_id, deadline)
 
-    retro = await _manager_mutate(request, retro_id, _mutate)
+    retro = await _manager_mutate(request, retro_id, _mutate, actor)
     await _audit(request, "cms.retro.section.open", actor.username, "ok",
                  {"retro_id": retro_id, "section_id": body.section_id})
     return _build_retro_state(retro)
@@ -796,7 +816,7 @@ async def cms_retro_close_section(
     request: Request,
     actor: CmsPrincipal = Depends(require_permission(PERM_RETRO_MANAGE)),
 ) -> dict:
-    retro = await _manager_mutate(request, retro_id, lambda r: r.close_section())
+    retro = await _manager_mutate(request, retro_id, lambda r: r.close_section(), actor)
     await _audit(request, "cms.retro.section.close", actor.username, "ok", {"retro_id": retro_id})
     return _build_retro_state(retro)
 
@@ -815,7 +835,7 @@ async def cms_retro_phase(
         mutate = lambda r: r.start_discussion()
     else:
         raise HTTPException(status_code=400, detail="Unknown phase target")
-    retro = await _manager_mutate(request, retro_id, mutate)
+    retro = await _manager_mutate(request, retro_id, mutate, actor)
     await _audit(request, "cms.retro.phase", actor.username, "ok", {"retro_id": retro_id, "target": target})
     return _build_retro_state(retro)
 
@@ -837,7 +857,7 @@ async def cms_retro_create_group(
             created_at=_now_iso(),
         )
 
-    retro = await _manager_mutate(request, retro_id, _mutate)
+    retro = await _manager_mutate(request, retro_id, _mutate, actor)
     await _audit(
         request,
         "cms.retro.group.create",
@@ -856,7 +876,7 @@ async def cms_retro_rename_group(
     request: Request,
     actor: CmsPrincipal = Depends(require_permission(PERM_RETRO_MANAGE)),
 ) -> dict:
-    retro = await _manager_mutate(request, retro_id, lambda r: r.rename_group(group_id, body.title))
+    retro = await _manager_mutate(request, retro_id, lambda r: r.rename_group(group_id, body.title), actor)
     await _audit(
         request,
         "cms.retro.group.rename",
@@ -874,7 +894,7 @@ async def cms_retro_ungroup(
     request: Request,
     actor: CmsPrincipal = Depends(require_permission(PERM_RETRO_MANAGE)),
 ) -> dict:
-    retro = await _manager_mutate(request, retro_id, lambda r: r.ungroup(group_id))
+    retro = await _manager_mutate(request, retro_id, lambda r: r.ungroup(group_id), actor)
     await _audit(
         request,
         "cms.retro.group.delete",
@@ -897,7 +917,7 @@ async def cms_retro_add_action_item(
     def _mutate(r: Retrospective):
         r.add_action_item(item_id=item_id, text=body.text, assignee=body.assignee, created_at=_now_iso())
 
-    retro = await _manager_mutate(request, retro_id, _mutate)
+    retro = await _manager_mutate(request, retro_id, _mutate, actor)
     await _audit(request, "cms.retro.action_item.add", actor.username, "ok", {"retro_id": retro_id})
     return _build_retro_state(retro)
 
@@ -909,7 +929,7 @@ async def cms_retro_remove_action_item(
     request: Request,
     actor: CmsPrincipal = Depends(require_permission(PERM_RETRO_MANAGE)),
 ) -> dict:
-    retro = await _manager_mutate(request, retro_id, lambda r: r.remove_action_item(item_id))
+    retro = await _manager_mutate(request, retro_id, lambda r: r.remove_action_item(item_id), actor)
     await _audit(request, "cms.retro.action_item.remove", actor.username, "ok", {"retro_id": retro_id})
     return _build_retro_state(retro)
 
@@ -920,7 +940,7 @@ async def cms_retro_finalize(
     request: Request,
     actor: CmsPrincipal = Depends(require_permission(PERM_RETRO_MANAGE)),
 ) -> dict:
-    retro = await _manager_mutate(request, retro_id, lambda r: r.finalize())
+    retro = await _manager_mutate(request, retro_id, lambda r: r.finalize(), actor)
     snapshot = _anonymized_retro_snapshot(retro)
     await _get_cms_store(request).save_retro_snapshot(retro_id, snapshot, status="done")
     await _audit(request, "cms.retro.finalize", actor.username, "ok", {"retro_id": retro_id})
@@ -934,6 +954,7 @@ async def cms_retro_analyze(
     actor: CmsPrincipal = Depends(require_permission(PERM_RETRO_ANALYZE)),
 ) -> dict:
     store = _get_cms_store(request)
+    await _require_retro_access(request, retro_id, actor)
     repo = _get_retro_repo(request)
     retro = await repo.get_retro(retro_id)
     if retro is None:
@@ -981,8 +1002,14 @@ def _set_ai(retro: Retrospective, summary: dict) -> None:
     retro.bump_version()
 
 
-async def _manager_mutate(request: Request, retro_id: int, mutator) -> Retrospective:
+async def _manager_mutate(
+    request: Request,
+    retro_id: int,
+    mutator,
+    actor: CmsPrincipal,
+) -> Retrospective:
     """Run a manager mutation, broadcast, and map domain errors to HTTP."""
+    await _require_retro_access(request, retro_id, actor)
     try:
         retro, _ = await repo_mutate(request, retro_id, mutator)
     except RetroError as exc:

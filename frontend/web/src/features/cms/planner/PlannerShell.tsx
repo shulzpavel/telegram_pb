@@ -23,6 +23,7 @@ import {
   HelpCallout,
   InlineError,
   MobileRecordCard,
+  Toolbar,
   MobileRecordField,
   SectionHeader,
   Skeleton,
@@ -42,7 +43,14 @@ import {
 } from "./plannerCalc";
 import { useUnsavedChangesGuard } from "../hooks/useUnsavedChangesGuard";
 
+import type { CmsPrincipal } from "../api/cmsTypes";
+import { TeamBadge } from "../components/TeamBadge";
+import { TeamFilter, teamFilterParams } from "../components/TeamFilter";
+import { TeamSelect, needsTeamPicker, resolveDefaultTeamId } from "../components/TeamSelect";
+import { useCmsTeams } from "../hooks/useCmsTeams";
+
 interface PlannerShellProps {
+  principal: CmsPrincipal;
   canManage: boolean;
 }
 
@@ -50,12 +58,12 @@ interface PlannerShellProps {
  * `/cms/planner` entry point. Routes the list view and the editor; the editor
  * is shared between "new" and "edit by id" cases.
  */
-export default function PlannerShell({ canManage }: PlannerShellProps) {
+export default function PlannerShell({ principal, canManage }: PlannerShellProps) {
   return (
     <Routes>
-      <Route index element={<PlannerListPage canManage={canManage} />} />
-      <Route path="new" element={<PlannerEditorPage canManage={canManage} mode="create" />} />
-      <Route path=":planId" element={<PlannerEditorPage canManage={canManage} mode="edit" />} />
+      <Route index element={<PlannerListPage principal={principal} canManage={canManage} />} />
+      <Route path="new" element={<PlannerEditorPage principal={principal} canManage={canManage} mode="create" />} />
+      <Route path=":planId" element={<PlannerEditorPage principal={principal} canManage={canManage} mode="edit" />} />
       <Route path="*" element={<Navigate to="." replace />} />
     </Routes>
   );
@@ -65,8 +73,11 @@ export default function PlannerShell({ canManage }: PlannerShellProps) {
 // List view
 // ---------------------------------------------------------------------------
 
-function PlannerListPage({ canManage }: { canManage: boolean }) {
+function PlannerListPage({ principal, canManage }: { principal: CmsPrincipal; canManage: boolean }) {
   const navigate = useNavigate();
+  const { teams } = useCmsTeams(principal);
+  const [teamFilter, setTeamFilter] = useState("");
+  const [teamSort, setTeamSort] = useState(false);
   const [items, setItems] = useState<SprintPlanRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -77,14 +88,17 @@ function PlannerListPage({ canManage }: { canManage: boolean }) {
     setLoading(true);
     setError(null);
     try {
-      const res = await cmsPlannerApi.list();
+      const res = await cmsPlannerApi.list({
+        ...teamFilterParams(teamFilter),
+        sort: teamSort && principal.is_superuser ? "team_then_updated" : undefined,
+      });
       setItems(res.items);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось загрузить список планов.");
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [principal.is_superuser, teamFilter, teamSort]);
 
   useEffect(() => {
     void reload();
@@ -127,6 +141,20 @@ function PlannerListPage({ canManage }: { canManage: boolean }) {
       </HelpCallout>
 
       {error ? <InlineError text={error} /> : null}
+
+      {principal.is_superuser ? (
+        <Toolbar>
+          <TeamFilter teams={teams} value={teamFilter} onChange={setTeamFilter} />
+          <SelectField
+            aria-label="Сортировка планов"
+            value={teamSort ? "team" : "updated"}
+            onChange={(event) => setTeamSort(event.target.value === "team")}
+          >
+            <option value="updated">По дате обновления</option>
+            <option value="team">По команде</option>
+          </SelectField>
+        </Toolbar>
+      ) : null}
 
       {loading ? (
         <Skeleton height="h-40" />
@@ -189,7 +217,12 @@ function PlannerList({
             <MobileRecordCard
               key={item.id}
               title={item.name}
-              meta={summary}
+              meta={
+                <span className="flex flex-wrap items-center gap-2">
+                  <TeamBadge teamId={item.team_id} team={item.team} />
+                  <span>{summary}</span>
+                </span>
+              }
               action={
                 <div className="flex gap-2">
                   <Button size="sm" variant="ghost" onClick={() => onEdit(item.id)}>
@@ -459,12 +492,16 @@ function serializeActualByTrack(inputs: PlannerInputs): Record<string, number> |
 }
 
 function PlannerEditorPage({
+  principal,
   canManage,
   mode,
 }: {
+  principal: CmsPrincipal;
   canManage: boolean;
   mode: "create" | "edit";
 }) {
+  const { teams } = useCmsTeams(principal);
+  const [teamId, setTeamId] = useState<number | "">(() => resolveDefaultTeamId(teams));
   const navigate = useNavigate();
   const toast = useToast();
   const params = useParams<{ planId: string }>();
@@ -521,7 +558,11 @@ function PlannerEditorPage({
       const saved =
         mode === "edit" && planId
           ? await cmsPlannerApi.update(planId, { name: name.trim(), payload })
-          : await cmsPlannerApi.create({ name: name.trim(), payload });
+          : await cmsPlannerApi.create({
+              name: name.trim(),
+              payload,
+              team_id: teamId === "" ? undefined : teamId,
+            });
 
       // Detect older voting-service deployments that silently strip the new
       // `tracks` / `by_track` fields — surface a warning so the user knows
@@ -616,6 +657,17 @@ function PlannerEditorPage({
         <Skeleton height="h-72" />
       ) : (
         <div className="grid gap-5 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+          {mode === "create" && needsTeamPicker(teams, principal.is_superuser) ? (
+            <FormCard title="Команда">
+              <TeamSelect
+                teams={teams}
+                value={teamId}
+                required={teams.length > 1}
+                disabled={!canManage}
+                onChange={setTeamId}
+              />
+            </FormCard>
+          ) : null}
           <PlannerForm
             disabled={!canManage}
             name={name}

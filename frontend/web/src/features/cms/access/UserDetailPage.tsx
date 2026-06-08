@@ -13,11 +13,13 @@ import {
   TextField,
 } from "../../../design-system";
 import { useMobileKeyboardInset } from "../../../design-system/mobileKeyboard";
-import { cmsAccessApi, cmsEventsApi } from "../api/cmsClient";
-import type { AuditEvent, CmsAdmin, CmsRole } from "../api/cmsTypes";
+import { cmsAccessApi, cmsEventsApi, cmsTeamsApi } from "../api/cmsClient";
+import type { AuditEvent, CmsAdmin, CmsRole, CmsTeam } from "../api/cmsTypes";
+import { TeamBadge } from "../components/TeamBadge";
 import { HelpCallout, InlineError, Status } from "../components/CmsPrimitives";
 import { useAccessContext } from "./AccessShell";
 import { RolePicker } from "./parts/RolePicker";
+import { TeamPicker } from "./parts/TeamPicker";
 import { formatRelativeTime } from "./parts/helpers";
 import { validateCreateAdminInput, ADMIN_PASSWORD_MIN_LENGTH } from "./accessValidation";
 
@@ -152,10 +154,18 @@ interface NewUserViewProps {
 }
 
 function NewUserView({ canManage, roles, onCreated }: NewUserViewProps) {
+  const { isSuperuser } = useAccessContext();
+  const [teams, setTeams] = useState<CmsTeam[]>([]);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [roleIds, setRoleIds] = useState<number[]>([]);
+  const [teamIds, setTeamIds] = useState<number[]>([]);
+
+  useEffect(() => {
+    if (!isSuperuser) return;
+    cmsTeamsApi.list().then((res) => setTeams(res.items)).catch(() => setTeams([]));
+  }, [isSuperuser]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -176,6 +186,7 @@ function NewUserView({ canManage, roles, onCreated }: NewUserViewProps) {
         display_name: displayName.trim() || null,
         is_active: true,
         role_ids: roleIds,
+        team_ids: isSuperuser ? teamIds : undefined,
       });
       onCreated(created);
     } catch (err) {
@@ -240,6 +251,15 @@ function NewUserView({ canManage, roles, onCreated }: NewUserViewProps) {
             />
           </div>
 
+          {isSuperuser ? (
+            <>
+              <h4 className="mt-5 text-sm font-bold text-ink">Команды</h4>
+              <div className="mt-2">
+                <TeamPicker teams={teams} selected={teamIds} disabled={!canManage} onChange={setTeamIds} />
+              </div>
+            </>
+          ) : null}
+
           {validation.length > 0 ? (
             <ul className="mt-3 space-y-1 text-xs text-red">
               {validation.map((message) => (
@@ -282,9 +302,17 @@ interface ExistingUserViewProps {
 }
 
 function ExistingUserView({ admin, canManage, isCurrent, roles, onUpdated }: ExistingUserViewProps) {
+  const { isSuperuser } = useAccessContext();
+  const [teams, setTeams] = useState<CmsTeam[]>([]);
   const [displayName, setDisplayName] = useState(admin.display_name ?? "");
   const [isActive, setIsActive] = useState(admin.is_active);
   const [roleIds, setRoleIds] = useState<number[]>(admin.roles.map((role) => role.id));
+  const [teamIds, setTeamIds] = useState<number[]>(admin.team_ids ?? admin.teams?.map((team) => team.id) ?? []);
+
+  useEffect(() => {
+    if (!isSuperuser) return;
+    cmsTeamsApi.list().then((res) => setTeams(res.items)).catch(() => setTeams([]));
+  }, [isSuperuser]);
 
   const [savingProfile, setSavingProfile] = useState(false);
   const [savingRoles, setSavingRoles] = useState(false);
@@ -299,6 +327,11 @@ function ExistingUserView({ admin, canManage, isCurrent, roles, onUpdated }: Exi
     if (before.size !== roleIds.length) return true;
     return roleIds.some((id) => !before.has(id));
   }, [admin.roles, roleIds]);
+  const teamsDirty = useMemo(() => {
+    const before = new Set(admin.team_ids ?? admin.teams?.map((team) => team.id) ?? []);
+    if (before.size !== teamIds.length) return true;
+    return teamIds.some((id) => !before.has(id));
+  }, [admin.team_ids, admin.teams, teamIds]);
 
   async function saveProfile() {
     setError(null);
@@ -309,6 +342,7 @@ function ExistingUserView({ admin, canManage, isCurrent, roles, onUpdated }: Exi
         display_name: displayName.trim() || null,
         is_active: isActive,
         role_ids: roleIds,
+        team_ids: isSuperuser ? teamIds : undefined,
       });
       onUpdated(updated);
       setSuccess("Профиль сохранён.");
@@ -366,6 +400,9 @@ function ExistingUserView({ admin, canManage, isCurrent, roles, onUpdated }: Exi
           </h3>
           {isCurrent ? <Badge tone="success">это вы</Badge> : null}
           {admin.is_superuser ? <Badge tone="info">superuser</Badge> : null}
+          {(admin.teams ?? []).map((team) => (
+            <TeamBadge key={team.id} teamId={team.id} team={team} />
+          ))}
           <Status active={admin.is_active} label={admin.is_active ? "активен" : "отключён"} />
         </div>
         <p className="text-xs text-ink3">
@@ -437,6 +474,32 @@ function ExistingUserView({ admin, canManage, isCurrent, roles, onUpdated }: Exi
               </Button>
             </div>
           </Surface>
+
+          {isSuperuser ? (
+            <Surface className="p-4">
+              <h4 className="text-sm font-bold text-ink">Команды</h4>
+              <div className="mt-3">
+                <TeamPicker teams={teams} selected={teamIds} disabled={!canManage} onChange={setTeamIds} />
+              </div>
+              <div className="mt-4 flex items-center justify-end gap-2">
+                <Button
+                  variant="ghost"
+                  onClick={() => setTeamIds(admin.team_ids ?? admin.teams?.map((team) => team.id) ?? [])}
+                  disabled={!teamsDirty || savingProfile}
+                >
+                  Отмена
+                </Button>
+                <Button
+                  variant="primary"
+                  onClick={saveProfile}
+                  disabled={!canManage || !teamsDirty || savingProfile}
+                  loading={savingProfile}
+                >
+                  Сохранить команды
+                </Button>
+              </div>
+            </Surface>
+          ) : null}
 
           <Surface className="p-4">
             <h4 className="text-sm font-bold text-ink">Пароль</h4>

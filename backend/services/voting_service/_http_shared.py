@@ -116,6 +116,8 @@ class CmsPrincipal:
     permissions: frozenset[str]
     roles: tuple[dict, ...]
     pages: tuple[dict, ...]
+    team_ids: frozenset[int] = frozenset()
+    teams: tuple[dict, ...] = ()
     theme_preference: ThemePreference = DEFAULT_THEME_PREFERENCE
 
     def can(self, permission: str) -> bool:
@@ -126,6 +128,8 @@ def _principal_from_record(record: dict) -> CmsPrincipal:
     theme = record.get("theme_preference") or DEFAULT_THEME_PREFERENCE
     if theme not in ALLOWED_THEME_PREFERENCES:
         theme = DEFAULT_THEME_PREFERENCE
+    raw_team_ids = record.get("team_ids") or []
+    team_ids = frozenset(int(team_id) for team_id in raw_team_ids)
     return CmsPrincipal(
         id=int(record["id"]),
         username=record["username"],
@@ -134,6 +138,8 @@ def _principal_from_record(record: dict) -> CmsPrincipal:
         permissions=frozenset(record.get("permissions") or []),
         roles=tuple(record.get("roles") or []),
         pages=tuple(record.get("pages") or []),
+        team_ids=team_ids,
+        teams=tuple(record.get("teams") or []),
         theme_preference=theme,
     )
 

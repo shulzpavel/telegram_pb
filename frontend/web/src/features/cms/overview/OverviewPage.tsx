@@ -2,7 +2,10 @@ import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "../../../design-system";
 import { cmsFetch } from "../api/cmsClient";
-import type { Overview } from "../api/cmsTypes";
+import type { CmsPrincipal, Overview } from "../api/cmsTypes";
+import { TeamFilter, teamFilterParams } from "../components/TeamFilter";
+import { useCmsTeams } from "../hooks/useCmsTeams";
+import { Toolbar } from "../components/CmsPrimitives";
 import { HelpCallout, InlineError, SectionHeader, Skeleton } from "../components/CmsPrimitives";
 import { formatNumber } from "../../../shared/lib/format";
 
@@ -14,17 +17,23 @@ interface OverviewTile {
   hint: string;
 }
 
-export default function OverviewPage() {
+export default function OverviewPage({ principal }: { principal: CmsPrincipal }) {
+  const { teams } = useCmsTeams(principal);
+  const [teamFilter, setTeamFilter] = useState("");
   const [overview, setOverview] = useState<Overview | null>(null);
   const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
 
   const loadOverview = useCallback(() => {
     setError(null);
-    cmsFetch<Overview>("/overview")
+    const query = new URLSearchParams();
+    const teamParams = teamFilterParams(teamFilter);
+    if (teamParams.team_id != null) query.set("team_id", String(teamParams.team_id));
+    const suffix = query.toString() ? `?${query.toString()}` : "";
+    cmsFetch<Overview>(`/overview${suffix}`)
       .then(setOverview)
       .catch((err) => setError(err instanceof Error ? err.message : "Не удалось загрузить сводку"));
-  }, []);
+  }, [teamFilter]);
 
   useEffect(() => {
     loadOverview();
@@ -48,6 +57,11 @@ export default function OverviewPage() {
         <p>Тайл-карточки кликабельны и идут в основном порядке работы: калькулятор → сессии → ретро.</p>
         <p>Цифры обновляются вручную — кнопкой «Обновить». Удалённые из истории сессии в счётчики не входят.</p>
       </HelpCallout>
+      {principal.is_superuser ? (
+        <Toolbar>
+          <TeamFilter teams={teams} value={teamFilter} onChange={setTeamFilter} />
+        </Toolbar>
+      ) : null}
       {error ? <InlineError text={error} /> : null}
       {overview ? <OverviewCards overview={overview} onSelect={(to) => navigate(to)} /> : <Skeleton height="h-24" />}
     </section>
