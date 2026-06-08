@@ -656,9 +656,9 @@ function PlannerEditorPage({
       {loading ? (
         <Skeleton height="h-72" />
       ) : (
-        <div className="grid gap-5 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+        <>
           {mode === "create" && needsTeamPicker(teams, principal.is_superuser) ? (
-            <FormCard title="Команда">
+            <div className="max-w-md">
               <TeamSelect
                 teams={teams}
                 value={teamId}
@@ -666,19 +666,21 @@ function PlannerEditorPage({
                 disabled={!canManage}
                 onChange={setTeamId}
               />
-            </FormCard>
+            </div>
           ) : null}
-          <PlannerForm
-            disabled={!canManage}
-            name={name}
-            onName={setName}
-            notes={notes}
-            onNotes={setNotes}
-            inputs={inputs}
-            onInputs={setInputs}
-          />
-          <ResultPanel result={result} />
-        </div>
+          <div className="grid gap-5 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+            <PlannerForm
+              disabled={!canManage}
+              name={name}
+              onName={setName}
+              notes={notes}
+              onNotes={setNotes}
+              inputs={inputs}
+              onInputs={setInputs}
+            />
+            <ResultPanel result={result} />
+          </div>
+        </>
       )}
 
       {!loading ? (
