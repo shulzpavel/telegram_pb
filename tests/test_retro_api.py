@@ -67,13 +67,13 @@ class FakeCmsStore:
         row = self._rows.get(retro_id)
         return dict(row) if row else None
 
-    async def list_retros(self):
+    async def list_retros(self, **kwargs):
         return [dict(r) for r in self._rows.values()]
 
     async def get_retro(self, retro_id):
         return self._row(retro_id)
 
-    async def create_retro(self, title, config, created_by):
+    async def create_retro(self, title, config, created_by, team_id=None):
         retro_id = next(self._ids)
         self._rows[retro_id] = {
             "id": retro_id,
@@ -83,6 +83,8 @@ class FakeCmsStore:
             "snapshot": None,
             "ai_summary": None,
             "created_by": created_by,
+            "team_id": team_id,
+            "team": None,
         }
         return self._row(retro_id)
 
@@ -128,6 +130,8 @@ def _principal() -> CmsPrincipal:
         permissions=frozenset(),
         roles=(),
         pages=(),
+        team_ids=frozenset(),
+        teams=(),
     )
 
 
