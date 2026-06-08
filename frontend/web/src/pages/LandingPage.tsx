@@ -75,25 +75,28 @@ export default function LandingPage() {
         </div>
       </AutoHideAppHeader>
 
-      <section className="flex flex-1 items-center px-4 py-8 pb-safe-6 lg:px-6">
-        <div className="mx-auto grid w-full max-w-6xl gap-6 lg:grid-cols-[0.78fr_1.22fr] lg:items-center">
-          <motion.div {...enter}>
-            <Badge tone="info">Общая ссылка для команды</Badge>
-            <h1 className="mt-4 max-w-xl text-balance text-3xl font-bold leading-tight tracking-tight sm:text-5xl sm:leading-[1.08]">
-              Планирование, poker и ретро в одном месте
-            </h1>
-            <p className="mt-4 max-w-lg text-base leading-7 text-ink2 sm:text-lg">
-              Начните с калькулятора capacity, проведите planning session и закройте цикл ретроспективой с анонимными карточками.
-            </p>
-            <div className="mt-6 rounded-2xl border border-blue/20 bg-blue/10 p-4 text-sm leading-6 text-ink2">
+      <section className="flex flex-1 px-4 py-5 pb-safe-5 lg:px-6">
+        <div className="mx-auto flex w-full max-w-7xl flex-col justify-center gap-5">
+          <motion.div {...enter} className="grid gap-4 lg:grid-cols-[minmax(0,0.95fr)_minmax(320px,0.55fr)] lg:items-end">
+            <div>
+              <Badge tone="info">Общая ссылка для команды</Badge>
+              <h1 className="mt-3 max-w-3xl text-balance text-3xl font-bold leading-tight tracking-tight sm:text-5xl sm:leading-[1.05]">
+                Планирование, poker и ретро в одном месте
+              </h1>
+              <p className="mt-3 max-w-2xl text-base leading-7 text-ink2 sm:text-lg">
+                Начните с калькулятора capacity, проведите planning session и закройте цикл ретроспективой с анонимными карточками.
+              </p>
+            </div>
+            <div className="rounded-2xl border border-blue/20 bg-blue/10 p-4 text-sm leading-6 text-ink2 shadow-card">
               Уже есть invite-ссылка? Откройте её напрямую — ссылки на сессии и ретро ведут сразу на нужный экран команды.
             </div>
           </motion.div>
 
-          <div className="grid gap-4">
+          <div className="grid gap-3 lg:grid-cols-3">
             {ACTIONS.map((action, index) => (
               <motion.div
                 key={action.id}
+                className="h-full"
                 {...(reduceMotion
                   ? {}
                   : {
@@ -102,20 +105,26 @@ export default function LandingPage() {
                       transition: { duration: 0.3, delay: 0.06 + index * 0.06, ease: [0.2, 0, 0, 1] as const },
                     })}
               >
-                <Surface className="p-5 sm:p-6">
-                  <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                <Surface
+                  className={[
+                    "group flex h-full flex-col overflow-hidden p-4 transition-transform duration-200 hover:-translate-y-0.5 hover:shadow-card sm:p-5",
+                    action.cta.variant === "primary" ? "border-blue/30 bg-blue/5" : "",
+                  ].join(" ")}
+                >
+                  <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue">{action.eyebrow}</p>
-                      <h2 className="mt-2 text-xl font-bold text-ink sm:text-2xl">{action.title}</h2>
-                      <p className="mt-2 max-w-xl text-sm leading-6 text-ink2">{action.description}</p>
+                      <h2 className="mt-2 text-xl font-bold leading-tight text-ink sm:text-2xl">{action.title}</h2>
                     </div>
                     <span
-                      className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-line bg-line2 text-sm font-bold text-blue"
+                      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-line bg-line2 text-sm font-bold text-blue"
                       aria-hidden
                     >
                       {index + 1}
                     </span>
                   </div>
+
+                  <p className="mt-3 text-sm leading-6 text-ink2">{action.description}</p>
 
                   <div className="mt-4 flex flex-wrap gap-2">
                     {action.details.map((detail) => (
@@ -123,15 +132,15 @@ export default function LandingPage() {
                     ))}
                   </div>
 
-                  <div className="mt-5 flex flex-col gap-2 sm:flex-row">
-                    <Link to={action.cta.to} className="block flex-1">
+                  <div className="mt-auto pt-5">
+                    <Link to={action.cta.to} className="block">
                       <Button variant={action.cta.variant} size="lg" className="w-full">
                         {action.cta.label}
                       </Button>
                     </Link>
                     {action.demo ? (
-                      <Link to={action.demo.to} className="block sm:w-auto">
-                        <Button variant="ghost" size="lg" className="w-full sm:w-auto">
+                      <Link to={action.demo.to} className="mt-2 block">
+                        <Button variant="ghost" size="md" className="w-full">
                           {action.demo.label}
                         </Button>
                       </Link>
@@ -140,56 +149,39 @@ export default function LandingPage() {
                 </Surface>
               </motion.div>
             ))}
-            <motion.div
-              {...(reduceMotion
-                ? {}
-                : {
-                    initial: { opacity: 0, y: 16 },
-                    animate: { opacity: 1, y: 0 },
-                    transition: { duration: 0.3, delay: 0.18, ease: [0.2, 0, 0, 1] as const },
-                  })}
-            >
-              <Surface className="p-5 sm:p-6">
-                <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                  <div className="min-w-0">
-                    <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue">Как это работает</p>
-                    <h2 className="mt-2 text-xl font-bold text-ink sm:text-2xl">Рабочий порядок</h2>
-                    <p className="mt-2 max-w-xl text-sm leading-6 text-ink2">
-                      Сначала оцените capacity команды, затем проведите planning poker по задачам и после спринта соберите ретро.
-                      Для быстрых проверок есть mock demo: голосование и ретро открываются без подготовки данных.
-                    </p>
-                  </div>
-                  <span
-                    className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-line bg-line2 text-sm font-bold text-blue"
-                    aria-hidden
-                  >
-                    4
-                  </span>
-                </div>
-
-                <div className="mt-4 grid gap-3 sm:grid-cols-3">
-                  <div className="rounded-xl border border-line bg-line2/70 p-3">
-                    <p className="text-xs font-bold uppercase tracking-wide text-ink3">Калькулятор</p>
-                    <p className="mt-1 text-sm leading-6 text-ink2">
-                      Зафиксируйте состав команды, absences и velocity перед тем, как брать объём в спринт.
-                    </p>
-                  </div>
-                  <div className="rounded-xl border border-line bg-line2/70 p-3">
-                    <p className="text-xs font-bold uppercase tracking-wide text-ink3">Сессии</p>
-                    <p className="mt-1 text-sm leading-6 text-ink2">
-                      Команда голосует по invite-ссылке, ведущий управляет задачами, AI и финальными SP.
-                    </p>
-                  </div>
-                  <div className="rounded-xl border border-line bg-line2/70 p-3">
-                    <p className="text-xs font-bold uppercase tracking-wide text-ink3">Ретро</p>
-                    <p className="mt-1 text-sm leading-6 text-ink2">
-                      Соберите карточки по секциям, сгруппируйте темы и сохраните action items после обсуждения.
-                    </p>
-                  </div>
-                </div>
-              </Surface>
-            </motion.div>
           </div>
+
+          <motion.div
+            {...(reduceMotion
+              ? {}
+              : {
+                  initial: { opacity: 0, y: 14 },
+                  animate: { opacity: 1, y: 0 },
+                  transition: { duration: 0.28, delay: 0.18, ease: [0.2, 0, 0, 1] as const },
+                })}
+          >
+            <Surface className="p-3 sm:p-4">
+              <div className="grid gap-3 lg:grid-cols-[0.8fr_1fr_1fr_1fr] lg:items-center">
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue">Как это работает</p>
+                  <h2 className="mt-1 text-lg font-bold text-ink">Рабочий порядок</h2>
+                </div>
+                <HubStep title="Калькулятор">
+                  Зафиксируйте состав команды, absences и velocity перед тем, как брать объём в спринт.
+                </HubStep>
+                <HubStep title="Сессии">
+                  Команда голосует по invite-ссылке, ведущий управляет задачами, AI и финальными SP.
+                </HubStep>
+                <HubStep title="Ретро">
+                  Соберите карточки по секциям, сгруппируйте темы и сохраните action items после обсуждения.
+                </HubStep>
+              </div>
+              <p className="mt-3 border-t border-line pt-3 text-sm leading-6 text-ink2">
+                Сначала оцените capacity команды, затем проведите planning poker по задачам и после спринта соберите ретро.
+                Для быстрых проверок есть mock demo: голосование и ретро открываются без подготовки данных.
+              </p>
+            </Surface>
+          </motion.div>
         </div>
       </section>
 
@@ -217,4 +209,13 @@ function DetailChip({ label }: { label: string }) {
   }
 
   return <AiSparklePill>{label}</AiSparklePill>;
+}
+
+function HubStep({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="rounded-xl border border-line bg-line2/70 p-3">
+      <p className="text-xs font-bold uppercase tracking-wide text-ink3">{title}</p>
+      <p className="mt-1 text-sm leading-6 text-ink2">{children}</p>
+    </div>
+  );
 }

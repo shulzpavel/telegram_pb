@@ -65,13 +65,16 @@ export function useRetro(
   const pidKey = `pp_retro_pid_${token}`;
   const anonKey = `pp_retro_anon_${token}`;
   const [participantId, setParticipantId] = useState<string | null>(() => {
+    if (mockEnabled && options.participant) return MOCK_PARTICIPANT_ID;
     try {
       return options.participant ? localStorage.getItem(pidKey) : null;
     } catch {
       return null;
     }
   });
-  const [state, setState] = useState<RetroLiveState | null>(null);
+  const [state, setState] = useState<RetroLiveState | null>(() =>
+    mockEnabled ? createMockRetroLiveState() : null,
+  );
   const [myVotes, setMyVotes] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
 

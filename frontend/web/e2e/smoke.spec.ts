@@ -97,4 +97,14 @@ test.describe("retro participant flow", () => {
     await expect(page.getByLabel("Ваша мысль")).toBeVisible();
     await expect(page.getByText(/Осталось:/)).toBeVisible();
   });
+
+  test("retro mock survives reload with cached participant id", async ({ page }) => {
+    await page.goto("/r/demo-retro?mock=1");
+    await expect(page.getByText("Демо ретроспектива")).toBeVisible();
+
+    await page.reload();
+
+    await expect(page.getByText("Демо ретроспектива")).toBeVisible();
+    await expect(page.getByLabel("Ваша мысль")).toBeVisible();
+  });
 });
