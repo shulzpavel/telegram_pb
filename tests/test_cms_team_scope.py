@@ -7,6 +7,7 @@ from services.voting_service.cms_team_access import (
     resolve_create_team_id,
     team_scope,
 )
+from services.voting_service.cms_store import normalize_team_slug
 import pytest
 from fastapi import HTTPException
 
@@ -79,3 +80,7 @@ def test_team_scope_payload():
     scope = team_scope(actor)
     assert scope["is_superuser"] is False
     assert set(scope["actor_team_ids"]) == {4, 8}
+
+
+def test_team_slug_allows_display_name_format():
+    assert normalize_team_slug("iGaming RIP") == "igaming-rip"

@@ -38,7 +38,7 @@ export default function TeamsListPage() {
     setError(null);
     try {
       await cmsTeamsApi.create({
-        slug: slug.trim().toLowerCase(),
+        slug: slug.trim() || undefined,
         name: name.trim(),
         description: description.trim(),
       });
@@ -68,8 +68,13 @@ export default function TeamsListPage() {
 
       {canManage ? (
         <Surface className="grid gap-3 p-4 sm:grid-cols-2">
-          <TextField label="Slug" value={slug} onChange={(e) => setSlug(e.target.value)} placeholder="alpha" />
-          <TextField label="Название" value={name} onChange={(e) => setName(e.target.value)} placeholder="Команда Alpha" />
+          <TextField label="Название" value={name} onChange={(e) => setName(e.target.value)} placeholder="iGaming RIP" />
+          <TextField
+            label="Slug (необязательно)"
+            value={slug}
+            onChange={(e) => setSlug(e.target.value)}
+            placeholder="создастся из названия"
+          />
           <TextField
             className="sm:col-span-2"
             label="Описание"
@@ -77,7 +82,7 @@ export default function TeamsListPage() {
             onChange={(e) => setDescription(e.target.value)}
           />
           <div className="sm:col-span-2">
-            <Button variant="primary" size="sm" loading={saving} disabled={!slug.trim() || !name.trim()} onClick={() => void createTeam()}>
+            <Button variant="primary" size="sm" loading={saving} disabled={!name.trim()} onClick={() => void createTeam()}>
               Создать команду
             </Button>
           </div>

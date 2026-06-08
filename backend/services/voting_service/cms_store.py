@@ -11,6 +11,7 @@ import base64
 import hashlib
 import json
 import logging
+import re
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any, Optional
@@ -44,6 +45,18 @@ MAX_LIMIT = 100
 
 def clamp_limit(limit: int) -> int:
     return max(1, min(limit, MAX_LIMIT))
+
+
+_TEAM_SLUG_PATTERN = re.compile(r"[^a-z0-9]+")
+
+
+def normalize_team_slug(value: str) -> str:
+    slug = _TEAM_SLUG_PATTERN.sub("-", value.strip().lower()).strip("-")
+    if not slug:
+        raise ValueError("team slug cannot be empty")
+    if not slug[0].isalpha():
+        slug = f"team-{slug}"
+    return slug[:64].rstrip("-")
 
 
 def encode_cursor(payload: dict[str, Any]) -> str:
@@ -593,45 +606,53 @@ class PostgresCmsStore:
                 );
                 CREATE INDEX IF NOT EXISTS idx_cms_retros_updated
                     ON cms_retros(updated_at DESC, id DESC);
-
-                CREATE TABLE IF NOT EXISTS cms_teams (
-                    id BIGSERIAL PRIMARY KEY,
-                    slug TEXT NOT NULL UNIQUE,
-                    name TEXT NOT NULL,
-                    description TEXT NOT NULL DEFAULT '',
-                    is_active BOOLEAN NOT NULL DEFAULT TRUE,
-                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-                );
-                CREATE INDEX IF NOT EXISTS idx_cms_teams_active_name
-                    ON cms_teams(is_active, lower(name), id);
-
-                CREATE TABLE IF NOT EXISTS cms_admin_teams (
-                    admin_id BIGINT NOT NULL REFERENCES cms_admin_accounts(id) ON DELETE CASCADE,
-                    team_id BIGINT NOT NULL REFERENCES cms_teams(id) ON DELETE CASCADE,
-                    PRIMARY KEY (admin_id, team_id)
-                );
-                CREATE INDEX IF NOT EXISTS idx_cms_admin_teams_team_admin
-                    ON cms_admin_teams(team_id, admin_id);
-                CREATE INDEX IF NOT EXISTS idx_cms_admin_teams_admin_team
-                    ON cms_admin_teams(admin_id, team_id);
-
-                ALTER TABLE cms_sessions
-                    ADD COLUMN IF NOT EXISTS team_id BIGINT REFERENCES cms_teams(id) ON DELETE SET NULL;
-                ALTER TABLE cms_sprint_plans
-                    ADD COLUMN IF NOT EXISTS team_id BIGINT REFERENCES cms_teams(id) ON DELETE SET NULL;
-                ALTER TABLE cms_retros
-                    ADD COLUMN IF NOT EXISTS team_id BIGINT REFERENCES cms_teams(id) ON DELETE SET NULL;
-
-                CREATE INDEX IF NOT EXISTS idx_cms_sessions_team_updated
-                    ON cms_sessions(team_id, updated_at DESC, id DESC)
-                    WHERE deleted_at IS NULL;
-                CREATE INDEX IF NOT EXISTS idx_cms_sprint_plans_team_updated
-                    ON cms_sprint_plans(team_id, updated_at DESC, id DESC);
-                CREATE INDEX IF NOT EXISTS idx_cms_retros_team_updated
-                    ON cms_retros(team_id, updated_at DESC, id DESC);
                 """
             )
+            await self._ensure_team_schema(conn)
+
+    async def _ensure_team_schema(self, conn: asyncpg.Connection) -> None:
+        """Team tables/columns are applied in a separate execute so upgrades from
+        older deployments always run even if the main schema block was cached."""
+        await conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS cms_teams (
+                id BIGSERIAL PRIMARY KEY,
+                slug TEXT NOT NULL UNIQUE,
+                name TEXT NOT NULL,
+                description TEXT NOT NULL DEFAULT '',
+                is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+            CREATE INDEX IF NOT EXISTS idx_cms_teams_active_name
+                ON cms_teams(is_active, lower(name), id);
+
+            CREATE TABLE IF NOT EXISTS cms_admin_teams (
+                admin_id BIGINT NOT NULL REFERENCES cms_admin_accounts(id) ON DELETE CASCADE,
+                team_id BIGINT NOT NULL REFERENCES cms_teams(id) ON DELETE CASCADE,
+                PRIMARY KEY (admin_id, team_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_cms_admin_teams_team_admin
+                ON cms_admin_teams(team_id, admin_id);
+            CREATE INDEX IF NOT EXISTS idx_cms_admin_teams_admin_team
+                ON cms_admin_teams(admin_id, team_id);
+
+            ALTER TABLE cms_sessions
+                ADD COLUMN IF NOT EXISTS team_id BIGINT REFERENCES cms_teams(id) ON DELETE SET NULL;
+            ALTER TABLE cms_sprint_plans
+                ADD COLUMN IF NOT EXISTS team_id BIGINT REFERENCES cms_teams(id) ON DELETE SET NULL;
+            ALTER TABLE cms_retros
+                ADD COLUMN IF NOT EXISTS team_id BIGINT REFERENCES cms_teams(id) ON DELETE SET NULL;
+
+            CREATE INDEX IF NOT EXISTS idx_cms_sessions_team_updated
+                ON cms_sessions(team_id, updated_at DESC, id DESC)
+                WHERE deleted_at IS NULL;
+            CREATE INDEX IF NOT EXISTS idx_cms_sprint_plans_team_updated
+                ON cms_sprint_plans(team_id, updated_at DESC, id DESC);
+            CREATE INDEX IF NOT EXISTS idx_cms_retros_team_updated
+                ON cms_retros(team_id, updated_at DESC, id DESC);
+            """
+        )
 
     async def ensure_access_defaults(self, bootstrap_username: str, bootstrap_password: str) -> None:
         async with self.pool.acquire() as conn:
@@ -1385,7 +1406,7 @@ class PostgresCmsStore:
                 VALUES ($1, $2, $3, NOW())
                 RETURNING id, slug, name, description, is_active, created_at, updated_at
                 """,
-                slug.strip().lower(),
+                normalize_team_slug(slug),
                 name.strip(),
                 (description or "").strip(),
             )
@@ -1506,7 +1527,6 @@ class PostgresCmsStore:
             )
             page_rows = rows[:limit]
             admin_ids = [int(row["id"]) for row in page_rows]
-            roles = []
             roles = []
             team_map: dict[int, list[dict[str, Any]]] = {}
             if admin_ids:
@@ -2015,7 +2035,15 @@ class PostgresCmsStore:
         AND ($3::bigint IS NULL OR s.team_id IS NOT DISTINCT FROM $3)
     """
 
-    _SESSION_SELECT = """
+    _SESSION_LIST_SELECT = """
+        SELECT s.id, s.session_key, s.chat_id, s.topic_id, s.title, s.current_task_index,
+               s.participants_count, s.tasks_queue_count, s.history_count,
+               s.last_batch_count, s.total_tasks, s.total_votes, s.batch_completed,
+               s.is_active, s.current_batch_id, s.current_batch_started_at,
+               s.current_task_id, s.tasks_version, s.updated_at, s.team_id
+    """
+
+    _SESSION_DETAIL_SELECT = """
         SELECT s.id, s.session_key, s.chat_id, s.topic_id, s.title, s.current_task_index,
                s.participants_count, s.tasks_queue_count, s.history_count,
                s.last_batch_count, s.total_tasks, s.total_votes, s.batch_completed,
@@ -2146,55 +2174,77 @@ class PostgresCmsStore:
         cursor_team_name = cur.get("team_name")
         pattern = f"%{q.strip()}%" if q and q.strip() else None
         scope = self._SESSION_SCOPE
-        if sort_team:
-            order_by = "lower(t.name) ASC NULLS LAST, s.updated_at DESC, s.id DESC"
-            cursor_clause = """
-                  AND (
-                      $8::text IS NULL
-                      OR (lower(t.name), s.updated_at, s.id) > ($8::text, $9::timestamptz, $10::bigint)
-                  )
-            """
-        else:
-            order_by = "s.updated_at DESC, s.id DESC"
-            cursor_clause = """
-                  AND (
-                      $8::timestamptz IS NULL
-                      OR (s.updated_at, s.id) < ($8::timestamptz, $9::bigint)
-                  )
-            """
         async with self.pool.acquire() as conn:
-            rows = await conn.fetch(
-                f"""
-                {self._SESSION_SELECT}
-                FROM cms_sessions s
-                LEFT JOIN cms_teams t ON t.id = s.team_id
-                WHERE s.deleted_at IS NULL
-                  AND {scope}
-                  AND (
-                      $4::text IS NULL
-                      OR s.session_key ILIKE $4
-                      OR s.current_batch_id ILIKE $4
-                      OR s.title ILIKE $4
-                  )
-                  AND ($5::boolean IS NULL OR s.is_active = $5)
-                  AND ($6::bigint IS NULL OR s.chat_id = $6)
-                  AND ($7::bigint IS NULL OR s.topic_id IS NOT DISTINCT FROM $7)
-                  {cursor_clause}
-                ORDER BY {order_by}
-                LIMIT $11
-                """,
-                is_superuser,
-                actor_team_ids,
-                team_id,
-                pattern,
-                active,
-                chat_id,
-                topic_id,
-                cursor_team_name if sort_team else cursor_ts,
-                cursor_ts if sort_team else cursor_id,
-                cursor_id if sort_team else None,
-                limit + 1,
-            )
+            if sort_team:
+                rows = await conn.fetch(
+                    f"""
+                    {self._SESSION_DETAIL_SELECT}
+                    FROM cms_sessions s
+                    LEFT JOIN cms_teams t ON t.id = s.team_id
+                    WHERE s.deleted_at IS NULL
+                      AND {scope}
+                      AND (
+                          $4::text IS NULL
+                          OR s.session_key ILIKE $4
+                          OR s.current_batch_id ILIKE $4
+                          OR s.title ILIKE $4
+                      )
+                      AND ($5::boolean IS NULL OR s.is_active = $5)
+                      AND ($6::bigint IS NULL OR s.chat_id = $6)
+                      AND ($7::bigint IS NULL OR s.topic_id IS NOT DISTINCT FROM $7)
+                      AND (
+                          $8::text IS NULL
+                          OR (lower(t.name), s.updated_at, s.id) > ($8::text, $9::timestamptz, $10::bigint)
+                      )
+                    ORDER BY lower(t.name) ASC NULLS LAST, s.updated_at DESC, s.id DESC
+                    LIMIT $11
+                    """,
+                    is_superuser,
+                    actor_team_ids,
+                    team_id,
+                    pattern,
+                    active,
+                    chat_id,
+                    topic_id,
+                    cursor_team_name,
+                    cursor_ts,
+                    cursor_id,
+                    limit + 1,
+                )
+            else:
+                rows = await conn.fetch(
+                    f"""
+                    {self._SESSION_LIST_SELECT}
+                    FROM cms_sessions s
+                    WHERE s.deleted_at IS NULL
+                      AND {scope}
+                      AND (
+                          $4::text IS NULL
+                          OR s.session_key ILIKE $4
+                          OR s.current_batch_id ILIKE $4
+                          OR s.title ILIKE $4
+                      )
+                      AND ($5::boolean IS NULL OR s.is_active = $5)
+                      AND ($6::bigint IS NULL OR s.chat_id = $6)
+                      AND ($7::bigint IS NULL OR s.topic_id IS NOT DISTINCT FROM $7)
+                      AND (
+                          $8::timestamptz IS NULL
+                          OR (s.updated_at, s.id) < ($8::timestamptz, $9::bigint)
+                      )
+                    ORDER BY s.updated_at DESC, s.id DESC
+                    LIMIT $10
+                    """,
+                    is_superuser,
+                    actor_team_ids,
+                    team_id,
+                    pattern,
+                    active,
+                    chat_id,
+                    topic_id,
+                    cursor_ts,
+                    cursor_id,
+                    limit + 1,
+                )
         has_more = len(rows) > limit
         page_rows = rows[:limit]
         items = [self._session_row(row) for row in page_rows]
@@ -2222,7 +2272,7 @@ class PostgresCmsStore:
         async with self.pool.acquire() as conn:
             row = await conn.fetchrow(
                 f"""
-                {self._SESSION_SELECT}, s.deleted_at, s.raw
+                {self._SESSION_DETAIL_SELECT}, s.deleted_at, s.raw
                 FROM cms_sessions s
                 LEFT JOIN cms_teams t ON t.id = s.team_id
                 WHERE s.id = $1
@@ -2267,7 +2317,7 @@ class PostgresCmsStore:
         async with self.pool.acquire() as conn:
             row = await conn.fetchrow(
                 f"""
-                {self._SESSION_SELECT}, s.is_active, s.batch_completed
+                {self._SESSION_DETAIL_SELECT}, s.is_active, s.batch_completed
                 FROM cms_sessions s
                 LEFT JOIN cms_teams t ON t.id = s.team_id
                 WHERE s.chat_id = $1

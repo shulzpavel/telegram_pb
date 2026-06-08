@@ -318,7 +318,7 @@ export interface CmsListTeamParams {
 
 export const cmsTeamsApi = {
   list: () => cmsFetch<{ items: CmsTeam[] }>("/teams"),
-  create: (body: { slug: string; name: string; description?: string }) =>
+  create: (body: { slug?: string; name: string; description?: string }) =>
     cmsFetch<CmsTeam>("/teams", { method: "POST", body: JSON.stringify(body) }),
   update: (
     teamId: number,

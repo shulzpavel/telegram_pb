@@ -163,7 +163,7 @@ class AdminUpdateRequest(BaseModel):
 
 
 class TeamCreateRequest(BaseModel):
-    slug: str = Field(min_length=2, max_length=64, pattern=r"^[a-z][a-z0-9_-]{1,63}$")
+    slug: Optional[str] = Field(default=None, min_length=1, max_length=120)
     name: str = Field(min_length=1, max_length=120)
     description: str = Field(default="", max_length=500)
 
@@ -426,7 +426,7 @@ async def cms_create_team(
     require_superuser(actor)
     try:
         team = await _get_cms_store(request).create_team(
-            slug=body.slug,
+            slug=body.slug or body.name,
             name=body.name,
             description=body.description,
         )
