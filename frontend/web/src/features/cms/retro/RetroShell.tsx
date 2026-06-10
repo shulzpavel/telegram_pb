@@ -179,7 +179,7 @@ function RetroListPage({ principal, canManage }: { principal: CmsPrincipal; canM
                 <span>Обновлено {formatRetroDate(retro.updated_at)}</span>
               </span>
             }
-            action={<StatusBadge status={retro.status} />}
+            status={<StatusBadge status={retro.status} />}
             footer={
               <>
                 <Button variant="secondary" size="sm" onClick={() => navigate(`${retro.id}`)}>

@@ -12,6 +12,7 @@ interface TeamSelectProps {
   label?: string;
   allowEmpty?: boolean;
   emptyLabel?: string;
+  compact?: boolean;
 }
 
 export function TeamSelect({
@@ -23,6 +24,7 @@ export function TeamSelect({
   label = "Команда",
   allowEmpty = false,
   emptyLabel = "Без команды (legacy)",
+  compact = false,
 }: TeamSelectProps) {
   const options = useMemo(() => {
     const items = teams.map((team) => ({
@@ -32,8 +34,11 @@ export function TeamSelect({
     if (allowEmpty) {
       return [{ value: "", label: emptyLabel }, ...items];
     }
+    if (required) {
+      return [{ value: "", label: "Выберите команду" }, ...items];
+    }
     return items;
-  }, [allowEmpty, emptyLabel, teams]);
+  }, [allowEmpty, emptyLabel, required, teams]);
 
   if (teams.length <= 1 && !allowEmpty) {
     if (teams.length === 1) {
@@ -49,6 +54,7 @@ export function TeamSelect({
   return (
     <SelectField
       label={label}
+      className={compact ? "max-w-sm" : undefined}
       value={value === "" ? "" : String(value)}
       required={required}
       disabled={disabled}

@@ -5,6 +5,7 @@ import { useScrollHideHeader } from "./useScrollHideHeader";
 type AutoHideAppHeaderProps = {
   children: ReactNode;
   className?: string;
+  hideOnMobileScroll?: boolean;
 };
 
 /**
@@ -13,10 +14,14 @@ type AutoHideAppHeaderProps = {
  * is fully translated out and visually transparent so no blurred plate remains
  * on top of the content.
  */
-export function AutoHideAppHeader({ children, className }: AutoHideAppHeaderProps) {
+export function AutoHideAppHeader({ children, className, hideOnMobileScroll = true }: AutoHideAppHeaderProps) {
   const [mobileEnabled, setMobileEnabled] = useState(false);
 
   useEffect(() => {
+    if (!hideOnMobileScroll) {
+      setMobileEnabled(false);
+      return;
+    }
     const media = window.matchMedia("(max-width: 767px)");
     function sync() {
       setMobileEnabled(media.matches);
@@ -24,7 +29,7 @@ export function AutoHideAppHeader({ children, className }: AutoHideAppHeaderProp
     sync();
     media.addEventListener("change", sync);
     return () => media.removeEventListener("change", sync);
-  }, []);
+  }, [hideOnMobileScroll]);
 
   const visible = useScrollHideHeader({ enabled: mobileEnabled });
 

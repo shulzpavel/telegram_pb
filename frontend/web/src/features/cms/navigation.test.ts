@@ -69,6 +69,35 @@ describe("CMS navigation", () => {
     expect(visibleCmsTabs(admin).map((tab) => tab.key)).toEqual(["users", "sessions"]);
   });
 
+  it("appends newly permitted frontend tabs when backend pages payload is stale", () => {
+    const admin = principal({
+      permissions: [
+        CMS_PERMISSIONS.users,
+        CMS_PERMISSIONS.sessions,
+        CMS_PERMISSIONS.planner,
+        CMS_PERMISSIONS.retro,
+      ],
+      pages: [
+        {
+          key: "users",
+          label: "Users",
+          path: "/cms/users",
+          permission_key: CMS_PERMISSIONS.users,
+          sort_order: 10,
+        },
+        {
+          key: "sessions",
+          label: "Sessions",
+          path: "/cms/sessions",
+          permission_key: CMS_PERMISSIONS.sessions,
+          sort_order: 20,
+        },
+      ],
+    });
+
+    expect(visibleCmsTabs(admin).map((tab) => tab.key)).toEqual(["users", "sessions", "planner", "retro"]);
+  });
+
   it("falls back to static order when pages are not present in auth payload", () => {
     const admin = principal({
       permissions: [CMS_PERMISSIONS.users, CMS_PERMISSIONS.sessions],

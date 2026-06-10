@@ -120,6 +120,7 @@ export function DataTable({
   columns,
   children,
   mobileCards,
+  mobileUntil = "lg",
   empty,
   loading,
   loadingMore = false,
@@ -136,6 +137,7 @@ export function DataTable({
   columns: string[];
   children: ReactNode;
   mobileCards?: ReactNode;
+  mobileUntil?: "md" | "lg";
   empty?: ReactNode;
   loading: boolean;
   loadingMore?: boolean;
@@ -155,6 +157,70 @@ export function DataTable({
   showSkeleton?: boolean;
 }) {
   const showInitialSkeleton = showSkeleton && loading && loadedCount === 0;
+  const mobileListClass = mobileUntil === "lg" ? "lg:hidden" : "md:hidden";
+  const desktopTableClass =
+    mobileUntil === "lg"
+      ? "hidden w-full overflow-hidden rounded-lg border border-line bg-surface shadow-card lg:block"
+      : "hidden w-full overflow-hidden rounded-lg border border-line bg-surface shadow-card md:block";
+  const renderFooter = () => (
+    <LoadMoreFooter
+      loading={loading}
+      loadingMore={loadingMore}
+      hasMore={hasMore}
+      reachedCap={reachedCap}
+      loadedCount={loadedCount}
+      total={total}
+      onMore={onMore}
+      onFocusSearch={onFocusSearch}
+      itemNoun={itemNoun}
+    />
+  );
+
+  if (mobileCards) {
+    return (
+      <>
+        <div className={mobileListClass}>
+          {error ? <div className="mb-3"><InlineError text={error} /></div> : null}
+          {showInitialSkeleton ? (
+            <div className="space-y-3">
+              <ListSkeleton rows={6} />
+            </div>
+          ) : empty ? (
+            <div>{empty}</div>
+          ) : (
+            <div className="space-y-3">
+              {mobileCards}
+            </div>
+          )}
+          {renderFooter()}
+        </div>
+
+        <div className={desktopTableClass}>
+          {error ? <div className="p-3"><InlineError text={error} /></div> : null}
+          {showInitialSkeleton ? (
+            <div className="p-3">
+              <ListSkeleton rows={6} />
+            </div>
+          ) : null}
+          {!showInitialSkeleton && empty ? <div className="p-3">{empty}</div> : null}
+          {!showInitialSkeleton ? (
+            <table className="w-full table-auto text-sm">
+              <thead className="bg-line2 text-xs uppercase text-ink3">
+                <tr>
+                  {columns.map((column) => (
+                    <th key={column} className="px-3 py-2 text-left font-bold align-bottom">{column}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>{children}</tbody>
+            </table>
+          ) : null}
+          {renderFooter()}
+        </div>
+      </>
+    );
+  }
+
   // Desktop tables flex to the container and break long cells (`break-words`
   // on <td> in callers); we keep `overflow-x-auto` only at the wrapper as a
   // safety valve for genuinely wide tables — but our column setup is sized
@@ -168,13 +234,8 @@ export function DataTable({
         </div>
       ) : null}
       {!showInitialSkeleton && empty ? <div className="p-3">{empty}</div> : null}
-      {!showInitialSkeleton && mobileCards ? (
-        <div className="flex flex-col gap-3 bg-canvas p-3 md:hidden">
-          {mobileCards}
-        </div>
-      ) : null}
       {!showInitialSkeleton ? (
-        <div className={mobileCards ? "hidden md:block" : "block"}>
+        <div className="block">
           <table className="w-full table-auto text-sm">
             <thead className="bg-line2 text-xs uppercase text-ink3">
               <tr>
@@ -187,17 +248,7 @@ export function DataTable({
           </table>
         </div>
       ) : null}
-      <LoadMoreFooter
-        loading={loading}
-        loadingMore={loadingMore}
-        hasMore={hasMore}
-        reachedCap={reachedCap}
-        loadedCount={loadedCount}
-        total={total}
-        onMore={onMore}
-        onFocusSearch={onFocusSearch}
-        itemNoun={itemNoun}
-      />
+      {renderFooter()}
     </div>
   );
 }
@@ -256,32 +307,37 @@ export function MobileRecordCard({
   meta,
   children,
   action,
+  status,
   footer,
 }: {
   title: ReactNode;
   meta?: ReactNode;
   children?: ReactNode;
   action?: ReactNode;
+  status?: ReactNode;
   /** Optional row of full-width controls — typically Buttons. Rendered below
    *  the stat grid with a top border so it visually separates from data. */
   footer?: ReactNode;
 }) {
   return (
-    <article className="rounded-xl border border-line bg-surface p-4 shadow-card">
+    <article className="overflow-hidden rounded-card border border-line border-l-4 border-l-blue/35 bg-surface p-4 shadow-card">
       <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="text-base font-bold text-ink break-words">{title}</div>
-          {meta ? <div className="mt-1 text-xs text-ink3">{meta}</div> : null}
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="min-w-0 text-base font-bold leading-snug text-ink break-words">{title}</div>
+            {status ? <div className="shrink-0">{status}</div> : null}
+          </div>
+          {meta ? <div className="mt-1 text-xs leading-relaxed text-ink3">{meta}</div> : null}
         </div>
         {action ? <div className="shrink-0">{action}</div> : null}
       </div>
       {children ? (
-        <div className="mt-3 grid grid-cols-2 gap-3 text-xs text-ink3">
+        <div className="mt-4 grid grid-cols-1 gap-3 rounded-xl bg-line2/25 p-3 text-xs text-ink3 min-[380px]:grid-cols-2">
           {children}
         </div>
       ) : null}
       {footer ? (
-        <div className="mt-4 flex flex-wrap gap-2 border-t border-line pt-3">
+        <div className="mt-4 flex flex-col gap-2 border-t border-line pt-3 min-[420px]:flex-row min-[420px]:flex-wrap [&>*]:w-full min-[420px]:[&>*]:w-auto">
           {footer}
         </div>
       ) : null}

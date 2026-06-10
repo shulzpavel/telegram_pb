@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { BottomSheet, Button, MobileBottomDock, SheetItem, ThemeMenuControl } from "../../design-system";
 import { keepFocusedFieldVisible } from "../../design-system/mobileKeyboard";
 import type { CmsPrincipal } from "../cms/api/cmsTypes";
@@ -12,11 +12,9 @@ import type { CmsPrincipal } from "../cms/api/cmsTypes";
  * single overflow trigger) and surface the real working actions in
  * a thumb-reachable strip at the bottom of the screen.
  *
- * Layout: three slots. Slot 1 is the primary CTA (Copy invite, since
- * sharing the link is the #1 mobile action for a fresh session).
- * Slot 2 only renders when there is something to finish — keeps the
- * destructive button out of the way otherwise. Slot 3 is always the
- * overflow menu (rename / theme / leave).
+ * Layout: two slots. Slot 1 is the primary CTA (Copy link, since sharing
+ * the link is the #1 mobile action for a fresh session). Slot 2 opens the
+ * action sheet; destructive actions stay in that sheet behind confirmation.
  *
  * Desktop hides the whole strip — the same actions live in
  * `ManagerTopBar` then.
@@ -39,12 +37,21 @@ export function ManagerBottomDock({
   principal: CmsPrincipal;
 }) {
   const [copied, setCopied] = useState(false);
-  const [sheetMode, setSheetMode] = useState<"menu" | "rename" | null>(null);
+  const [sheetMode, setSheetMode] = useState<"menu" | "rename" | "finish-confirm" | null>(null);
   const [renameValue, setRenameValue] = useState(currentTitle);
+  const renameInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     if (sheetMode === "rename") setRenameValue(currentTitle);
   }, [currentTitle, sheetMode]);
+
+  useEffect(() => {
+    if (sheetMode !== "rename") return;
+    const timeout = window.setTimeout(() => {
+      renameInputRef.current?.focus();
+    }, 220);
+    return () => window.clearTimeout(timeout);
+  }, [sheetMode]);
 
   async function copyInvite() {
     if (!inviteUrl) return;
@@ -60,46 +67,44 @@ export function ManagerBottomDock({
   return (
     <>
       <MobileBottomDock aria-label="Действия сессии" className="shrink-0" contentClassName="max-w-[1440px]">
-          {inviteUrl ? (
-            <Button
-              variant={copied ? "success" : "primary"}
-              size="md"
-              className="flex-1 min-h-12"
-              onClick={copyInvite}
-            >
-              <span className="shrink-0">{copied ? <CheckIcon /> : <LinkIcon />}</span>
-              <span className="whitespace-normal break-words">{copied ? "Скопировано" : "Скопировать invite"}</span>
-            </Button>
-          ) : null}
-          {onFinishSession ? (
-            <Button
-              variant="danger"
-              size="md"
-              className="min-h-12 px-3"
-              onClick={onFinishSession}
-              loading={Boolean(finishBusy)}
-              aria-label="Завершить сессию"
-            >
-              Завершить
-            </Button>
-          ) : null}
-          <button
-            type="button"
-            onClick={() => setSheetMode("menu")}
-            aria-label="Открыть меню"
-            className="inline-flex min-h-12 w-12 items-center justify-center rounded-md border border-line bg-surface text-ink transition-colors hover:bg-line2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue/40 active:scale-[0.96] motion-reduce:active:scale-100"
+        {inviteUrl ? (
+          <Button
+            variant={copied ? "success" : "primary"}
+            size="md"
+            className="flex-1 min-h-12"
+            onClick={copyInvite}
           >
-            <DotsIcon />
-          </button>
+            <span className="shrink-0">{copied ? <CheckIcon /> : <LinkIcon />}</span>
+            <span className="whitespace-normal break-words">{copied ? "Ссылка скопирована" : "Скопировать ссылку"}</span>
+          </Button>
+        ) : null}
+        <Button
+          variant="secondary"
+          size="md"
+          className="min-h-12 px-3"
+          onClick={() => setSheetMode("menu")}
+          aria-label="Ещё действия"
+        >
+          Ещё
+        </Button>
       </MobileBottomDock>
 
       <BottomSheet
         open={sheetMode !== null}
         onClose={() => setSheetMode(null)}
-        title={sheetMode === "rename" ? "Переименовать сессию" : "Меню сессии"}
+        initialFocus={sheetMode === "rename" ? "container" : "first"}
+        title={
+          sheetMode === "rename"
+            ? "Переименовать сессию"
+            : sheetMode === "finish-confirm"
+            ? "Завершить сессию?"
+            : "Действия сессии"
+        }
         description={
           sheetMode === "rename"
             ? "Название видно участникам и в CMS"
+            : sheetMode === "finish-confirm"
+            ? "Участники больше не смогут голосовать, а вы перейдёте к отчёту."
             : `Вы вошли как ${principal.display_name ?? principal.username}`
         }
         footer={
@@ -120,6 +125,22 @@ export function ManagerBottomDock({
                 Сохранить
               </Button>
             </div>
+          ) : sheetMode === "finish-confirm" ? (
+            <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <Button variant="ghost" onClick={() => setSheetMode("menu")} disabled={Boolean(finishBusy)}>Назад</Button>
+              <Button
+                variant="danger"
+                loading={Boolean(finishBusy)}
+                disabled={Boolean(finishBusy)}
+                onClick={() => {
+                  if (!onFinishSession) return;
+                  onFinishSession();
+                  setSheetMode(null);
+                }}
+              >
+                Завершить
+              </Button>
+            </div>
           ) : undefined
         }
       >
@@ -135,7 +156,7 @@ export function ManagerBottomDock({
             }}
           >
             <input
-              autoFocus
+              ref={renameInputRef}
               value={renameValue}
               maxLength={120}
               onChange={(event) => setRenameValue(event.target.value)}
@@ -145,6 +166,10 @@ export function ManagerBottomDock({
             />
             <p className="mt-2 text-xs text-ink3">Максимум 120 символов.</p>
           </form>
+        ) : sheetMode === "finish-confirm" ? (
+          <div className="px-3 pb-3 pt-1 text-sm leading-relaxed text-ink3">
+            Завершение закроет активное голосование и откроет отчёт по сессии.
+          </div>
         ) : (
           <div className="space-y-0.5 px-2 pb-2">
             {onRename ? (
@@ -156,20 +181,21 @@ export function ManagerBottomDock({
               />
             ) : null}
             <ThemeMenuControl />
+            {onFinishSession ? (
+              <div className="mt-3 border-t border-line pt-3">
+                <SheetItem
+                  tone="danger"
+                  label="Завершить сессию"
+                  description="Участники больше не смогут голосовать"
+                  disabled={Boolean(finishBusy)}
+                  onClick={() => setSheetMode("finish-confirm")}
+                />
+              </div>
+            ) : null}
           </div>
         )}
       </BottomSheet>
     </>
-  );
-}
-
-function DotsIcon() {
-  return (
-    <svg viewBox="0 0 20 20" fill="currentColor" className="h-5 w-5" aria-hidden="true">
-      <circle cx="4.5" cy="10" r="1.5" />
-      <circle cx="10" cy="10" r="1.5" />
-      <circle cx="15.5" cy="10" r="1.5" />
-    </svg>
   );
 }
 

@@ -68,7 +68,7 @@ export default function PermissionsRefPage() {
         </p>
 
         {/* Mobile: stacked cards — same as the main table above. */}
-        <ul className="mt-3 flex flex-col gap-3 md:hidden">
+        <ul className="mt-3 flex flex-col gap-3 lg:hidden">
           {pages.map((page) => {
             const permission = permissionByKey.get(page.permission_key);
             return (
@@ -96,7 +96,7 @@ export default function PermissionsRefPage() {
         </ul>
 
         {/* Desktop: regular table without horizontal scroll. */}
-        <div className="mt-3 hidden md:block">
+        <div className="mt-3 hidden lg:block">
           <table className="w-full table-auto text-sm">
             <thead className="bg-line2 text-xs uppercase text-ink3">
               <tr>

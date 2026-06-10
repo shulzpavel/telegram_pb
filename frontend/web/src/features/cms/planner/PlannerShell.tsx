@@ -209,8 +209,8 @@ function PlannerList({
   onDelete: (record: SprintPlanRecord) => void;
 }) {
   return (
-    <div className="space-y-3 md:space-y-0">
-      <div className="grid grid-cols-1 gap-3 md:hidden">
+    <div className="space-y-3 lg:space-y-0">
+      <div className="grid grid-cols-1 gap-3 lg:hidden">
         {items.map((item) => {
           const summary = item.payload.result_summary ?? "—";
           return (
@@ -223,17 +223,17 @@ function PlannerList({
                   <span>{summary}</span>
                 </span>
               }
-              action={
-                <div className="flex gap-2">
-                  <Button size="sm" variant="ghost" onClick={() => onEdit(item.id)}>
+              footer={
+                <>
+                  <Button size="sm" variant="primary" className="w-full min-[420px]:w-auto" onClick={() => onEdit(item.id)}>
                     Открыть
                   </Button>
                   {canManage ? (
-                    <Button size="sm" variant="danger" onClick={() => onDelete(item)}>
+                    <Button size="sm" variant="ghost" className="w-full min-[420px]:w-auto" onClick={() => onDelete(item)}>
                       Удалить
                     </Button>
                   ) : null}
-                </div>
+                </>
               }
             >
               <MobileRecordField label="Создан" value={formatDate(item.created_at)} />
@@ -244,7 +244,7 @@ function PlannerList({
         })}
       </div>
 
-      <div className="hidden overflow-hidden rounded-lg border border-line bg-surface shadow-card md:block">
+      <div className="hidden overflow-hidden rounded-lg border border-line bg-surface shadow-card lg:block">
         <table className="w-full table-auto text-sm">
           <thead className="bg-line2 text-xs uppercase text-ink3">
             <tr>
@@ -658,12 +658,13 @@ function PlannerEditorPage({
       ) : (
         <>
           {mode === "create" && needsTeamPicker(teams, principal.is_superuser) ? (
-            <div className="max-w-md">
+            <div className="max-w-sm rounded-card border border-line bg-surface p-3 shadow-card">
               <TeamSelect
                 teams={teams}
                 value={teamId}
                 required={teams.length > 1}
                 disabled={!canManage}
+                compact
                 onChange={setTeamId}
               />
             </div>

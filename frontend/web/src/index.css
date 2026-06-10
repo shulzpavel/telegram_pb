@@ -110,23 +110,6 @@
     overflow-x: clip;
   }
 
-  /* Hide browser scrollbars everywhere while keeping native scroll, wheel,
-     touch and keyboard navigation intact. Firefox uses `scrollbar-width`;
-     old Edge/IE use `-ms-overflow-style`; WebKit browsers need the
-     pseudo-element. */
-  *,
-  *::before,
-  *::after {
-    scrollbar-width: none;
-    -ms-overflow-style: none;
-  }
-
-  *::-webkit-scrollbar {
-    width: 0;
-    height: 0;
-    display: none;
-  }
-
   body {
     @apply bg-canvas text-ink font-sans;
     min-height: 100dvh;
@@ -517,6 +500,19 @@
   .jira-html-content th,
   .jira-html-content td { border: 1px solid rgb(var(--c-line)); padding: 0.35rem 0.5rem; vertical-align: top; }
   .jira-html-content th { background: rgb(var(--c-line) / 0.35); font-weight: 600; }
+}
+
+@layer utilities {
+  .no-scrollbar {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+
+  .no-scrollbar::-webkit-scrollbar {
+    width: 0;
+    height: 0;
+    display: none;
+  }
 }
 
 /* Defer fontstack swap so we don't get a layout reflow between fallback and

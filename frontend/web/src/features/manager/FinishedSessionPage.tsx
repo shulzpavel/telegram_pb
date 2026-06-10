@@ -274,20 +274,9 @@ export default function FinishedSessionPage() {
         )}
       </div>
 
-      {/* Mobile bottom dock — mirrors ManagerBottomDock pattern so the
-          report screen feels like part of the same family. Primary
-          download stays the first thumb-reachable action; cockpit
-          and overflow menu come next. */}
+      {/* Mobile bottom dock mirrors ManagerBottomDock: one primary action
+          stays thumb-reachable, everything else lives in the sheet. */}
       <MobileBottomDock aria-label="Действия отчёта" contentClassName="max-w-6xl">
-          <Button
-            variant="secondary"
-            className="min-h-12 shrink-0 px-3"
-            disabled={!canSyncJira || jiraSyncBusy}
-            loading={jiraSyncBusy}
-            onClick={() => { void syncJiraSp(); }}
-          >
-            Jira SP
-          </Button>
           <Button
             variant="primary"
             className="flex-1 min-h-12"
@@ -297,26 +286,19 @@ export default function FinishedSessionPage() {
             Скачать MD
           </Button>
           <Button
-            variant="ghost"
-            className="min-h-12"
-            onClick={() => navigate("/manage")}
-          >
-            Cockpit
-          </Button>
-          <button
-            type="button"
+            variant="secondary"
+            className="min-h-12 px-3"
             onClick={() => setMobileMenuOpen(true)}
-            aria-label="Открыть меню"
-            className="inline-flex min-h-12 w-12 items-center justify-center rounded-md border border-line bg-surface text-ink transition-colors hover:bg-line2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue/40 active:scale-[0.96] motion-reduce:active:scale-100"
+            aria-label="Ещё действия"
           >
-            <DotsIcon />
-          </button>
+            Ещё
+          </Button>
       </MobileBottomDock>
 
       <BottomSheet
         open={mobileMenuOpen}
         onClose={() => setMobileMenuOpen(false)}
-        title="Меню отчёта"
+        title="Действия отчёта"
         description={summary?.title ?? title}
       >
         <div className="space-y-2 px-1 pb-2">
@@ -348,7 +330,7 @@ export default function FinishedSessionPage() {
             }}
           />
           <SheetItem
-            label="Открыть cockpit"
+            label="Открыть управление"
             description="Вернуться к управлению сессией"
             onClick={() => {
               setMobileMenuOpen(false);
@@ -393,16 +375,6 @@ function JiraSyncResultPanel({ result, className = "" }: { result: JiraStoryPoin
         </ul>
       ) : null}
     </Alert>
-  );
-}
-
-function DotsIcon() {
-  return (
-    <svg viewBox="0 0 20 20" fill="currentColor" className="h-5 w-5" aria-hidden="true">
-      <circle cx="4.5" cy="10" r="1.5" />
-      <circle cx="10" cy="10" r="1.5" />
-      <circle cx="15.5" cy="10" r="1.5" />
-    </svg>
   );
 }
 

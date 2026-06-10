@@ -10,7 +10,6 @@ import {
   AutoHideAppHeader,
   Badge,
   BrandHomeLink,
-  CollapsibleSection,
   LoadingDots,
   ProgressBar,
   Surface,
@@ -243,23 +242,12 @@ export default function VotePage({ task, participants, onVote, error, onLogoClic
               test/final, assumptions). Only appears when the manager
               has actually generated the summary. */}
           {task.ai_summary ? (
-            <CollapsibleSection
-              className="rounded-lg border border-line bg-surface p-4 md:p-5 shadow-card"
-              bodyClassName="px-2 pb-2 pt-3"
-              defaultOpenMobile={false}
-              title={
-                <p className="text-2xs font-semibold uppercase tracking-widest text-ink3">
-                  AI-подсказка
-                </p>
-              }
-            >
-              <AiSummaryView
-                summary={task.ai_summary}
-                helperText="для оценки"
-                sparkleLabel="AI-подсказка"
-                className="p-4 md:p-5"
-              />
-            </CollapsibleSection>
+            <AiSummaryView
+              summary={task.ai_summary}
+              helperText="для оценки"
+              sparkleLabel="AI-подсказка"
+              className="p-4 md:p-5"
+            />
           ) : null}
         </section>
       </main>

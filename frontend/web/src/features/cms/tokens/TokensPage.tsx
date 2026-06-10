@@ -112,7 +112,7 @@ export default function TokensPage({ canManageSessions }: TokensPageProps) {
             ) : (
               <EmptyState
                 title="Invite-ссылок пока нет"
-                description="Ссылка выпускается автоматически при создании сессии. Создайте первую — в cockpit появится кнопка «Скопировать invite»."
+                description="Ссылка выпускается автоматически при создании сессии. Создайте первую — в управлении появится кнопка «Скопировать ссылку»."
                 action={
                   canManageSessions ? (
                     <Button

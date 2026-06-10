@@ -42,11 +42,21 @@ export function ManagerTopBar({
   const [copied, setCopied] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [renameOpen, setRenameOpen] = useState(false);
+  const [finishConfirmOpen, setFinishConfirmOpen] = useState(false);
   const [renameValue, setRenameValue] = useState(title);
+  const renameInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     if (renameOpen) setRenameValue(title);
   }, [renameOpen, title]);
+
+  useEffect(() => {
+    if (!renameOpen) return;
+    const timeout = window.setTimeout(() => {
+      renameInputRef.current?.focus();
+    }, 220);
+    return () => window.clearTimeout(timeout);
+  }, [renameOpen]);
 
   async function copyInvite() {
     if (!inviteUrl) return;
@@ -100,7 +110,7 @@ export function ManagerTopBar({
                   onClick={copyInvite}
                   className="hidden md:inline-flex"
                 >
-                  {copied ? "Скопировано" : "Invite"}
+                  {copied ? "Скопировано" : "Ссылка"}
                 </Button>
               ) : null}
               {onFinishSession ? (
@@ -117,7 +127,7 @@ export function ManagerTopBar({
               <button
                 type="button"
                 onClick={() => setMenuOpen(true)}
-                aria-label="Меню сессии"
+                aria-label="Действия сессии"
                 className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-line bg-surface text-ink transition-colors hover:bg-line2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue/40 active:scale-[0.96] motion-reduce:active:scale-100"
               >
                 <DotsIcon />
@@ -136,11 +146,15 @@ export function ManagerTopBar({
         onClose={() => {
           setMenuOpen(false);
           setRenameOpen(false);
+          setFinishConfirmOpen(false);
         }}
-        title={renameOpen ? "Переименовать сессию" : "Меню сессии"}
+        title={renameOpen ? "Переименовать сессию" : finishConfirmOpen ? "Завершить сессию?" : "Действия сессии"}
+        initialFocus={renameOpen ? "container" : "first"}
         description={
           renameOpen
             ? "Название видно участникам и в CMS"
+            : finishConfirmOpen
+            ? "Участники больше не смогут голосовать, а вы перейдёте к отчёту."
             : `Вы вошли как ${userLabel}`
         }
         footer={
@@ -166,6 +180,25 @@ export function ManagerTopBar({
                 Сохранить
               </Button>
             </div>
+          ) : finishConfirmOpen ? (
+            <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <Button variant="ghost" onClick={() => setFinishConfirmOpen(false)} disabled={Boolean(finishBusy)}>
+                Назад
+              </Button>
+              <Button
+                variant="danger"
+                loading={Boolean(finishBusy)}
+                disabled={Boolean(finishBusy)}
+                onClick={() => {
+                  if (!onFinishSession) return;
+                  setMenuOpen(false);
+                  setFinishConfirmOpen(false);
+                  onFinishSession();
+                }}
+              >
+                Завершить
+              </Button>
+            </div>
           ) : undefined
         }
       >
@@ -184,7 +217,7 @@ export function ManagerTopBar({
             }}
           >
             <input
-              autoFocus
+              ref={renameInputRef}
               value={renameValue}
               maxLength={120}
               onChange={(event) => setRenameValue(event.target.value)}
@@ -194,6 +227,10 @@ export function ManagerTopBar({
             />
             <p className="mt-2 text-xs text-ink3">Максимум 120 символов.</p>
           </form>
+        ) : finishConfirmOpen ? (
+          <div className="px-3 pb-3 pt-1 text-sm leading-relaxed text-ink3">
+            Завершение закроет активное голосование и откроет отчёт по сессии.
+          </div>
         ) : (
           <div className="space-y-0.5 px-2 pb-2">
             {onRename ? (
@@ -208,7 +245,7 @@ export function ManagerTopBar({
               <div className="md:hidden">
                 <SheetItem
                   icon={<LinkIcon />}
-                  label={copied ? "Invite скопирован" : "Скопировать invite"}
+                  label={copied ? "Ссылка скопирована" : "Скопировать ссылку"}
                   onClick={() => {
                     void copyInvite();
                   }}
@@ -222,8 +259,7 @@ export function ManagerTopBar({
                   label="Завершить сессию"
                   tone="danger"
                   onClick={() => {
-                    setMenuOpen(false);
-                    onFinishSession();
+                    setFinishConfirmOpen(true);
                   }}
                 />
               </div>

@@ -76,7 +76,7 @@ export const cmsTabs: CmsTab[] = [
   {
     key: "sessions",
     label: "Сессии",
-    description: "Список планирований: открыть cockpit, отчёт, закрыть или удалить из истории.",
+    description: "Список планирований: открыть управление, отчёт, закрыть или удалить из истории.",
     permission: CMS_PERMISSIONS.sessions,
     path: "/cms/sessions",
     routePath: "sessions",
@@ -141,7 +141,9 @@ export function visibleCmsTabs(principal: CmsPrincipal): CmsTab[] {
     .filter((tab) => hasPermission(principal, tab.permission));
 
   if (orderedFromDb.length > 0) {
-    return orderedFromDb;
+    const included = new Set(orderedFromDb.map((tab) => tab.key));
+    const missingPermittedTabs = cmsTabs.filter((tab) => !included.has(tab.key) && hasPermission(principal, tab.permission));
+    return [...orderedFromDb, ...missingPermittedTabs];
   }
   return cmsTabs.filter((tab) => hasPermission(principal, tab.permission));
 }

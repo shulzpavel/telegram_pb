@@ -38,6 +38,22 @@ const PHASE_META: Record<string, { label: string; tone: "info" | "success" | "wa
   complete:{ label: "Сессия завершена", tone: "neutral", description: "Все задачи отыграны. Откройте отчёт или добавьте ещё задач." },
 };
 
+function useIsMobileViewport(): boolean {
+  const [isMobile, setIsMobile] = useState(() =>
+    typeof window !== "undefined" ? window.matchMedia("(max-width: 767px)").matches : false,
+  );
+
+  useEffect(() => {
+    const media = window.matchMedia("(max-width: 767px)");
+    const sync = () => setIsMobile(media.matches);
+    sync();
+    media.addEventListener("change", sync);
+    return () => media.removeEventListener("change", sync);
+  }, []);
+
+  return isMobile;
+}
+
 const STORAGE_KEY = "pp_manager_session";
 const ESTIMATE_VALUES = [1, 2, 3, 5, 8, 13, 21, 34];
 
@@ -314,6 +330,7 @@ function ManagerLogin({ onLogin }: { onLogin: (principal: CmsPrincipal) => void 
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const isMobile = useIsMobileViewport();
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -351,7 +368,7 @@ function ManagerLogin({ onLogin }: { onLogin: (principal: CmsPrincipal) => void 
           <h2 className="text-xl font-bold text-ink">Вход менеджера</h2>
           <p className="mt-1 text-sm text-ink3">Используется тот же аккаунт, что и для CMS.</p>
           <div className="mt-6 space-y-4">
-            <TextField autoFocus label="Username" value={username} onChange={(event) => setUsername(event.target.value)} />
+            <TextField autoFocus={!isMobile} label="Username" value={username} onChange={(event) => setUsername(event.target.value)} />
             <TextField label="Password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} />
             {error ? <Alert tone="danger">{error}</Alert> : null}
             <Button type="submit" variant="primary" className="w-full" disabled={loading || !username || !password} loading={loading}>
@@ -793,7 +810,7 @@ function ManagerWorkspace({
           <CreateSessionPanel loading={busy === "create"} onCreate={createSession} />
           <Surface className="mt-4 p-4">
             <h2 className="text-sm font-bold text-ink">Быстрый тест на реальных задачах</h2>
-            <p className="mt-1 text-sm text-ink3">Создаст живую demo session с Jira-like задачами и invite link.</p>
+            <p className="mt-1 text-sm text-ink3">Создаст живую demo session с Jira-like задачами и ссылкой для команды.</p>
             <Button
               className="mt-3 w-full"
               disabled={busy !== null}
@@ -1632,7 +1649,7 @@ function LiveVotesPanel({
       <p className="text-xs font-semibold uppercase tracking-wide text-ink3">Голоса (видны только вам)</p>
       <div className="mt-3 grid gap-2 md:grid-cols-2">
         {participants.length === 0 ? (
-          <p className="text-sm text-ink3">Пока никого не подключилось — отправьте invite link.</p>
+          <p className="text-sm text-ink3">Пока никого не подключилось — отправьте ссылку команде.</p>
         ) : participants.map((participant, idx) => {
           const value = voteByName.get(participant.name);
           const voted = Boolean(value);
@@ -1868,7 +1885,7 @@ function BacklogWizard({
         </h1>
         <p className="mx-auto mt-2 max-w-xl text-sm text-ink3 md:text-base">
           Без задач голосовать не из чего. Выберите способ ниже, добавьте хотя бы одну —
-          и сразу откроется cockpit с управлением голосованием.
+          и сразу откроется управление голосованием.
         </p>
       </div>
 
@@ -1883,7 +1900,7 @@ function BacklogWizard({
         </li>
         <li className="rounded-md border border-line bg-surface px-3 py-2">
           <span className="block text-2xs font-semibold uppercase tracking-wide text-ink4">далее</span>
-          Скопируйте invite и пригласите команду
+          Скопируйте ссылку и пригласите команду
         </li>
         <li className="rounded-md border border-line bg-surface px-3 py-2">
           <span className="block text-2xs font-semibold uppercase tracking-wide text-ink4">далее</span>
@@ -2130,7 +2147,7 @@ function ParticipantsPanel({ participants }: { participants: ManagerSession["sta
       </div>
       <div className="mt-3 space-y-2">
         {participants.length === 0 ? (
-          <EmptyState title="Пока никого" description="Отправьте invite link команде." />
+          <EmptyState title="Пока никого" description="Отправьте ссылку команде." />
         ) : participants.map((participant, idx) => (
           <div key={`${participant.name}-${idx}`} className="flex items-center justify-between rounded-lg border border-line bg-line2 px-3 py-2">
             <span className="min-w-0 whitespace-normal break-words text-sm font-semibold text-ink">{participant.name}</span>

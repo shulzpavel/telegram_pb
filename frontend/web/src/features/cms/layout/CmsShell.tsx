@@ -92,7 +92,7 @@ export default function CmsShell({
   return (
     <main className="min-h-screen-mobile app-gradient-bg pb-safe">
       <header className="z-30 md:sticky md:top-0 md:border-b md:border-line md:bg-surface/95 md:backdrop-blur md:supports-[backdrop-filter]:bg-surface/80">
-        <AutoHideAppHeader className="border-b-0">
+        <AutoHideAppHeader className="border-b-0" hideOnMobileScroll={false}>
           <div className="flex min-h-14 w-full items-center gap-2 px-3 py-2 pt-safe sm:gap-3 sm:px-4 md:min-h-16 lg:px-6">
           <BrandHomeLink size="sm" showWordmark={false} className="shrink-0" />
           <div className="min-w-0 flex-1">
@@ -108,7 +108,7 @@ export default function CmsShell({
             </p>
           </div>
           <div className="ml-auto flex shrink-0 items-center gap-1.5 sm:gap-2">
-            <ThemeToggle className="hidden md:inline-flex" />
+            <ThemeToggle className="hidden lg:inline-flex" />
             <Button
               variant="primary"
               size="sm"
@@ -116,23 +116,24 @@ export default function CmsShell({
               title="Открыть рабочее место фасилитатора"
               className="hidden sm:inline-flex"
             >
-              <span className="hidden md:inline">Открыть cockpit</span>
-              <span className="md:hidden">Cockpit</span>
+              <span>Cockpit</span>
             </Button>
-            <Button variant="ghost" size="sm" onClick={logout} className="hidden md:inline-flex">
+            <Button variant="ghost" size="sm" onClick={logout} className="hidden lg:inline-flex">
               Выйти
             </Button>
-            {/* Mobile-only overflow trigger. The full action set (nav
-                groups, cockpit, theme, logout) lives in the bottom
-                sheet so the header stays a clean 56px row at 320px. */}
+            {/* Mobile navigation trigger. The full action set (nav groups,
+                cockpit, theme, logout) lives in the bottom sheet, but the
+                trigger names the current section so it reads as navigation
+                rather than an overflow-only menu. */}
             <button
               type="button"
               onClick={() => setMobileOpen(true)}
-              aria-label="Открыть меню"
+              aria-label="Открыть разделы CMS"
               aria-expanded={mobileOpen}
-              className="md:hidden inline-flex h-10 w-10 items-center justify-center rounded-md border border-line bg-surface text-ink transition-colors hover:bg-line2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue/40 active:scale-[0.96] motion-reduce:active:scale-100"
+              className="lg:hidden inline-flex min-h-10 min-w-0 max-w-[9rem] items-center gap-1.5 rounded-lg border border-line bg-surface px-3 text-sm font-semibold text-ink transition-colors hover:bg-line2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue/40 active:scale-[0.96] motion-reduce:active:scale-100"
             >
-              <DotsIcon />
+              <span className="truncate">{activeTab?.label ?? "Разделы"}</span>
+              <ChevronDownIcon />
             </button>
           </div>
           </div>
@@ -142,7 +143,7 @@ export default function CmsShell({
             don't double-up the navigation surface. */}
         <nav
           aria-label="Разделы CMS"
-          className="hidden md:block border-t border-line"
+          className="hidden lg:block border-t border-line"
         >
           <div className="flex w-full gap-1 px-4 lg:px-6">
             {visibleTabs.map((item) => (
@@ -179,7 +180,7 @@ export default function CmsShell({
                 navigate("/manage");
               }}
             >
-              Открыть cockpit фасилитатора
+              Открыть управление
             </Button>
             <Button
               variant="ghost"
@@ -309,12 +310,10 @@ function CmsIndexRedirect({
   return <Navigate to={firstPath} replace />;
 }
 
-function DotsIcon() {
+function ChevronDownIcon() {
   return (
-    <svg viewBox="0 0 20 20" fill="currentColor" className="h-5 w-5" aria-hidden="true">
-      <circle cx="4.5" cy="10" r="1.5" />
-      <circle cx="10" cy="10" r="1.5" />
-      <circle cx="15.5" cy="10" r="1.5" />
+    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4 shrink-0" aria-hidden="true">
+      <path d="M5 7.5 10 12.5 15 7.5" />
     </svg>
   );
 }

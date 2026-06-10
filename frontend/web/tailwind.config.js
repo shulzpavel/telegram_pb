@@ -49,6 +49,9 @@ export default {
       },
       borderRadius: {
         "4xl": "2rem",
+        card: "1rem",
+        sheet: "1.5rem",
+        control: "0.75rem",
       },
       animation: {
         "fade-up":   "fadeUp .35s ease both",

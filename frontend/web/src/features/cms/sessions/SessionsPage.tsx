@@ -51,7 +51,6 @@ import {
 } from "../components/CmsPrimitives";
 import { useCmsList } from "../hooks/useCmsList";
 import { useDebouncedValue } from "../hooks/useDebouncedValue";
-import { useUnsavedChangesGuard } from "../hooks/useUnsavedChangesGuard";
 import { formatDate, shortHash } from "../../../shared/lib/format";
 import { displaySessionTitle, sessionKeyChip } from "./sessionTitle";
 import { normalizeOptionalNumber, normalizeOptionalText } from "./taskInput";
@@ -88,9 +87,6 @@ export default function SessionsPage({ principal, canManageTasks, canManageSessi
   const [createBusy, setCreateBusy] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const [createTeamId, setCreateTeamId] = useState<number | "">("");
-  const createSessionGuard = useUnsavedChangesGuard({
-    when: createOpen && (createTitle.trim().length > 0 || createTeamId !== "") && !createBusy,
-  });
   const debouncedQ = useDebouncedValue(q);
   const params = useMemo(
     () => ({
@@ -138,7 +134,7 @@ export default function SessionsPage({ principal, canManageTasks, canManageSessi
       storeManagerSession(session);
       setCreateOpen(false);
       setCreateTitle("");
-      createSessionGuard.runWithoutPrompt(() => navigate(`/cms/sessions/${session.chat_id}/cockpit`));
+      navigate(`/cms/sessions/${session.chat_id}/cockpit`);
     } catch (err) {
       setCreateError(err instanceof Error ? err.message : "Не удалось создать сессию");
     } finally {
@@ -174,7 +170,7 @@ export default function SessionsPage({ principal, canManageTasks, canManageSessi
     <section className="space-y-4">
       <SectionHeader
         title="Сессии"
-        description="Все планинг-покер сессии. «Открыть» ведёт в cockpit (или отчёт, если сессия завершена). «Подробнее» открывает карточку с переименованием, закрытием и удалением."
+        description="Все планинг-покер сессии. «Открыть» ведёт в управление голосованием (или отчёт, если сессия завершена). «Подробнее» открывает карточку с переименованием, закрытием и удалением."
         actions={
           <Button
             variant="primary"
@@ -191,7 +187,7 @@ export default function SessionsPage({ principal, canManageTasks, canManageSessi
         }
       />
       <HelpCallout title="Подсказки">
-        <p>«Открыть cockpit» — фасилитаторский экран для управления сессией: ставить SP, переключать задачи, видеть голоса участников.</p>
+        <p>«Открыть» — фасилитаторский экран для управления сессией: ставить SP, переключать задачи, видеть голоса участников.</p>
         <p>«Открыть отчёт» — итоги завершённой сессии с экспортом в CSV. Работает даже если сессия ещё не закрыта (покажет текущие голосования).</p>
         <p>«Закрыть» переносит все оставшиеся задачи в last_batch и фиксирует консенсус — после этого сессия доступна только для чтения.</p>
         <p>«Удалить из истории» прячет сессию вместе с её задачами, голосами и invite-ссылками; запись в журнал действий остаётся.</p>
@@ -310,7 +306,7 @@ export default function SessionsPage({ principal, canManageTasks, canManageSessi
                 <span>обновлена {formatDate(item.updated_at)}</span>
               </span>
             }
-            action={<Status active={item.is_active} done={item.batch_completed} />}
+            status={<Status active={item.is_active} done={item.batch_completed} />}
             footer={
               // Simplified list-card: one primary CTA "Открыть" that
               // routes by status. Detailed actions (Закрыть / Удалить
@@ -429,14 +425,14 @@ export default function SessionsPage({ principal, canManageTasks, canManageSessi
         error={createError}
         onTitleChange={setCreateTitle}
         onTeamIdChange={setCreateTeamId}
-        onCancel={() => createSessionGuard.confirmIfNeeded(() => {
+        dirty={createTitle.trim().length > 0 || createTeamId !== ""}
+        onCancel={() => {
           if (createBusy) return;
           setCreateOpen(false);
           setCreateError(null);
-        })}
+        }}
         onSubmit={submitCreate}
       />
-      {createSessionGuard.dialog}
 
       {selectedId ? (
         <SessionDetails
@@ -481,6 +477,7 @@ function CreateSessionDialog({
   showTeamPicker,
   busy,
   error,
+  dirty,
   onTitleChange,
   onTeamIdChange,
   onCancel,
@@ -493,19 +490,45 @@ function CreateSessionDialog({
   showTeamPicker: boolean;
   busy: boolean;
   error: string | null;
+  dirty: boolean;
   onTitleChange: (next: string) => void;
   onTeamIdChange: (next: number | "") => void;
   onCancel: () => void;
   onSubmit: (event: FormEvent) => void;
 }) {
+  const [confirmCancel, setConfirmCancel] = useState(false);
+  const titleRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    if (!open) {
+      setConfirmCancel(false);
+      return;
+    }
+    const timeout = window.setTimeout(() => {
+      titleRef.current?.focus();
+    }, 220);
+    return () => window.clearTimeout(timeout);
+  }, [open]);
+
+  function requestCancel() {
+    if (busy) return;
+    if (dirty && !confirmCancel) {
+      setConfirmCancel(true);
+      return;
+    }
+    onCancel();
+    setConfirmCancel(false);
+  }
+
   return (
     <BottomSheet
       open={open}
       onClose={() => {
-        if (!busy) onCancel();
+        requestCancel();
       }}
       title="Новая сессия"
-      description="Создадим пустую сессию и сразу откроем cockpit, чтобы вы могли добавить задачи и пригласить участников."
+      description="Создадим пустую сессию и сразу откроем управление, чтобы вы могли добавить задачи и пригласить участников."
+      initialFocus="container"
       footer={
         <div className="flex flex-col-reverse gap-2 md:flex-row md:justify-end">
           <Button
@@ -513,22 +536,36 @@ function CreateSessionDialog({
             variant="ghost"
             size="md"
             disabled={busy}
-            onClick={onCancel}
+            onClick={requestCancel}
             className="w-full md:w-auto"
           >
-            Отмена
+            {confirmCancel ? "Да, закрыть" : "Отмена"}
           </Button>
-          <Button
-            type="submit"
-            form="cms-create-session-form"
-            variant="primary"
-            size="md"
-            loading={busy}
-            disabled={busy}
-            className="w-full md:w-auto"
-          >
-            Создать и открыть
-          </Button>
+          {confirmCancel ? (
+            <Button
+              type="button"
+              variant="secondary"
+              size="md"
+              disabled={busy}
+              onClick={() => setConfirmCancel(false)}
+              className="w-full md:w-auto"
+            >
+              Продолжить
+            </Button>
+          ) : null}
+          {!confirmCancel ? (
+            <Button
+              type="submit"
+              form="cms-create-session-form"
+              variant="primary"
+              size="md"
+              loading={busy}
+              disabled={busy}
+              className="w-full md:w-auto"
+            >
+              Создать и открыть
+            </Button>
+          ) : null}
         </div>
       }
     >
@@ -537,14 +574,22 @@ function CreateSessionDialog({
         className="space-y-3 px-3 pb-3 pt-1"
         onSubmit={onSubmit}
       >
+        {confirmCancel ? (
+          <Alert tone="warning">
+            Закрыть окно и потерять введённые данные?
+          </Alert>
+        ) : null}
         <TextField
+          ref={titleRef}
           label="Название сессии"
           placeholder="Planning Poker"
           value={title}
           maxLength={200}
-          autoFocus
           disabled={busy}
-          onChange={(event) => onTitleChange(event.target.value)}
+          onChange={(event) => {
+            setConfirmCancel(false);
+            onTitleChange(event.target.value);
+          }}
           hint="Можно оставить пустым — подставим «Planning Poker»."
         />
         {showTeamPicker ? (
@@ -554,7 +599,10 @@ function CreateSessionDialog({
             required={teams.length > 1}
             disabled={busy}
             allowEmpty={teams.length === 0}
-            onChange={onTeamIdChange}
+            onChange={(next) => {
+              setConfirmCancel(false);
+              onTeamIdChange(next);
+            }}
           />
         ) : null}
         {error ? <Alert tone="danger">{error}</Alert> : null}
@@ -703,7 +751,7 @@ function SessionDetails({
             {detail ? (
               <>
                 <Button variant="primary" size="sm" onClick={() => onOpenCockpit(detail)}>
-                  Открыть cockpit
+                  Открыть управление
                 </Button>
                 <Button variant="ghost" size="sm" onClick={() => onOpenReport(detail)}>
                   Открыть отчёт
@@ -1540,7 +1588,7 @@ function TaskRow({
             </p>
           </div>
           {canManage ? (
-            <div className="grid grid-cols-3 gap-1 sm:flex sm:flex-wrap sm:justify-end sm:max-w-[360px]">
+            <div className="grid grid-cols-2 gap-1 min-[380px]:grid-cols-3 sm:flex sm:flex-wrap sm:justify-end sm:max-w-[360px]">
               <Button
                 type="button"
                 variant="ghost"

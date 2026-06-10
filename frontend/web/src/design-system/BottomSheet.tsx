@@ -23,6 +23,7 @@ export function BottomSheet({
   children,
   footer,
   className,
+  initialFocus = "first",
 }: {
   open: boolean;
   title?: ReactNode;
@@ -31,6 +32,7 @@ export function BottomSheet({
   children: ReactNode;
   footer?: ReactNode;
   className?: string;
+  initialFocus?: "first" | "container";
 }) {
   const titleId = useId();
   const descriptionId = useId();
@@ -56,6 +58,10 @@ export function BottomSheet({
     previousFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const focusableSelector = "button, [href], input, select, textarea, [tabindex]:not([tabindex='-1'])";
     const focusFirst = () => {
+      if (initialFocus === "container") {
+        sheetRef.current?.focus();
+        return;
+      }
       const preferred = findPreferredFocusTarget(sheetRef.current);
       preferred?.focus();
       if (preferred) return;
@@ -107,7 +113,7 @@ export function BottomSheet({
       document.body.style.paddingRight = previousPaddingRight;
       previousFocusRef.current?.focus();
     };
-  }, [open]);
+  }, [initialFocus, open]);
 
   const handleBackdrop = useCallback((event: React.MouseEvent | React.TouchEvent) => {
     if (event.target === event.currentTarget) onClose();
@@ -216,7 +222,7 @@ export function BottomSheet({
           // narrow centered "rectangle in the middle of the screen"
           // bug). On md+ this becomes a normal centered dialog.
           "relative w-full outline-none md:max-w-md",
-          "rounded-t-2xl border border-line border-b-0 bg-surface shadow-card md:rounded-2xl md:border-b",
+          "rounded-t-sheet border border-line border-b-0 bg-surface shadow-card md:rounded-sheet md:border-b",
           "motion-safe:animate-scale-in",
           // Keep the sheet above the on-screen keyboard on mobile.
           "max-h-[calc(100dvh-var(--safe-top)-var(--keyboard-bottom-inset)-0.75rem)] overflow-hidden md:max-h-[min(760px,calc(100dvh-3rem))]",
