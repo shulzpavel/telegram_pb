@@ -237,6 +237,11 @@ async def test_app_skip_task_records_single_audit_event(monkeypatch) -> None:
     async def fake_publish(_request, _session) -> None:
         return None
 
+    async def fake_get(_repo, _chat_id, _topic_id):
+        session = Session(chat_id=1, topic_id=None)
+        session.batch_completed = False
+        return session
+
     async def fake_mutate(_repo, _chat_id, _topic_id, mutator):
         session = Session(chat_id=1, topic_id=None)
         session.tasks_queue.append(Task(summary="t1"))
@@ -244,9 +249,14 @@ async def test_app_skip_task_records_single_audit_event(monkeypatch) -> None:
         mutator(session)
         return session, None
 
+    async def fake_notify(*_args, **_kwargs) -> None:
+        return None
+
     monkeypatch.setattr(app_api, "_audit", fake_audit)
     monkeypatch.setattr(app_api, "_publish_state", fake_publish)
+    monkeypatch.setattr(app_api, "_get_repo_session", fake_get)
     monkeypatch.setattr(app_api, "_mutate_repo_session", fake_mutate)
+    monkeypatch.setattr(app_api, "maybe_notify_session_finished", fake_notify)
 
     class _Actor:
         username = "manager"
@@ -262,3 +272,51 @@ async def test_app_skip_task_records_single_audit_event(monkeypatch) -> None:
     assert actions == ["app.session.skip"], (
         f"skip should emit exactly one audit event, got: {actions}"
     )
+
+
+@pytest.mark.asyncio
+async def test_app_next_task_notifies_when_last_task_auto_completes(monkeypatch) -> None:
+    """Auto-next after the final estimate is a session finish for alerts."""
+    from services.voting_service import app_api
+
+    notifications: list[dict[str, Any]] = []
+
+    async def fake_get(_repo, _chat_id, _topic_id):
+        session = Session(chat_id=1, topic_id=None)
+        session.batch_completed = False
+        return session
+
+    async def fake_mutate(_repo, _chat_id, _topic_id, mutator):
+        session = Session(chat_id=1, topic_id=None)
+        session.tasks_queue.append(Task(summary="final task"))
+        session.current_batch_started_at = "2024-01-01"
+        mutator(session)
+        return session, None
+
+    async def fake_noop(*_args, **_kwargs) -> None:
+        return None
+
+    async def fake_notify(_request, session, **kwargs) -> None:
+        notifications.append({"session": session, **kwargs})
+
+    monkeypatch.setattr(app_api, "_get_repo_session", fake_get)
+    monkeypatch.setattr(app_api, "_mutate_repo_session", fake_mutate)
+    monkeypatch.setattr(app_api, "_ensure_current_task_description", fake_noop)
+    monkeypatch.setattr(app_api, "_publish_state", fake_noop)
+    monkeypatch.setattr(app_api, "_audit", fake_noop)
+    monkeypatch.setattr(app_api, "maybe_notify_session_finished", fake_notify)
+
+    class _Actor:
+        username = "manager"
+
+    class _Req:
+        class app:  # noqa: N801
+            class state:  # noqa: N801
+                repository = object()
+
+    await app_api.app_next_task(chat_id=1, request=_Req(), topic_id=None, actor=_Actor())
+
+    assert len(notifications) == 1
+    assert notifications[0]["was_completed"] is False
+    assert notifications[0]["session"].batch_completed is True
+    assert notifications[0]["close_method"] == "Last task completed"

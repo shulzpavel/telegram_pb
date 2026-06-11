@@ -1111,6 +1111,9 @@ async def app_next_task(
     topic_id: Optional[int] = None,
     actor: CmsPrincipal = Depends(_require_manager_session),
 ) -> dict:
+    before = await _get_repo_session(request.app.state.repository, chat_id, topic_id)
+    was_completed = before.batch_completed
+
     def mutate(session: Session) -> None:
         if session.current_task:
             session.current_task_index += 1
@@ -1131,6 +1134,13 @@ async def app_next_task(
     await _ensure_current_task_description(request, chat_id, topic_id, session=session)
     await _publish_state(request, session)
     await _audit(request, "app.session.next", actor.username, "ok", {"chat_id": chat_id})
+    await maybe_notify_session_finished(
+        request,
+        session,
+        was_completed=was_completed,
+        actor=actor,
+        close_method="Last task completed",
+    )
     return _manager_session_payload(session)
 
 
@@ -1141,6 +1151,9 @@ async def app_skip_task(
     topic_id: Optional[int] = None,
     actor: CmsPrincipal = Depends(_require_manager_session),
 ) -> dict:
+    before = await _get_repo_session(request.app.state.repository, chat_id, topic_id)
+    was_completed = before.batch_completed
+
     # Skip == advance to next task. Run the same mutation as `next` but only
     # record a single `skip` audit event so the audit log isn't polluted with
     # a paired `skip` + `next` for every skip click.
@@ -1163,6 +1176,13 @@ async def app_skip_task(
     await _ensure_current_task_description(request, chat_id, topic_id, session=session)
     await _publish_state(request, session)
     await _audit(request, "app.session.skip", actor.username, "ok", {"chat_id": chat_id})
+    await maybe_notify_session_finished(
+        request,
+        session,
+        was_completed=was_completed,
+        actor=actor,
+        close_method="Last task skipped",
+    )
     return _manager_session_payload(session)
 
 
