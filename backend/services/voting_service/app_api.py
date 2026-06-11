@@ -64,6 +64,7 @@ from services.voting_service.ai_summary_llm import (
     generate_ai_summary_llm,
 )
 from services.voting_service.rate_limit import enforce_rate_limit
+from services.voting_service.session_finish_notify import maybe_notify_session_finished
 from services.voting_service.web_api import WEB_TOKEN_TTL, _build_web_session_state
 
 
@@ -1240,10 +1241,21 @@ async def app_finish_session(
     CMS-driven force-close stay strictly in sync (they used to be two copies
     of the same mutator).
     """
-    use_case = CloseSessionUseCase(request.app.state.repository)
+    repo = request.app.state.repository
+    before = await _get_repo_session(repo, chat_id, topic_id)
+    was_completed = before.batch_completed
+
+    use_case = CloseSessionUseCase(repo)
     session, completed = await use_case.execute(chat_id, topic_id)
     await _publish_state(request, session)
     await _audit(request, "app.session.finish", actor.username, "ok", {"chat_id": chat_id, "count": len(completed)})
+    await maybe_notify_session_finished(
+        request,
+        session,
+        was_completed=was_completed,
+        actor=actor,
+        close_method="Finish",
+    )
     return _manager_session_payload(session)
 
 
@@ -1544,6 +1556,8 @@ def _markdown_report(summary: dict) -> str:
     for idx, entry in enumerate(summary["completed_tasks"], start=1):
         title = entry["jira_key"] or entry["summary"]
         lines.extend([
+            "---",
+            "",
             f"### {idx}. {_md_escape(title)}",
             "",
             f"- **Final SP:** {entry['story_points'] if entry['story_points'] is not None else '—'}",
@@ -1596,7 +1610,7 @@ def _markdown_report(summary: dict) -> str:
                 lines.append(f"| {_md_escape(vote['name'])} | {_md_escape(vote['value'])} |")
         else:
             lines.append("| — | — |")
-        lines.append("")
+        lines.extend(["", "---", ""])
 
     return "\n".join(lines).strip() + "\n"
 

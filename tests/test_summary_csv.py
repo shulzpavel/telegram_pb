@@ -150,6 +150,8 @@ def test_markdown_report_contains_confluence_summary() -> None:
     assert "**AI estimate:** dev 8 SP, test 5 SP, final 8 SP" in report
     assert "**AI assumptions:** Need PSP sandbox" in report
     assert "**AI estimation model:** max(sp_dev, sp_test)" in report
+    assert "\n---\n\n### 1. BB-1" in report
+    assert report.rstrip().endswith("---")
 
 
 def test_csv_report_is_sectioned_and_contains_total() -> None:

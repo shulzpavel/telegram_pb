@@ -35,6 +35,7 @@ from app.usecases.manage_tasks import (
     UpdateTaskUseCase,
 )
 from services.voting_service.cms_store import DEFAULT_LIMIT, MAX_LIMIT, token_hash as compute_token_hash
+from services.voting_service.session_finish_notify import maybe_notify_session_finished
 from services.voting_service.cms_team_access import (
     assert_record_access,
     require_superuser,
@@ -852,7 +853,11 @@ async def cms_close_session(
     — both delegate to ``CloseSessionUseCase``.
     """
     chat_id, topic_id = await _session_ref(request, session_id, actor)
-    use_case = CloseSessionUseCase(request.app.state.repository)
+    repo = request.app.state.repository
+    before = await _get_repo_session(repo, chat_id, topic_id)
+    was_completed = before.batch_completed
+
+    use_case = CloseSessionUseCase(repo)
     refreshed_session, completed = await use_case.execute(chat_id, topic_id)
     await _broadcast_session_state(request, refreshed_session)
     await _audit(
@@ -861,6 +866,13 @@ async def cms_close_session(
         actor.username,
         "ok",
         {"session_id": session_id, "completed_count": len(completed)},
+    )
+    await maybe_notify_session_finished(
+        request,
+        refreshed_session,
+        was_completed=was_completed,
+        actor=actor,
+        close_method="CMS force-close",
     )
     return {
         "ok": True,
