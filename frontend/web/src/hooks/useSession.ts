@@ -88,6 +88,16 @@ export function useSession(token: string): UseSessionReturn {
 
   const phase: Phase = participantId === null ? "joining" : (state?.phase ?? "waiting");
 
+  const refreshState = useCallback(async () => {
+    try {
+      const resp = await fetch(apiUrl(`/web/state/${encodeURIComponent(token)}`));
+      if (!resp.ok || unmounted.current) return;
+      setState((await resp.json()) as WebSessionState);
+    } catch {
+      // WebSocket reconnect will keep retrying; this is only catch-up.
+    }
+  }, [token]);
+
   const connect = useCallback(() => {
     if (unmounted.current || !participantId) return;
 
@@ -98,6 +108,7 @@ export function useSession(token: string): UseSessionReturn {
       // Reset backoff when we successfully establish a fresh connection,
       // even if no session_state message arrives immediately afterwards.
       reconnectDelay.current = 1000;
+      void refreshState();
     };
 
     ws.onmessage = (ev) => {
@@ -177,7 +188,7 @@ export function useSession(token: string): UseSessionReturn {
     ws.onerror = () => {
       ws.close();
     };
-  }, [token, participantId, pidKey]);
+  }, [token, participantId, pidKey, refreshState]);
 
   useEffect(() => {
     unmounted.current = false;

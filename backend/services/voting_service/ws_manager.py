@@ -3,7 +3,7 @@
 import asyncio
 import json
 import logging
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import WebSocket
 
@@ -48,14 +48,23 @@ class ConnectionManager:
 manager = ConnectionManager()
 
 
-async def redis_pubsub_listener(redis_url: str, token: str, channel: str, websocket: WebSocket) -> None:
-    """Subscribe to a Redis pub/sub channel and forward messages to a WebSocket."""
+async def redis_pubsub_listener(redis_source: Any, token: str, channel: str, websocket: WebSocket) -> None:
+    """Subscribe to a Redis pub/sub channel and forward messages to a WebSocket.
+
+    Prefer the app's already configured Redis client/pool. Passing a URL is
+    kept for compatibility with older callers and tests.
+    """
     import redis.asyncio as redis
 
     client: Optional[redis.Redis] = None
     pubsub = None
+    owns_client = False
     try:
-        client = await redis.from_url(redis_url, decode_responses=True)
+        if isinstance(redis_source, str):
+            client = await redis.from_url(redis_source, decode_responses=True)
+            owns_client = True
+        else:
+            client = redis_source
         pubsub = client.pubsub()
         await pubsub.subscribe(channel)
         async for message in pubsub.listen():
@@ -76,7 +85,7 @@ async def redis_pubsub_listener(redis_url: str, token: str, channel: str, websoc
                 await pubsub.aclose()
             except Exception as exc:
                 logger.debug("Redis pubsub close failed token=%s channel=%s: %s", token, channel, exc)
-        if client:
+        if client and owns_client:
             try:
                 await client.aclose()
             except Exception as exc:

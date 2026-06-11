@@ -2,15 +2,17 @@
 
 ## Purpose
 
-Planning Poker helps teams estimate Jira tasks from a manager-led web room with browser voting links.
+Planning Poker helps teams estimate Jira tasks from a manager-led web room with browser voting links, live results, exportable reports, and operational audit tooling.
 
 ## Core Flows
 
 1. A manager logs in to the main web app and creates a planning session.
 2. Participants join by invite link and wait in the lobby.
 3. The manager imports tasks from Jira or adds them manually.
-4. The manager starts voting, reveals results, discusses outliers, sets the final estimate, and moves to the next task.
-5. CMS remains available for audit, access, and operational inspection.
+4. The manager starts voting. Participants see live vote progress and values as votes arrive; once everyone has voted, the round moves to results.
+5. The manager discusses outliers, sets the final estimate, and the cockpit automatically advances to the next task.
+6. On the final task, auto-advance completes the session and opens the finished-report flow. Manual `Finish` and CMS `Close` remain available.
+7. CMS remains available for audit, access, and operational inspection.
 
 ## Roles In Planning Sessions
 
@@ -41,12 +43,28 @@ A manager can:
 - preview and import Jira tasks;
 - edit, delete, and move backlog tasks;
 - start voting;
-- reveal results before or after all voters have voted;
 - skip or move to the next task;
+- generate a structured AI estimation hint for the active task when Anthropic is configured;
 - set the final estimate after discussion;
-- finish the session.
+- finish the session and open the report.
 
-Only users with `app.sessions.manage` can call manager session APIs. Participants cannot start, reveal, skip, or advance tasks from the public voting link.
+Only users with `app.sessions.manage` can call manager session APIs. Participants cannot start, skip, advance, set estimates, sync Jira, or finish tasks from the public voting link.
+
+## Finished Session Report
+
+Finished sessions have a report page under `/cms/sessions/:chatId/report` and the legacy `/manage/finished/:chatId` route.
+
+The report includes:
+
+- played task count, final estimate coverage, total SP, consensus count, and votes cast;
+- session start/end timestamps and duration;
+- participant roster;
+- per-task vote breakdowns, final estimates, Jira metadata, and stored AI summaries;
+- CSV export for spreadsheet use;
+- Markdown export for Confluence-friendly handoff, with `---` separators between task sections;
+- optional Jira Story Points sync from the finished batch.
+
+Reports work for both explicitly finished sessions and auto-completed sessions where the manager advanced past the final task.
 
 ## Real Demo Session
 
@@ -68,8 +86,21 @@ The web app supports token-based voting sessions:
 - `/s/:token` opens the participant flow.
 - A participant joins with a name and role.
 - The browser keeps a local participant id for the token.
-- WebSocket updates keep the voting state current.
+- WebSocket updates keep the voting state current, and the client catches up from `/web/state/:token` after reconnects.
+- Vote values are visible live; the participant screen no longer waits for a separate manager reveal step.
 - Participants do not see manager controls.
+
+## Telegram Alerts
+
+Production can send a Telegram alert when a planning session newly completes.
+
+The alert is sent when:
+
+- the manager auto-advances past the final task after setting the last final SP;
+- the manager explicitly clicks Finish;
+- an admin force-closes the session from CMS.
+
+The alert includes a short HTML caption with session title, team, finisher, duration, stats, report link, and an attached Markdown report. Alerts are best-effort and idempotent: already completed sessions do not send duplicate alerts on later Finish/Close calls.
 
 ## CMS
 
@@ -79,12 +110,12 @@ CMS includes:
 
 - Overview
 - Sessions
-- Users
-- Votes
 - Tokens
 - Web participants
 - Audit events
 - Access management
+- Sprint planner
+- Retrospectives
 
 Access management lets a superadmin or access manager:
 
@@ -97,6 +128,13 @@ Access management lets a superadmin or access manager:
 New CMS users need a username, a temporary password of at least 8 characters, and at least one role.
 
 For large teams, CMS users are searched and loaded page by page. The access screen supports filtering by status and role before loading more rows.
+
+## Sprint Planner And Retrospectives
+
+CMS also includes lightweight planning and retrospective workspaces:
+
+- Sprint planner stores sprint-plan drafts, plan metadata, and task lists.
+- Retrospectives use token-based participant links, live WebSocket updates, configurable sections, voting/grouping, action items, and optional AI analysis through Anthropic.
 
 ## Task Queue Management
 
@@ -126,3 +164,14 @@ Jira preview rows are shown in a scrollable list instead of being silently cappe
 - CMS permissions are enforced server-side.
 - Frontend uses permissions only for navigation and UX.
 - Bootstrap superadmin is configured by `CMS_USERNAME` and `CMS_PASSWORD`.
+- Participant invite tokens and WebSocket authorization are Redis-backed and expire with `WEB_TOKEN_TTL`.
+
+## Browser And Apple Icons
+
+The web app ships favicon and install metadata for desktop browsers, Safari, iOS, and PWA-style home-screen shortcuts:
+
+- `favicon.ico` for legacy browser support;
+- `favicon.svg` and `favicon-96x96.png` for modern tabs;
+- `apple-touch-icon.png` for iOS;
+- `safari-pinned-tab.svg` for pinned tabs;
+- `site.webmanifest` with 192px and 512px PNG icons.

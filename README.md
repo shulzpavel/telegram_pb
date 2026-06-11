@@ -1,14 +1,15 @@
 # Planning Poker
 
-Planning Poker is a manager-led web estimation tool with Jira integration, browser voting links, and an admin/audit CMS.
+Planning Poker is a manager-led web estimation tool with Jira integration, browser voting links, session reports, Telegram completion alerts, and an admin/audit CMS.
 
 ## What Is Included
 
-- Manager web cockpit for session creation, invite links, task queue management, voting control, reveal, and final estimates.
+- Manager web cockpit for session creation, invite links, task queue management, live voting control, final estimates, and finished-session reports.
 - Voting Service API backed by Redis for live state and Postgres for CMS/read models.
 - Jira Service API for Jira search and Story Points writes.
-- React/Vite web app for `/manage`, participant voting links, and `/cms`.
+- React/Vite web app for `/manage`, participant voting links, `/cms`, and installable browser/Apple home-screen metadata.
 - CMS with role-based access control for overview, sessions, users, votes, tokens, web participants, audit events, and access management.
+- Retrospective workspace with live participant links and AI analysis.
 - Docker Compose setup for local and production-like runs.
 
 ## Repository Layout

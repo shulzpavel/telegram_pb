@@ -10,9 +10,9 @@ backend/app
 backend/services/jira_service
   FastAPI service for Jira search and Story Points writes
 backend/services/voting_service
-  FastAPI service for sessions, manager app, web voting, CMS, RBAC, and read-model sync
+  FastAPI service for sessions, manager app, web voting, CMS, RBAC, retrospectives, alerts, and read-model sync
 frontend/web
-  React/Vite app for manager sessions, participant voting, and CMS
+  React/Vite app for manager sessions, participant voting, reports, retrospectives, and CMS
 infra
   Caddy, Grafana, Kubernetes, deployment files
 ```
@@ -20,11 +20,13 @@ infra
 ## Runtime Data
 
 - Redis stores live voting/session state and web voting tokens.
+- Redis pub/sub fans live state to participant and retro WebSockets.
 - Postgres stores the CMS read model and RBAC data.
 - Voting Service syncs live session state into normalized CMS tables through a coalesced background sync.
 - CMS list endpoints use cursor pagination and indexed query shapes.
 - Task queue and voting mutations always write through atomic live-session repository operations first; the CMS read model is refreshed asynchronously after the commit.
 - Manager-created web sessions use live session state as the source of truth; CMS tables remain a read model.
+- Finished-session summaries are computed from live session state and support paginated task details plus CSV/Markdown exports.
 
 ## Reliability And Secrets
 
@@ -37,6 +39,8 @@ infra
 - Session mutations are atomic at the repository boundary: Redis uses optimistic locking with `WATCH`, Postgres uses a transaction-scoped advisory lock, and the file repository uses a process-local async lock for development/test runs.
 - CMS read-model sync is scheduled in the background and coalesced per session so user-facing write paths are not blocked by CMS table refreshes.
 - CMS text search uses trigram indexes for large session, user, and task tables.
+- WebSocket listeners subscribe through the same configured Redis client/pool used for REST publish operations. Participant clients also catch up from `/web/state/{token}` when a socket opens or reconnects.
+- Telegram session-finish alerts are best-effort. Notification failures are logged and never fail the session mutation.
 
 ## Task Queue Management
 
@@ -80,6 +84,9 @@ Core endpoints:
 
 - `POST /api/v1/app/sessions`
 - `GET /api/v1/app/sessions/{chat_id}/state`
+- `GET /api/v1/app/sessions/{chat_id}/completed`
+- `POST /api/v1/app/sessions/{chat_id}/invite`
+- `PATCH /api/v1/app/sessions/{chat_id}/title`
 - `GET /api/v1/app/sessions/{chat_id}/tasks`
 - `POST /api/v1/app/sessions/{chat_id}/tasks`
 - `POST /api/v1/app/sessions/{chat_id}/tasks/bulk`
@@ -89,15 +96,69 @@ Core endpoints:
 - `DELETE /api/v1/app/sessions/{chat_id}/tasks/{task_id}`
 - `POST /api/v1/app/sessions/{chat_id}/tasks/{task_id}/move`
 - `POST /api/v1/app/sessions/{chat_id}/start`
-- `POST /api/v1/app/sessions/{chat_id}/reveal`
+- `POST /api/v1/app/sessions/{chat_id}/ai-summary`
 - `POST /api/v1/app/sessions/{chat_id}/next`
 - `POST /api/v1/app/sessions/{chat_id}/skip`
+- `POST /api/v1/app/sessions/{chat_id}/completed/{task_id}/reopen`
 - `POST /api/v1/app/sessions/{chat_id}/final-estimate`
 - `POST /api/v1/app/sessions/{chat_id}/finish`
+- `POST /api/v1/app/sessions/{chat_id}/jira-story-points/sync`
+- `GET /api/v1/app/sessions/{chat_id}/summary`
+- `GET /api/v1/app/sessions/{chat_id}/summary/tasks`
+- `GET /api/v1/app/sessions/{chat_id}/summary.csv`
+- `GET /api/v1/app/sessions/{chat_id}/summary.md`
 
-Manual reveal is represented by `Session.revealed_task_id`. The browser state moves to `results` either when all eligible voters voted or when the manager explicitly reveals the current task.
+Live vote values are included in participant WebSocket state. The browser state moves to `results` when all eligible voters have voted; `Session.revealed_task_id` remains in the domain model for compatibility with older flows but the current web UI no longer requires a separate reveal action.
 
-Only authenticated managers with `app.sessions.manage` can start, reveal, skip, advance, or finish a session. Public participant links expose voting/joining only.
+Setting a final estimate calls `/final-estimate`, then the cockpit auto-calls `/next`. If `/next` advances past the final task, `batch_completed` becomes true and the session-finish notifier runs. Explicit `/finish` and CMS `/close` share the same idempotency guard so Telegram alerts are not duplicated.
+
+Only authenticated managers with `app.sessions.manage` can start, skip, advance, reopen completed tasks, set final estimates, sync Jira Story Points, or finish a session. Public participant links expose voting/joining only.
+
+## Public Voting And WebSockets
+
+Public voting endpoints:
+
+- `POST /api/v1/web/token`
+- `POST /api/v1/web/join`
+- `GET /api/v1/web/state/{token}`
+- `POST /api/v1/web/vote`
+- `WS /api/v1/ws/{token}`
+
+The WebSocket sends an initial `session_state`, forwards Redis pub/sub messages, and emits keepalive pings. REST mutations publish `session_state` snapshots through `_publish_state`; direct participant votes publish either `vote_cast` or `results`. The React `useSession` hook reconnects with exponential backoff and fetches `/web/state/{token}` on socket open to recover missed events.
+
+## Finished Reports And Telegram Alerts
+
+Finished report generation lives in `backend/services/voting_service/app_api.py`:
+
+- `_summary_payload()` computes exact aggregate stats over the full completed batch.
+- `/summary` can inline the first task page while `/summary/tasks` pages through long sessions.
+- `_csv_report()` powers `/summary.csv`.
+- `_markdown_report()` powers `/summary.md` and Telegram attachments.
+
+Telegram alert orchestration lives in:
+
+- `backend/services/voting_service/session_finish_notify.py`
+- `backend/services/voting_service/telegram_notifier.py`
+
+Required runtime env for alerts:
+
+- `TELEGRAM_BOT_TOKEN`
+- `TELEGRAM_CHAT_ID`
+- `WEB_UI_URL` for report links
+
+The notifier sends `sendDocument` with an HTML caption and Markdown report. It runs on newly completed sessions from manager auto-complete, explicit Finish, and CMS force-close.
+
+## Retrospectives
+
+Retrospectives are served by `backend/services/voting_service/retro_api.py` and use Redis live state plus Postgres CMS metadata.
+
+Core capabilities:
+
+- CMS-created retrospectives with configurable sections and vote limits.
+- Public `/r/:token` participant flow backed by `web_retro:{token}` keys.
+- `WS /api/v1/retro-ws/{token}` for live state.
+- Anonymous cards, grouping, voting, action items, finalization, and optional Anthropic AI analysis.
+- AI analysis is strict JSON with one repair retry and no heuristic fallback.
 
 Demo support:
 
@@ -143,6 +204,9 @@ Runtime env:
 - `ANTHROPIC_MODEL`: Claude model id, default `claude-haiku-4-5-20251001`.
 - `ANTHROPIC_TIMEOUT_SECONDS`: LLM HTTP timeout, default `20`.
 - `ANTHROPIC_MAX_CONTEXT_CHARS`: max Jira/task text sent to the model, default `16000`.
+- `TELEGRAM_BOT_TOKEN`: bot token for session-finish Telegram alerts.
+- `TELEGRAM_CHAT_ID`: target chat/channel for session-finish Telegram alerts.
+- `WEB_UI_URL`: public web base URL used in invite/report links and Telegram captions.
 - `JIRA_CACHE_MAX_ITEMS`: max in-memory Jira cache entries, default `1000`.
 - `JIRA_UPDATE_CONCURRENCY`: concurrent Jira Story Points writes in skip-errors mode, default `5`.
 - `JIRA_SERVICE_TIMEOUT_SECONDS`: CMS Jira preview/import HTTP timeout, default `30`.
@@ -160,6 +224,11 @@ CMS permissions:
 - `cms.access.view`
 - `cms.access.manage`
 - `cms.tasks.manage`
+- `cms.planner.view`
+- `cms.planner.manage`
+- `cms.retro.view`
+- `cms.retro.manage`
+- `cms.retro.analyze`
 - `app.sessions.manage`
 
 ## Frontend Structure
@@ -196,6 +265,7 @@ Primary routes:
 
 - `/manage`: manager cockpit for creating and facilitating sessions.
 - `/s/:token`: participant voting link.
+- `/r/:token`: participant retrospective link.
 - `/cms`: secondary admin/audit CMS.
 
 CMS routes are nested under `/cms`:
@@ -205,13 +275,16 @@ CMS routes are nested under `/cms`:
 - `/cms/users`
 - `/cms/votes`
 - `/cms/tokens`
-- `/cms/web`
 - `/cms/events`
 - `/cms/access`
+- `/cms/planner`
+- `/cms/retro`
 
 CMS route components are lazy-loaded to keep the participant voting path lighter.
 
 The CMS task queue editor uses `@tanstack/react-virtual` for large lists and `@dnd-kit` for drag handles. Full drag reorder is sent through `/tasks/reorder` only when the complete unfiltered queue is loaded; otherwise the UI falls back to a bounded move operation so huge filtered lists do not require rendering everything.
+
+The web root also ships browser install assets from `frontend/web/public`: `favicon.ico`, `favicon.svg`, `favicon-96x96.png`, `apple-touch-icon.png`, `safari-pinned-tab.svg`, `site.webmanifest`, and 192/512 PNG manifest icons.
 
 ## Frontend Design System
 
@@ -247,7 +320,7 @@ npm run build
 npm run test:e2e
 ```
 
-Current frontend unit tests cover CMS navigation/RBAC tab filtering, query serialization, access validation, and task bulk-input parsing.
+Current frontend unit tests cover CMS navigation/RBAC tab filtering, query serialization, access validation, task bulk-input parsing, manager/voter AI-summary rendering, and task queue behavior.
 Frontend smoke E2E tests run with Playwright against the production preview build on desktop Chromium and a Pixel 5 mobile viewport.
 
 CI:

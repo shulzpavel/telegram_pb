@@ -630,7 +630,7 @@ async def retro_websocket(websocket: WebSocket, token: str) -> None:
         return
 
     channel = _retro_channel(retro_id)
-    listen_task = asyncio.create_task(redis_pubsub_listener(REDIS_URL, token, channel, websocket))
+    listen_task = asyncio.create_task(redis_pubsub_listener(redis_client, token, channel, websocket))
     try:
         while True:
             try:

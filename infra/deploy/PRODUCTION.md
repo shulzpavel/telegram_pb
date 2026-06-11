@@ -135,6 +135,40 @@ Add these repository secrets in `Settings -> Secrets and variables -> Actions`:
 - `TELEGRAM_CHAT_ID`
 - `TELEGRAM_BOT_TOKEN`
 
+## Telegram session-finish alerts
+
+Planning sessions can also send a Telegram alert when they newly complete. This
+is separate from deploy/pipeline notifications: the variables must be present in
+the runtime `.env` loaded by `docker-compose.prod.yml`, because `voting-service`
+reads them inside the app process.
+
+Add to `/opt/planning-poker/.env`:
+
+```bash
+TELEGRAM_CHAT_ID=-1003923094895
+TELEGRAM_BOT_TOKEN=<telegram-bot-token>
+WEB_UI_URL=https://planning.shults-sync.com
+```
+
+After changing these values, recreate `voting-service`:
+
+```bash
+docker compose -f docker-compose.prod.yml --env-file .env up -d --force-recreate voting-service
+```
+
+Verify the app container sees the secrets without printing them:
+
+```bash
+docker compose -f docker-compose.prod.yml --env-file .env exec voting-service sh -lc \
+'echo "BOT=${TELEGRAM_BOT_TOKEN:+set} CHAT=${TELEGRAM_CHAT_ID:+set} WEB_UI_URL=$WEB_UI_URL"'
+```
+
+Expected: `BOT=set CHAT=set WEB_UI_URL=https://planning.shults-sync.com`.
+
+Alerts are sent on auto-completion after the final task, explicit manager
+Finish, and CMS force-close. Already completed sessions do not send duplicate
+alerts.
+
 ## Auto Deploy on push to main
 
 The repo deploys from the existing `.github/workflows/ci.yml` workflow.
@@ -177,6 +211,31 @@ chmod 600 ~/.ssh/authorized_keys
 docker compose -f docker-compose.prod.yml --env-file .env logs -f voting-service
 docker compose -f docker-compose.prod.yml --env-file .env logs -f caddy
 ```
+
+## Realtime voting checks
+
+Voting screens use `wss://<domain>/api/v1/ws/{token}` plus Redis pub/sub. A
+page refresh reads `/api/v1/web/state/{token}`, so "refresh works but live UI is
+stale" usually points at WebSocket/proxy/pubsub.
+
+After deploy:
+
+1. Open a manager session and a participant invite in two browsers.
+2. Join as a participant and verify the manager lobby updates without refresh.
+3. Start voting, cast a vote, and verify the participant/manager vote state
+   changes live.
+4. Set the final estimate on the last task and verify the participant reaches
+   complete state without manual refresh.
+
+Useful log filters:
+
+```bash
+docker compose -f docker-compose.prod.yml --env-file .env logs --tail=200 voting-service \
+  | grep -Ei "websocket|pubsub|publish_state|session finish|telegram"
+```
+
+Cloudflare must keep **Network -> WebSockets** enabled, and Caddy must keep the
+`Upgrade` / `Connection: upgrade` proxy headers for `/api/v1/ws/`.
 
 ## Caddy keeps restarting
 

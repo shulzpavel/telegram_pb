@@ -440,7 +440,7 @@ async def websocket_endpoint(websocket: WebSocket, token: str) -> None:
 
     # Run pub/sub listener and a receive task concurrently; exit when either finishes
     listen_task = asyncio.create_task(
-        redis_pubsub_listener(REDIS_URL, token, channel, websocket)
+        redis_pubsub_listener(redis_client, token, channel, websocket)
     )
 
     try:

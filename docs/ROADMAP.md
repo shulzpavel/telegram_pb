@@ -20,9 +20,21 @@
    - Jira preview shows all returned preview rows in a bounded list and exposes selected/importable counts.
 
 5. Moved session facilitation into the main web app.
-   - `/manage` is now the manager cockpit for session creation, invite links, queue editing, Jira/manual task intake, start/reveal/next/skip/finish, and final estimate selection.
+   - `/manage` is now the manager cockpit for session creation, invite links, queue editing, Jira/manual task intake, start/next/skip/finish, and final estimate selection.
    - `/cms` remains the secondary operational/audit surface.
    - Manager actions are protected by `app.sessions.manage`.
+
+6. Added finished-session reporting and Telegram completion alerts.
+   - Finished reports expose paginated task details, aggregate stats, CSV export, and Confluence-friendly Markdown export.
+   - Telegram alerts send a short caption plus Markdown attachment when a session newly completes.
+   - Auto-completion after the final task, explicit Finish, and CMS Close use the same idempotent notification path.
+
+7. Hardened realtime participant updates.
+   - WebSocket pub/sub listeners use the app-configured Redis client/pool.
+   - Participant clients catch up from `/web/state/:token` on socket open/reconnect.
+
+8. Added browser and Apple install metadata.
+   - Desktop favicon, SVG icon, Safari pinned tab, Apple touch icon, and web manifest assets ship from `frontend/web/public`.
 
 ## Next Backend Improvements
 
@@ -61,6 +73,7 @@
 
 8. Add slow-query metrics for CMS endpoints.
    - Track endpoint, filters, duration, and returned row count.
+   - Track Telegram alert success/failure counters and WebSocket reconnect/disconnect rates.
 
 ## Next Frontend Improvements
 
@@ -96,10 +109,9 @@
    - Bulk select/delete for non-active tasks.
 
 6. Improve the manager cockpit interaction model.
-   - Drag-and-drop reorder for loaded unfiltered queues.
-   - Toast notifications for successful actions.
    - Dedicated empty/error/loading states for Jira import.
    - Multi-manager conflict messaging when `tasks_version` is stale.
+   - Clearer complete-state CTA after the final task and after Jira sync.
 
 ## Production Readiness
 
@@ -107,11 +119,9 @@
    - Postgres scheduled dumps.
    - Restore test procedure.
 
-2. Add production deploy workflow.
-   - Build immutable Docker images.
-   - Push images to registry.
-   - Deploy to VPS only after CI passes.
-   - Keep manual approval for production until rollback is rehearsed.
+2. Build immutable production images.
+   - Current deploy rebuilds compose services on the VPS after CI.
+   - Next step is pushing versioned images to a registry and deploying by digest/tag.
 
 3. Add secrets process.
    - Strong generated `CMS_PASSWORD`.
