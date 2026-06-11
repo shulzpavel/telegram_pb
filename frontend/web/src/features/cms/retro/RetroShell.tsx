@@ -45,7 +45,12 @@ const DEFAULT_SECTIONS: RetroSectionConfig[] = DEFAULT_RETRO_SECTIONS.map((secti
 import type { CmsPrincipal } from "../api/cmsTypes";
 import { TeamBadge } from "../components/TeamBadge";
 import { TeamFilter, teamFilterParams } from "../components/TeamFilter";
-import { TeamSelect, needsTeamPicker, resolveDefaultTeamId } from "../components/TeamSelect";
+import {
+  TeamSelect,
+  needsTeamPicker,
+  teamPickerRequired,
+  useTeamIdState,
+} from "../components/TeamSelect";
 import { useCmsTeams } from "../hooks/useCmsTeams";
 
 export default function RetroShell({
@@ -210,6 +215,9 @@ function RetroListPage({ principal, canManage }: { principal: CmsPrincipal; canM
               <Link to={`${retro.id}`} className="font-semibold text-ink hover:text-blue">
                 {retro.title}
               </Link>
+              <p className="mt-1">
+                <TeamBadge teamId={retro.team_id} team={retro.team} />
+              </p>
             </td>
             <td className="px-3 py-2">
               <StatusBadge status={retro.status} />
@@ -273,15 +281,15 @@ function formatRetroDate(value: string): string {
 function RetroCreatePage({ principal, canManage }: { principal: CmsPrincipal; canManage: boolean }) {
   const navigate = useNavigate();
   const toast = useToast();
-  const { teams } = useCmsTeams(principal);
-  const [teamId, setTeamId] = useState<number | "">(() => resolveDefaultTeamId(teams));
+  const { teams, loading: teamsLoading } = useCmsTeams(principal);
+  const [teamId, setTeamId] = useTeamIdState(teams);
 
   if (!canManage) {
     return <InlineError text="Недостаточно прав для создания ретроспектив." />;
   }
 
   async function handleCreate(title: string, config: RetroConfig) {
-    if (needsTeamPicker(teams, principal.is_superuser) && teamId === "") {
+    if (teamPickerRequired(teams, principal.is_superuser) && teamId === "") {
       throw new Error("Выберите команду");
     }
     const created = await cmsRetroApi.create({
@@ -297,7 +305,15 @@ function RetroCreatePage({ principal, canManage }: { principal: CmsPrincipal; ca
     <div className="space-y-5">
       <SectionHeader title="Новое ретро" description="Задайте название и секции для обсуждения." />
       {needsTeamPicker(teams, principal.is_superuser) ? (
-        <TeamSelect teams={teams} value={teamId} required={teams.length > 1} onChange={setTeamId} />
+        <TeamSelect
+          teams={teams}
+          value={teamId}
+          forcePicker
+          loading={teamsLoading}
+          required={teamPickerRequired(teams, principal.is_superuser)}
+          allowEmpty={principal.is_superuser}
+          onChange={setTeamId}
+        />
       ) : null}
       <RetroConfigForm
         initialTitle=""

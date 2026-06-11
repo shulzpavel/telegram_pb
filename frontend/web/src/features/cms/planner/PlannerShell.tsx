@@ -46,7 +46,12 @@ import { useUnsavedChangesGuard } from "../hooks/useUnsavedChangesGuard";
 import type { CmsPrincipal } from "../api/cmsTypes";
 import { TeamBadge } from "../components/TeamBadge";
 import { TeamFilter, teamFilterParams } from "../components/TeamFilter";
-import { TeamSelect, needsTeamPicker, resolveDefaultTeamId } from "../components/TeamSelect";
+import {
+  TeamSelect,
+  needsTeamPicker,
+  teamPickerRequired,
+  useTeamIdState,
+} from "../components/TeamSelect";
 import { useCmsTeams } from "../hooks/useCmsTeams";
 
 interface PlannerShellProps {
@@ -266,6 +271,9 @@ function PlannerList({
                   >
                     {item.name}
                   </button>
+                  <p className="mt-1">
+                    <TeamBadge teamId={item.team_id} team={item.team} />
+                  </p>
                 </td>
                 <td className="px-3 py-2 align-top text-ink2">{item.payload.result_summary ?? "—"}</td>
                 <td className="px-3 py-2 align-top text-ink3">{formatDate(item.updated_at)}</td>
@@ -500,8 +508,8 @@ function PlannerEditorPage({
   canManage: boolean;
   mode: "create" | "edit";
 }) {
-  const { teams } = useCmsTeams(principal);
-  const [teamId, setTeamId] = useState<number | "">(() => resolveDefaultTeamId(teams));
+  const { teams, loading: teamsLoading } = useCmsTeams(principal);
+  const [teamId, setTeamId] = useTeamIdState(teams, mode === "create");
   const navigate = useNavigate();
   const toast = useToast();
   const params = useParams<{ planId: string }>();
@@ -510,6 +518,7 @@ function PlannerEditorPage({
   const [name, setName] = useState<string>(() => defaultPlanName());
   const [notes, setNotes] = useState("");
   const [inputs, setInputs] = useState<PlannerInputs>(() => emptyInputs());
+  const [team, setTeam] = useState<SprintPlanRecord["team"]>(null);
   const [loading, setLoading] = useState(mode === "edit");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -535,6 +544,8 @@ function PlannerEditorPage({
         setName(record.name);
         setNotes(record.payload.notes ?? "");
         setInputs(payloadToInputs(record.payload));
+        setTeamId(record.team_id ?? "");
+        setTeam(record.team ?? null);
       })
       .catch((err) => {
         if (!active) return;
@@ -553,6 +564,13 @@ function PlannerEditorPage({
   async function save() {
     setSaving(true);
     setError(null);
+    if (mode === "create" && teamPickerRequired(teams, principal.is_superuser) && teamId === "") {
+      const message = "Выберите команду";
+      setError(message);
+      toast.error(message, { title: "Сохранение не прошло" });
+      setSaving(false);
+      return;
+    }
     try {
       const payload = inputsToPayload(inputs, notes, result);
       const saved =
@@ -584,6 +602,8 @@ function PlannerEditorPage({
         setName(saved.name);
         setNotes(saved.payload.notes ?? "");
         setInputs(payloadToInputs(saved.payload));
+        setTeamId(saved.team_id ?? "");
+        setTeam(saved.team ?? null);
       }
 
       setSavedAt(Date.now());
@@ -657,12 +677,20 @@ function PlannerEditorPage({
         <Skeleton height="h-72" />
       ) : (
         <>
+          {mode === "edit" ? (
+            <div className="max-w-sm rounded-card border border-line bg-surface p-3 shadow-card">
+              <TeamBadge teamId={teamId === "" ? null : teamId} team={team} />
+            </div>
+          ) : null}
           {mode === "create" && needsTeamPicker(teams, principal.is_superuser) ? (
             <div className="max-w-sm rounded-card border border-line bg-surface p-3 shadow-card">
               <TeamSelect
                 teams={teams}
                 value={teamId}
-                required={teams.length > 1}
+                forcePicker
+                loading={teamsLoading}
+                required={teamPickerRequired(teams, principal.is_superuser)}
+                allowEmpty={principal.is_superuser}
                 disabled={!canManage}
                 compact
                 onChange={setTeamId}

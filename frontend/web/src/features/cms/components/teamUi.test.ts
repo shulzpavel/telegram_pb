@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { teamDisplayLabel } from "./TeamBadge";
-import { needsTeamPicker, resolveDefaultTeamId } from "./TeamSelect";
+import { needsTeamPicker, resolveDefaultTeamId, teamPickerRequired } from "./TeamSelect";
 import { teamFilterParams } from "./TeamFilter";
 
 describe("team UI helpers", () => {
@@ -20,6 +20,9 @@ describe("team UI helpers", () => {
     expect(needsTeamPicker(teams, false)).toBe(true);
     expect(needsTeamPicker(teams, true)).toBe(true);
     expect(needsTeamPicker(teams.slice(0, 1), false)).toBe(false);
+    expect(teamPickerRequired(teams, false)).toBe(true);
+    expect(teamPickerRequired(teams, true)).toBe(false);
+    expect(teamPickerRequired(teams.slice(0, 1), false)).toBe(false);
   });
 
   it("maps team filter params", () => {

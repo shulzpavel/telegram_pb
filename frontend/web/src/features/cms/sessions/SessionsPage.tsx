@@ -33,7 +33,13 @@ import type {
 } from "../api/cmsTypes";
 import { TeamBadge } from "../components/TeamBadge";
 import { TeamFilter, teamFilterParams } from "../components/TeamFilter";
-import { TeamSelect, needsTeamPicker, resolveDefaultTeamId } from "../components/TeamSelect";
+import {
+  TeamSelect,
+  needsTeamPicker,
+  resolveDefaultTeamId,
+  teamPickerRequired,
+  useTeamIdState,
+} from "../components/TeamSelect";
 import { useCmsTeams } from "../hooks/useCmsTeams";
 import { Alert, Badge, BottomSheet, Button, ConfirmDialog, EmptyState, ScrollArea, SelectField, Surface, TextField } from "../../../design-system";
 import {
@@ -63,7 +69,7 @@ interface SessionsPageProps {
 }
 
 export default function SessionsPage({ principal, canManageTasks, canManageSessions }: SessionsPageProps) {
-  const { teams } = useCmsTeams(principal);
+  const { teams, loading: teamsLoading } = useCmsTeams(principal);
   const [q, setQ] = useState("");
   const [active, setActive] = useState("");
   const [teamFilter, setTeamFilter] = useState("");
@@ -86,7 +92,7 @@ export default function SessionsPage({ principal, canManageTasks, canManageSessi
   const [createTitle, setCreateTitle] = useState("");
   const [createBusy, setCreateBusy] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
-  const [createTeamId, setCreateTeamId] = useState<number | "">("");
+  const [createTeamId, setCreateTeamId] = useTeamIdState(teams, createOpen);
   const debouncedQ = useDebouncedValue(q);
   const params = useMemo(
     () => ({
@@ -121,7 +127,7 @@ export default function SessionsPage({ principal, canManageTasks, canManageSessi
     setCreateError(null);
     const title = createTitle.trim() || "Planning Poker";
     const teamId = createTeamId === "" ? undefined : createTeamId;
-    if (needsTeamPicker(teams, principal.is_superuser) && teamId == null) {
+    if (teamPickerRequired(teams, principal.is_superuser) && teamId == null) {
       setCreateError("Выберите команду");
       setCreateBusy(false);
       return;
@@ -421,6 +427,8 @@ export default function SessionsPage({ principal, canManageTasks, canManageSessi
         teamId={createTeamId}
         teams={teams}
         showTeamPicker={needsTeamPicker(teams, principal.is_superuser)}
+        isSuperuser={principal.is_superuser}
+        teamsLoading={teamsLoading}
         busy={createBusy}
         error={createError}
         onTitleChange={setCreateTitle}
@@ -475,6 +483,8 @@ function CreateSessionDialog({
   teamId,
   teams,
   showTeamPicker,
+  isSuperuser,
+  teamsLoading,
   busy,
   error,
   dirty,
@@ -488,6 +498,8 @@ function CreateSessionDialog({
   teamId: number | "";
   teams: import("../api/cmsTypes").CmsTeam[];
   showTeamPicker: boolean;
+  isSuperuser: boolean;
+  teamsLoading: boolean;
   busy: boolean;
   error: string | null;
   dirty: boolean;
@@ -596,9 +608,11 @@ function CreateSessionDialog({
           <TeamSelect
             teams={teams}
             value={teamId}
-            required={teams.length > 1}
+            forcePicker
+            loading={teamsLoading}
+            required={teamPickerRequired(teams, isSuperuser)}
+            allowEmpty={isSuperuser}
             disabled={busy}
-            allowEmpty={teams.length === 0}
             onChange={(next) => {
               setConfirmCancel(false);
               onTeamIdChange(next);

@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { SelectField } from "../../../design-system";
 import type { CmsTeam } from "../api/cmsTypes";
 import { teamDisplayLabel } from "./TeamBadge";
@@ -13,6 +13,9 @@ interface TeamSelectProps {
   allowEmpty?: boolean;
   emptyLabel?: string;
   compact?: boolean;
+  /** Always render a dropdown (create flows, superadmin, multi-team admins). */
+  forcePicker?: boolean;
+  loading?: boolean;
 }
 
 export function TeamSelect({
@@ -25,8 +28,16 @@ export function TeamSelect({
   allowEmpty = false,
   emptyLabel = "Без команды (legacy)",
   compact = false,
+  forcePicker = false,
+  loading = false,
 }: TeamSelectProps) {
   const options = useMemo(() => {
+    if (loading && teams.length === 0) {
+      return [{ value: "", label: "Загрузка команд..." }];
+    }
+    if (!loading && teams.length === 0) {
+      return [{ value: "", label: "Нет доступных команд" }];
+    }
     const items = teams.map((team) => ({
       value: String(team.id),
       label: teamDisplayLabel(team.id, team),
@@ -38,9 +49,9 @@ export function TeamSelect({
       return [{ value: "", label: "Выберите команду" }, ...items];
     }
     return items;
-  }, [allowEmpty, emptyLabel, required, teams]);
+  }, [allowEmpty, emptyLabel, loading, required, teams]);
 
-  if (teams.length <= 1 && !allowEmpty) {
+  if (!forcePicker && teams.length <= 1 && !allowEmpty) {
     if (teams.length === 1) {
       return (
         <p className="text-sm text-ink2">
@@ -57,7 +68,7 @@ export function TeamSelect({
       className={compact ? "max-w-sm" : undefined}
       value={value === "" ? "" : String(value)}
       required={required}
-      disabled={disabled}
+      disabled={disabled || loading || teams.length === 0}
       onChange={(event) => {
         const next = event.target.value;
         onChange(next === "" ? "" : Number(next));
@@ -80,4 +91,20 @@ export function resolveDefaultTeamId(teams: CmsTeam[]): number | "" {
 export function needsTeamPicker(teams: CmsTeam[], isSuperuser: boolean): boolean {
   if (isSuperuser) return true;
   return teams.length > 1;
+}
+
+export function teamPickerRequired(teams: CmsTeam[], isSuperuser: boolean): boolean {
+  return needsTeamPicker(teams, isSuperuser) && !isSuperuser && teams.length > 1;
+}
+
+/** Keep create forms in sync when teams finish loading after the first render. */
+export function useTeamIdState(teams: CmsTeam[], enabled = true) {
+  const [teamId, setTeamId] = useState<number | "">(() => resolveDefaultTeamId(teams));
+
+  useEffect(() => {
+    if (!enabled) return;
+    setTeamId((current) => (current === "" ? resolveDefaultTeamId(teams) : current));
+  }, [enabled, teams]);
+
+  return [teamId, setTeamId] as const;
 }
