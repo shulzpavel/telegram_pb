@@ -2214,8 +2214,9 @@ class PostgresCmsStore:
             else:
                 rows = await conn.fetch(
                     f"""
-                    {self._SESSION_LIST_SELECT}
+                    {self._SESSION_DETAIL_SELECT}
                     FROM cms_sessions s
+                    LEFT JOIN cms_teams t ON t.id = s.team_id
                     WHERE s.deleted_at IS NULL
                       AND {scope}
                       AND (
