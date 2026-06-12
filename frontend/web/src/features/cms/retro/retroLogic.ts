@@ -206,10 +206,31 @@ export function groupsBySection(state: Pick<RetroLiveState, "sections" | "groups
   return map;
 }
 
+/** Cards that can still be selected for grouping (not already in a group). */
+export function groupableCards(state: Pick<RetroLiveState, "cards">): RetroCardView[] {
+  return state.cards.filter((card) => !card.group_id && !card.is_grouped);
+}
+
+export const MIN_GROUP_CARDS = 2;
+
+/**
+ * Why a group can't be created from the current selection yet, or null when
+ * everything is in place. Drives the hint inside the selection action bar.
+ */
+export function groupCreationHint(selectedCount: number, title: string): string | null {
+  if (selectedCount < MIN_GROUP_CARDS) {
+    return "Отметьте минимум две карточки";
+  }
+  if (!title.trim()) {
+    return "Укажите название группы";
+  }
+  return null;
+}
+
 export function ungroupedCardsBySection(state: Pick<RetroLiveState, "sections" | "cards">): Map<string, RetroCardView[]> {
   return cardsBySection({
     sections: state.sections,
-    cards: state.cards.filter((card) => !card.group_id && !card.is_grouped),
+    cards: groupableCards(state),
   });
 }
 

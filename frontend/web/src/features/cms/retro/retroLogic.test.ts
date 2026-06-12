@@ -4,6 +4,8 @@ import {
   canAddToSection,
   cardsBySection,
   formatCountdown,
+  groupableCards,
+  groupCreationHint,
   isCountdownExpired,
   mergeRetroState,
   nextSectionId,
@@ -119,6 +121,42 @@ describe("mergeRetroState", () => {
     expect(merged.my_votes).toEqual(["c1"]);
     expect(merged.my_votes_used).toBe(1);
     expect(merged.my_votes_remaining).toBe(4);
+  });
+});
+
+describe("groupableCards", () => {
+  it("returns only cards that are not part of a group", () => {
+    const state = makeState({
+      cards: [
+        { card_id: "c1", section_id: "a", text: "free", vote_count: 0 },
+        { card_id: "c2", section_id: "a", text: "in group", group_id: "g1", vote_count: 0 },
+        { card_id: "c3", section_id: "b", text: "flagged", is_grouped: true, vote_count: 0 },
+      ],
+    });
+    expect(groupableCards(state).map((c) => c.card_id)).toEqual(["c1"]);
+  });
+
+  it("returns an empty list when everything is grouped", () => {
+    const state = makeState({
+      cards: [{ card_id: "c1", section_id: "a", text: "x", group_id: "g1", vote_count: 0 }],
+    });
+    expect(groupableCards(state)).toEqual([]);
+  });
+});
+
+describe("groupCreationHint", () => {
+  it("asks for more cards below the minimum", () => {
+    expect(groupCreationHint(0, "Релизы")).toBe("Отметьте минимум две карточки");
+    expect(groupCreationHint(1, "Релизы")).toBe("Отметьте минимум две карточки");
+  });
+
+  it("asks for a title when it is empty or blank", () => {
+    expect(groupCreationHint(2, "")).toBe("Укажите название группы");
+    expect(groupCreationHint(3, "   ")).toBe("Укажите название группы");
+  });
+
+  it("returns null when the selection is valid", () => {
+    expect(groupCreationHint(2, "Проблемы с релизами")).toBeNull();
   });
 });
 
