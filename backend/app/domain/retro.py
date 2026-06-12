@@ -209,6 +209,7 @@ class Retrospective:
     phase: str = PHASE_LOBBY
     active_section_id: Optional[str] = None
     section_deadline: Optional[str] = None
+    visited_section_ids: List[str] = field(default_factory=list)
     participants: Dict[int, RetroParticipant] = field(default_factory=dict)
     cards: List[RetroCard] = field(default_factory=list)
     groups: List[RetroGroup] = field(default_factory=list)
@@ -420,6 +421,8 @@ class Retrospective:
         self.phase = PHASE_COLLECTING
         self.active_section_id = section_id
         self.section_deadline = deadline
+        if section_id not in self.visited_section_ids:
+            self.visited_section_ids.append(section_id)
         self.bump_version()
 
     def close_section(self) -> None:
@@ -433,6 +436,9 @@ class Retrospective:
             raise RetroError("Ретро уже завершено", status_code=409)
         if self.phase != PHASE_COLLECTING:
             raise RetroError("Сначала откройте хотя бы одну секцию", status_code=409)
+        missing = [section.title for section in self.sections if section.section_id not in self.visited_section_ids]
+        if missing:
+            raise RetroError("Сначала откройте все секции: " + ", ".join(missing), status_code=409)
         self.phase = PHASE_VOTING
         self.active_section_id = None
         self.section_deadline = None
@@ -483,6 +489,7 @@ class RetrospectiveFactory:
             "phase": retro.phase,
             "active_section_id": retro.active_section_id,
             "section_deadline": retro.section_deadline,
+            "visited_section_ids": list(retro.visited_section_ids),
             "participants": {str(uid): p.to_dict() for uid, p in retro.participants.items()},
             "cards": [c.to_dict() for c in retro.cards],
             "groups": [g.to_dict() for g in retro.groups],
@@ -545,6 +552,15 @@ class RetrospectiveFactory:
                 action_items.append(RetroActionItem.from_dict(action_data))
             except (TypeError, ValueError, KeyError):
                 continue
+        section_ids = [section.section_id for section in sections]
+        raw_visited = data.get("visited_section_ids")
+        if isinstance(raw_visited, list):
+            visited_section_ids = [str(section_id) for section_id in raw_visited if str(section_id) in section_ids]
+        elif phase in (PHASE_VOTING, PHASE_DISCUSSING, PHASE_DONE):
+            visited_section_ids = list(section_ids)
+        else:
+            active_section_id = data.get("active_section_id")
+            visited_section_ids = [active_section_id] if active_section_id in section_ids else []
         return Retrospective(
             retro_id=retro_id,
             title=str(data.get("title", "")),
@@ -554,6 +570,7 @@ class RetrospectiveFactory:
             phase=phase,
             active_section_id=data.get("active_section_id"),
             section_deadline=data.get("section_deadline"),
+            visited_section_ids=visited_section_ids,
             participants=participants,
             cards=cards,
             groups=groups,

@@ -24,7 +24,7 @@ import {
   resolveTrackLabel,
 } from "../shared/lib/estimationModes";
 
-const VOTE_VALUES = ["0", "1", "2", "3", "5", "8", "13", "21", "34", "?"];
+const VOTE_VALUES = ["0", "1", "2", "3", "5", "8", "13", "21", "?"];
 
 interface VotePageProps {
   task: TaskInfo;

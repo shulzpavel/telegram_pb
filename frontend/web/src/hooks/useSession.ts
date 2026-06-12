@@ -154,7 +154,12 @@ export function useSession(token: string): UseSessionReturn {
             ...(prev ?? { task: null, participants: [] }),
             phase: "results",
             results: msg.votes as VoteResult[],
+            track_results: msg.track_results ?? prev?.track_results ?? null,
             task: msg.task ?? prev?.task ?? null,
+            estimation_mode: msg.estimation_mode ?? prev?.estimation_mode,
+            estimation_mode_label: msg.estimation_mode_label ?? prev?.estimation_mode_label,
+            estimation_mode_description: msg.estimation_mode_description ?? prev?.estimation_mode_description,
+            estimation_tracks: msg.estimation_tracks ?? prev?.estimation_tracks,
           }));
         } else if (msg.type === "next_task") {
           setState((prev) => ({

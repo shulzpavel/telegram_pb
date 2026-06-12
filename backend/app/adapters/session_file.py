@@ -90,5 +90,6 @@ class FileSessionRepository(SessionRepository):
             current_batch_id=data["current_batch_id"],
             current_batch_started_at=data["current_batch_started_at"],
             tasks_version=data["tasks_version"],
+            estimation_mode=data["estimation_mode"],
         )
         return state

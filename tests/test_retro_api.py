@@ -210,6 +210,14 @@ def test_full_retro_flow(client):
     })
     assert wrong.status_code == 409
 
+    blocked_voting = client.post(f"/api/v1/cms/retros/{retro_id}/phase", json={"target": "voting"})
+    assert blocked_voting.status_code == 409
+
+    # Manager opens the remaining section; voting unlocks after every block was opened.
+    opened_second = client.post(f"/api/v1/cms/retros/{retro_id}/open-section", json={"section_id": "process"})
+    assert opened_second.status_code == 200
+    assert opened_second.json()["visited_section_ids"] == ["sprint", "process"]
+
     # Manager moves to voting.
     voting = client.post(f"/api/v1/cms/retros/{retro_id}/phase", json={"target": "voting"})
     assert voting.status_code == 200

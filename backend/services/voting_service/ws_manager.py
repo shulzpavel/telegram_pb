@@ -61,13 +61,25 @@ async def redis_pubsub_listener(redis_source: Any, token: str, channel: str, web
     owns_client = False
     try:
         if isinstance(redis_source, str):
-            client = await redis.from_url(redis_source, decode_responses=True)
+            client = await redis.from_url(
+                redis_source,
+                decode_responses=True,
+                socket_timeout=None,
+                health_check_interval=30,
+            )
             owns_client = True
         else:
             client = redis_source
         pubsub = client.pubsub()
         await pubsub.subscribe(channel)
-        async for message in pubsub.listen():
+        while True:
+            try:
+                message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=30.0)
+            except redis.TimeoutError:
+                logger.debug("Redis pubsub timeout token=%s channel=%s; continuing", token, channel)
+                continue
+            if message is None:
+                continue
             if message["type"] == "message":
                 try:
                     await websocket.send_text(message["data"])

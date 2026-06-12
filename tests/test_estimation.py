@@ -77,6 +77,15 @@ class TestEstimationPolicy:
         assert task.votes == {}
         assert task.track_votes == {}
 
+    def test_clear_task_votes_drops_stale_track_votes_in_sp_mode(self):
+        # Mode switched split -> sp between rounds: stale track votes must go.
+        task = Task(summary="Reset")
+        task.votes[1] = "5"
+        task.track_votes = {"dev": {1: "5"}}
+        clear_task_votes(task, "sp")
+        assert task.votes == {}
+        assert task.track_votes == {}
+
     def test_normalise_invalid_mode(self):
         assert normalise_estimation_mode("unknown") == DEFAULT_ESTIMATION_MODE
 

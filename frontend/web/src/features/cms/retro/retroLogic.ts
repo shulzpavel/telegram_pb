@@ -67,6 +67,7 @@ export interface RetroLiveState {
   phase: RetroPhase;
   active_section_id: string | null;
   section_deadline: string | null;
+  visited_section_ids: string[];
   votes_per_person: number;
   default_section_seconds: number;
   sections: RetroSectionDef[];
@@ -145,6 +146,7 @@ export function createMockRetroLiveState(overrides: Partial<RetroLiveState> = {}
     phase: "collecting",
     active_section_id: DEFAULT_RETRO_SECTIONS[0].section_id,
     section_deadline: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
+    visited_section_ids: [DEFAULT_RETRO_SECTIONS[0].section_id],
     votes_per_person: 5,
     default_section_seconds: 300,
     sections: DEFAULT_RETRO_SECTIONS,
@@ -218,6 +220,19 @@ export function nextSectionId(sections: RetroSectionDef[], activeId: string | nu
   const index = sections.findIndex((s) => s.section_id === activeId);
   if (index < 0 || index + 1 >= sections.length) return null;
   return sections[index + 1].section_id;
+}
+
+export function allRetroSectionsOpened(state: Pick<RetroLiveState, "sections" | "visited_section_ids">): boolean {
+  if (state.sections.length === 0) return false;
+  const visited = new Set(state.visited_section_ids ?? []);
+  return state.sections.every((section) => visited.has(section.section_id));
+}
+
+export function nextUnopenedSection(
+  state: Pick<RetroLiveState, "sections" | "visited_section_ids">,
+): RetroSectionDef | null {
+  const visited = new Set(state.visited_section_ids ?? []);
+  return state.sections.find((section) => !visited.has(section.section_id)) ?? null;
 }
 
 /** Whether a participant may type into the given section right now. */

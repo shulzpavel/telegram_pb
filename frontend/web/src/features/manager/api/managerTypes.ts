@@ -13,6 +13,14 @@ export interface NamedVote {
   value: string;
   track?: string;
   track_label?: string;
+  role?: string | null;
+}
+
+export interface ReportParticipant {
+  name: string;
+  role?: string | null;
+  track?: string | null;
+  track_label?: string | null;
 }
 
 export interface AiTaskSummary {
@@ -113,12 +121,18 @@ export interface SessionSummary {
   /** Cursor for paginated tasks. Present when `tasks_limit` was requested. */
   completed_next_cursor?: string | null;
   participants: string[];
+  participants_detailed?: ReportParticipant[];
+  estimation_mode?: EstimationMode;
+  estimation_mode_label?: string;
+  estimation_mode_description?: string;
+  estimation_tracks?: EstimationTrackInfo[];
   stats: {
     total_completed: number;
     with_estimate: number;
     consensus_count: number;
     votes_cast: number;
     total_story_points: number;
+    total_story_points_by_track?: Record<string, number>;
   };
 }
 

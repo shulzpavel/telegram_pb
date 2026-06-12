@@ -52,6 +52,29 @@ async def test_web_vote_persists_when_voter_is_eligible():
 
 
 @pytest.mark.asyncio
+async def test_web_vote_rejects_story_points_above_21():
+    repo, path = _temp_repo("test_web_vote_max_21")
+    try:
+        session = Session(chat_id=1, topic_id=None)
+        session.participants[-42] = Participant(
+            user_id=-42, name="Alice", role=UserRole.PARTICIPANT
+        )
+        session.tasks_queue.append(Task(jira_key="BB-1", summary="Login"))
+        session.current_batch_started_at = "2025-01-01T10:00:00"
+        await repo.save_session(session)
+
+        use_case = WebVoteUseCase(repo)
+        with pytest.raises(WebVoteError) as info:
+            await use_case.execute(1, None, user_id=-42, vote_value="34")
+
+        assert info.value.status_code == 400
+        assert "21 SP" in str(info.value)
+    finally:
+        if path.exists():
+            path.unlink()
+
+
+@pytest.mark.asyncio
 async def test_web_vote_rejects_when_no_active_task_with_400():
     repo, path = _temp_repo("test_web_vote_no_task")
     try:

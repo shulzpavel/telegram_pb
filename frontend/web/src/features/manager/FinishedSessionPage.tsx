@@ -37,7 +37,37 @@ function normalizeSummaryStats(stats: SessionSummary["stats"] | null | undefined
     consensus_count: toSafeNumber(stats?.consensus_count),
     votes_cast: toSafeNumber(stats?.votes_cast),
     total_story_points: toSafeNumber(stats?.total_story_points),
+    total_story_points_by_track: stats?.total_story_points_by_track ?? {},
   };
+}
+
+function formatTrackTotals(totals?: Record<string, number>): string {
+  const entries = Object.entries(totals ?? {});
+  if (entries.length === 0) return "—";
+  return entries.map(([track, value]) => `${track}: ${value}`).join(", ");
+}
+
+function groupVotesByTrack(votes: CompletedTask["votes"]): Array<[string, CompletedTask["votes"]]> {
+  const groups = new Map<string, CompletedTask["votes"]>();
+  for (const vote of votes) {
+    const label = vote.track_label ?? "Общая оценка";
+    groups.set(label, [...(groups.get(label) ?? []), vote]);
+  }
+  return Array.from(groups.entries());
+}
+
+function voteDistribution(votes: CompletedTask["votes"]): Array<[string, number]> {
+  const counts = new Map<string, number>();
+  for (const vote of votes) counts.set(vote.value, (counts.get(vote.value) ?? 0) + 1);
+  return Array.from(counts.entries()).sort((a, b) => b[1] - a[1]);
+}
+
+function finalValueForVoteGroup(entry: CompletedTask, votes: CompletedTask["votes"]): number | null {
+  const track = votes.find((vote) => vote.track)?.track;
+  if (track && entry.story_points_by_track && entry.story_points_by_track[track] !== undefined) {
+    return entry.story_points_by_track[track];
+  }
+  return entry.story_points;
 }
 
 function useFinishedThemeSync(principal: CmsPrincipal | null): void {
@@ -525,14 +555,31 @@ function FinishedSummaryBody({
           <StatCard label="Consensus" value={`${stats.consensus_count} / ${stats.total_completed}`} />
           <StatCard label="Голосов отдано" value={stats.votes_cast.toString()} />
         </div>
+        {summary.stats.total_story_points_by_track && Object.keys(summary.stats.total_story_points_by_track).length > 0 ? (
+          <div className="mt-4 rounded-lg border border-blue/25 bg-blue/5 px-4 py-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-ink3">Split SP по трекам</p>
+            <p className="mt-1 text-sm font-semibold text-ink2">{formatTrackTotals(summary.stats.total_story_points_by_track)}</p>
+          </div>
+        ) : null}
         <div className="mt-5 grid gap-3 text-sm text-ink3 sm:grid-cols-3">
           <MetaRow label="Старт">{formatDateTime(summary.started_at)}</MetaRow>
           <MetaRow label="Завершение">{formatDateTime(summary.finished_at)}</MetaRow>
           <MetaRow label="Длительность">{duration ?? "—"}</MetaRow>
+          <MetaRow label="Метод оценки">{summary.estimation_mode_label ?? "SP"}</MetaRow>
         </div>
         <div className="mt-3 text-sm text-ink3">
           <span className="font-semibold text-ink2">Участники:</span>{" "}
-          {summary.participants.length === 0 ? <span>—</span> : summary.participants.join(", ")}
+          {summary.participants_detailed && summary.participants_detailed.length > 0 ? (
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {summary.participants_detailed.map((participant) => (
+                <span key={participant.name} className="rounded-md border border-line bg-surface px-2 py-1 text-xs font-semibold text-ink2">
+                  {participant.name}
+                  {participant.role ? <span className="text-ink4"> · {participant.role}</span> : null}
+                  {participant.track_label ? <span className="text-blue"> · {participant.track_label}</span> : null}
+                </span>
+              ))}
+            </div>
+          ) : summary.participants.length === 0 ? <span>—</span> : summary.participants.join(", ")}
         </div>
       </Surface>
 
@@ -575,7 +622,7 @@ function FinishedSummaryBody({
                   <th className="px-4 py-3">Summary</th>
                   <th className="px-4 py-3 text-center">SP</th>
                   <th className="px-4 py-3 text-center">Голоса</th>
-                  <th className="px-4 py-3">Распределение</th>
+                  <th className="px-4 py-3">Результаты</th>
                   <th className="px-4 py-3">Consensus</th>
                 </tr>
               </thead>
@@ -666,6 +713,63 @@ function MetaRow({ label, children }: { label: string; children: React.ReactNode
   );
 }
 
+function TaskResultBreakdown({ entry, compact = false }: { entry: CompletedTask; compact?: boolean }) {
+  const groups = groupVotesByTrack(entry.votes);
+
+  if (groups.length === 0) {
+    return <span className="text-xs text-ink4">Голосов нет</span>;
+  }
+
+  return (
+    <div className={compact ? "space-y-2" : "min-w-[260px] space-y-2"}>
+      {groups.map(([trackLabel, votes]) => {
+        const distribution = voteDistribution(votes);
+        const max = distribution.reduce((acc, [, count]) => Math.max(acc, count), 1);
+        const finalValue = finalValueForVoteGroup(entry, votes);
+
+        return (
+          <section key={trackLabel} className="rounded-lg border border-line bg-surface p-2.5">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-wide text-ink3">{trackLabel}</p>
+                <p className="mt-0.5 text-xs font-semibold text-ink2">
+                  {votes.length} голос{votes.length === 1 ? "" : "ов"}
+                </p>
+              </div>
+              <span className="rounded-md bg-emerald-100 px-2 py-0.5 text-xs font-bold text-emerald-700">
+                {finalValue !== null ? `${finalValue} SP` : "— SP"}
+              </span>
+            </div>
+
+            <div className="mt-2 space-y-1">
+              {distribution.map(([value, count]) => (
+                <div key={value} className="flex items-center gap-2">
+                  <span className="w-7 text-right text-[11px] font-bold tabular-nums text-ink2">{value}</span>
+                  <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-line">
+                    <div className="h-full rounded-full bg-blue/70" style={{ width: `${(count / max) * 100}%` }} />
+                  </div>
+                  <span className="w-7 text-right text-[11px] font-semibold tabular-nums text-ink3">×{count}</span>
+                </div>
+              ))}
+            </div>
+
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {votes.map((vote, idx) => (
+                <span key={`${vote.name}-${idx}`} className="rounded-md border border-line bg-canvas px-2 py-0.5 text-[11px] font-semibold text-ink2">
+                  {vote.name}
+                  {vote.role ? <span className="text-ink4"> · {vote.role}</span> : null}
+                  {" → "}
+                  <span className="text-blue">{vote.value}</span>
+                </span>
+              ))}
+            </div>
+          </section>
+        );
+      })}
+    </div>
+  );
+}
+
 function TaskRow({
   index,
   entry,
@@ -677,9 +781,6 @@ function TaskRow({
   reopenBusy: string | null;
   onReopen: (taskId: string) => void;
 }) {
-  const distribution = Object.entries(entry.distribution).sort((a, b) => b[1] - a[1]);
-  const max = distribution.reduce((acc, [, count]) => Math.max(acc, count), 1);
-
   return (
     <tr className="align-top hover:bg-line2/40">
       <td className="px-4 py-3 text-xs font-semibold tabular-nums text-ink3">{index}</td>
@@ -697,7 +798,15 @@ function TaskRow({
       </td>
       <td className="px-4 py-3 text-center">
         <div className="flex flex-col items-center gap-2">
-          {entry.story_points !== null ? (
+          {entry.story_points_by_track && Object.keys(entry.story_points_by_track).length > 0 ? (
+            <div className="flex flex-col items-center gap-1">
+              {Object.entries(entry.story_points_by_track).map(([track, value]) => (
+                <span key={track} className="rounded-md bg-emerald-100 px-2 py-0.5 text-xs font-bold text-emerald-700">
+                  {track}: {value}
+                </span>
+              ))}
+            </div>
+          ) : entry.story_points !== null ? (
             <span className="rounded-md bg-emerald-100 px-2 py-0.5 text-sm font-bold tabular-nums text-emerald-700">{entry.story_points}</span>
           ) : (
             <span className="text-xs text-ink4">—</span>
@@ -715,33 +824,7 @@ function TaskRow({
       </td>
       <td className="px-4 py-3 text-center text-sm font-semibold tabular-nums text-ink2">{entry.voter_count}</td>
       <td className="px-4 py-3">
-        {distribution.length === 0 ? (
-          <span className="text-xs text-ink4">—</span>
-        ) : (
-          <div className="min-w-[160px] space-y-1">
-            {distribution.map(([value, count]) => (
-              <div key={value} className="flex items-center gap-2">
-                <span className="w-7 text-right text-[11px] font-bold tabular-nums text-ink2">{value}</span>
-                <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-line">
-                  <div className="h-full rounded-full bg-blue/70" style={{ width: `${(count / max) * 100}%` }} />
-                </div>
-                <span className="w-7 text-right text-[11px] font-semibold tabular-nums text-ink3">×{count}</span>
-              </div>
-            ))}
-          </div>
-        )}
-        {entry.votes.length > 0 ? (
-          <details className="mt-2 text-xs text-ink3">
-            <summary className="cursor-pointer select-none font-semibold text-ink2 hover:text-blue">По участникам</summary>
-            <div className="mt-2 flex flex-wrap gap-1.5">
-              {entry.votes.map((vote, idx) => (
-                <span key={`${vote.name}-${idx}`} className="rounded-md border border-line bg-surface px-2 py-0.5 text-[11px] font-semibold text-ink2">
-                  {vote.name} → <span className="text-blue">{vote.value}</span>
-                </span>
-              ))}
-            </div>
-          </details>
-        ) : null}
+        <TaskResultBreakdown entry={entry} />
       </td>
       <td className="px-4 py-3">
         {entry.consensus ? (
@@ -768,8 +851,6 @@ function TaskCard({
   reopenBusy: string | null;
   onReopen: (taskId: string) => void;
 }) {
-  const distribution = Object.entries(entry.distribution).sort((a, b) => b[1] - a[1]);
-  const max = distribution.reduce((acc, [, count]) => Math.max(acc, count), 1);
   return (
     <li className="rounded-xl border border-line bg-surface p-4 shadow-card">
       <div className="flex items-start justify-between gap-3">
@@ -787,7 +868,13 @@ function TaskCard({
           <p className="mt-1 break-words font-semibold text-ink">{entry.summary}</p>
         </div>
         <div className="flex shrink-0 flex-col items-end gap-1">
-          {entry.story_points !== null ? (
+          {entry.story_points_by_track && Object.keys(entry.story_points_by_track).length > 0 ? (
+            Object.entries(entry.story_points_by_track).map(([track, value]) => (
+              <span key={track} className="rounded-md bg-emerald-100 px-2 py-0.5 text-xs font-bold text-emerald-700">
+                {track}: {value}
+              </span>
+            ))
+          ) : entry.story_points !== null ? (
             <span className="rounded-md bg-emerald-100 px-2 py-0.5 text-sm font-bold tabular-nums text-emerald-700">
               {entry.story_points} SP
             </span>
@@ -810,34 +897,10 @@ function TaskCard({
       <p className="mt-3 text-xs text-ink3">
         Голосов: <span className="font-semibold tabular-nums text-ink2">{entry.voter_count}</span>
       </p>
-      {distribution.length > 0 ? (
-        <div className="mt-2 space-y-1">
-          {distribution.map(([value, count]) => (
-            <div key={value} className="flex items-center gap-2">
-              <span className="w-7 text-right text-[11px] font-bold tabular-nums text-ink2">{value}</span>
-              <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-line">
-                <div className="h-full rounded-full bg-blue/70" style={{ width: `${(count / max) * 100}%` }} />
-              </div>
-              <span className="w-7 text-right text-[11px] font-semibold tabular-nums text-ink3">×{count}</span>
-            </div>
-          ))}
-        </div>
-      ) : null}
-      {entry.votes.length > 0 ? (
-        <details className="mt-3 text-xs text-ink3">
-          <summary className="cursor-pointer select-none font-semibold text-ink2 hover:text-blue">По участникам</summary>
-          <div className="mt-2 flex flex-wrap gap-1.5">
-            {entry.votes.map((vote, idx) => (
-              <span
-                key={`${vote.name}-${idx}`}
-                className="break-words rounded-md border border-line bg-canvas px-2 py-0.5 text-[11px] font-semibold text-ink2"
-              >
-                {vote.name} → <span className="text-blue">{vote.value}</span>
-              </span>
-            ))}
-          </div>
-        </details>
-      ) : null}
+      <div className="mt-3">
+        <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink3">Результаты</p>
+        <TaskResultBreakdown entry={entry} compact />
+      </div>
     </li>
   );
 }

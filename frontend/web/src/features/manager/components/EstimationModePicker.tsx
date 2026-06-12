@@ -22,7 +22,7 @@ export default function EstimationModePicker({
 
   return (
     <div className="space-y-3">
-      <div className="grid gap-2 md:grid-cols-3">
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,12rem),1fr))] gap-2">
         {ESTIMATION_MODE_OPTIONS.map((option) => {
           const active = option.mode === value;
           return (
@@ -32,14 +32,14 @@ export default function EstimationModePicker({
               disabled={disabled}
               onClick={() => onChange(option.mode)}
               className={[
-                "rounded-lg border p-3 text-left transition-colors",
+                "min-h-16 rounded-lg border p-3 text-left transition-colors",
                 active ? "border-blue bg-blue/10" : "border-line bg-surface hover:border-blue/40",
                 disabled ? "cursor-not-allowed opacity-60" : "",
               ].join(" ")}
             >
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-sm font-semibold text-ink">{option.label}</span>
-                {active ? <Badge tone="info">Выбрано</Badge> : null}
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <span className="min-w-0 text-sm font-semibold leading-snug text-ink">{option.label}</span>
+                {active ? <Badge tone="info" className="shrink-0">Выбрано</Badge> : null}
               </div>
               {!compact ? (
                 <p className="mt-1 text-xs leading-relaxed text-ink3">{option.description}</p>

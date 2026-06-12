@@ -16,6 +16,8 @@ if TYPE_CHECKING:
 
 DEFAULT_ESTIMATION_MODE = "sp"
 VALID_ESTIMATION_MODES = frozenset({"sp", "sp_dev_test", "sp_split"})
+MAX_STORY_POINTS = 21
+SPECIAL_VOTE_VALUES = frozenset({"?", "skip", "needs_review"})
 
 # Participant team roles (web join) -> estimation track per mode.
 ROLE_TO_TRACK: dict[str, dict[str, str]] = {
@@ -105,6 +107,16 @@ def resolve_track_for_participant(session: Session, user_id: int) -> Optional[st
     return resolve_track(session.estimation_mode, team_role)
 
 
+def is_valid_vote_value(value: str) -> bool:
+    if value in SPECIAL_VOTE_VALUES:
+        return True
+    try:
+        numeric = int(value)
+    except (TypeError, ValueError):
+        return False
+    return 0 <= numeric <= MAX_STORY_POINTS
+
+
 def cast_vote_value(task: Task, mode: Optional[str], user_id: int, track: Optional[str], value: str) -> None:
     """Persist a vote for the active mode."""
     if normalise_estimation_mode(mode) == DEFAULT_ESTIMATION_MODE:
@@ -143,10 +155,15 @@ def get_participant_vote_value(session: Session, task: Task, user_id: int) -> Op
     return task.track_votes.get(track, {}).get(user_id)
 
 
-def clear_task_votes(task: Task, mode: Optional[str]) -> None:
+def clear_task_votes(task: Task, mode: Optional[str] = None) -> None:
+    """Reset all recorded votes on a task.
+
+    ``track_votes`` is cleared regardless of the current mode so that
+    switching the estimation mode between rounds never leaves stale
+    per-track votes behind. ``mode`` is kept for call-site compatibility.
+    """
     task.votes.clear()
-    if is_split_mode(mode):
-        task.track_votes.clear()
+    task.track_votes.clear()
 
 
 def build_track_results(session: Session, task: Task) -> Optional[dict[str, list[dict[str, str]]]]:

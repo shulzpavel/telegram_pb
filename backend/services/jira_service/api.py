@@ -85,6 +85,21 @@ class UpdateSPResponse(BaseModel):
     story_points: int
 
 
+class UpdateSPFieldsRequest(BaseModel):
+    """Request model for updating multiple SP fields."""
+
+    issue_key: str
+    fields: Dict[str, int] = Field(default_factory=dict)
+
+
+class UpdateSPFieldsResponse(BaseModel):
+    """Response model for updating multiple SP fields."""
+
+    success: bool
+    issue_key: str
+    results: Dict[str, bool]
+
+
 DEMO_ISSUES: list[dict] = [
     {
         "key": "DEMO-101",
@@ -257,6 +272,24 @@ async def update_story_points(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to update story points: {str(e)}")
+
+
+@router.put("/issue/{issue_key}/story-points/fields", response_model=UpdateSPFieldsResponse)
+async def update_story_points_fields(
+    issue_key: str,
+    body: UpdateSPFieldsRequest,
+    client: JiraServiceClient = Depends(get_jira_client),
+) -> UpdateSPFieldsResponse:
+    """Update concrete Jira SP custom fields with partial success."""
+    try:
+        results = await client.update_story_points_fields(issue_key, body.fields)
+        return UpdateSPFieldsResponse(
+            success=bool(results) and all(results.values()),
+            issue_key=issue_key,
+            results=results,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to update story point fields: {str(e)}")
 
 
 @router.post("/parse", response_model=SearchResponse)

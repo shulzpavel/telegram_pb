@@ -23,6 +23,11 @@ JIRA_URL = os.getenv("JIRA_URL", "https://your-domain.atlassian.net")
 JIRA_USERNAME = os.getenv("JIRA_USERNAME", "your-email@domain.com")
 JIRA_API_TOKEN = os.getenv("JIRA_API_TOKEN", "YOUR_JIRA_API_TOKEN_HERE")
 STORY_POINTS_FIELD = os.getenv("STORY_POINTS_FIELD", "customfield_10022")
+JIRA_SP_DEV_FIELD = os.getenv("JIRA_SP_DEV_FIELD", "").strip()
+JIRA_SP_TEST_FIELD = os.getenv("JIRA_SP_TEST_FIELD", "").strip()
+JIRA_SP_FRONT_FIELD = os.getenv("JIRA_SP_FRONT_FIELD", "").strip()
+JIRA_SP_BACK_FIELD = os.getenv("JIRA_SP_BACK_FIELD", "").strip()
+JIRA_SP_QA_FIELD = os.getenv("JIRA_SP_QA_FIELD", "").strip()
 
 # Web UI base URL (e.g. https://poker.example.com); leave empty to disable web links
 WEB_UI_URL = os.getenv("WEB_UI_URL", "")

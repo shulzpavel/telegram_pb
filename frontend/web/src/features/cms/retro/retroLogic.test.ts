@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
+  allRetroSectionsOpened,
   canAddToSection,
   cardsBySection,
   formatCountdown,
   isCountdownExpired,
   mergeRetroState,
   nextSectionId,
+  nextUnopenedSection,
   phaseLabel,
   type RetroLiveState,
 } from "./retroLogic";
@@ -17,6 +19,7 @@ function makeState(overrides: Partial<RetroLiveState> = {}): RetroLiveState {
     phase: "collecting",
     active_section_id: "a",
     section_deadline: null,
+    visited_section_ids: ["a"],
     votes_per_person: 5,
     default_section_seconds: 300,
     sections: [
@@ -72,6 +75,18 @@ describe("nextSectionId", () => {
   });
   it("returns null for an empty list", () => {
     expect(nextSectionId([], "a")).toBeNull();
+  });
+});
+
+describe("retro section progress", () => {
+  it("detects whether every section was opened", () => {
+    expect(allRetroSectionsOpened(makeState({ visited_section_ids: ["a", "b"] }))).toBe(false);
+    expect(allRetroSectionsOpened(makeState({ visited_section_ids: ["a", "b", "c"] }))).toBe(true);
+  });
+
+  it("returns the next unopened section", () => {
+    expect(nextUnopenedSection(makeState({ visited_section_ids: ["a"] }))?.section_id).toBe("b");
+    expect(nextUnopenedSection(makeState({ visited_section_ids: ["a", "b", "c"] }))).toBeNull();
   });
 });
 

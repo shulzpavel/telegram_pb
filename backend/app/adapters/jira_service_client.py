@@ -3,7 +3,7 @@
 import asyncio
 import logging
 import os
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Mapping, Optional
 
 import aiohttp
 
@@ -120,6 +120,19 @@ class JiraServiceHttpClient(JiraClient):
                 await asyncio.sleep(0.2 * attempt)
 
         raise RuntimeError(f"Jira Service unavailable: {last_error}") from last_error
+
+    async def update_story_points_fields(self, issue_key: str, fields: Mapping[str, int]) -> Dict[str, bool]:
+        """Update multiple SP fields via Jira Service with partial success."""
+        url = f"{self.base_url}/api/v1/issue/{issue_key}/story-points/fields"
+        session = await self._get_session()
+        async with session.put(url, json={"issue_key": issue_key, "fields": dict(fields)}) as resp:
+            if resp.status != 200:
+                return {field_id: False for field_id in fields}
+            data = await resp.json()
+        results = data.get("results") if isinstance(data, dict) else None
+        if not isinstance(results, dict):
+            return {field_id: False for field_id in fields}
+        return {str(field_id): bool(ok) for field_id, ok in results.items()}
 
     async def parse_jira_request(self, text: str, max_results: int = 500) -> Optional[List[Dict[str, Any]]]:
         """Parse Jira request via Jira Service."""

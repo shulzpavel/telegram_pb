@@ -5,7 +5,7 @@ import html
 import logging
 import os
 import re
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Mapping, Optional
 from urllib.parse import parse_qs, quote, urljoin, urlparse
 
 import aiohttp
@@ -292,6 +292,17 @@ class JiraHttpClient(JiraClient):
         payload = {"fields": {self.story_points_field: story_points}}
         result = await self._make_request("PUT", f"issue/{issue_key}", payload, api_versions=["3", "2"])
         return result is not None
+
+    async def update_story_points_fields(self, issue_key: str, fields: Mapping[str, int]) -> Dict[str, bool]:
+        """Update arbitrary numeric Jira fields one by one for partial success."""
+        results: Dict[str, bool] = {}
+        for field_id, value in fields.items():
+            if not field_id:
+                continue
+            payload = {"fields": {field_id: value}}
+            result = await self._make_request("PUT", f"issue/{issue_key}", payload, api_versions=["3", "2"])
+            results[field_id] = result is not None
+        return results
 
     async def parse_jira_request(self, text: str, max_results: int = 500) -> Optional[List[Dict[str, Any]]]:
         """Return list of tasks by JQL."""

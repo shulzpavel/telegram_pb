@@ -57,7 +57,7 @@ function useIsMobileViewport(): boolean {
 }
 
 const STORAGE_KEY = "pp_manager_session";
-const ESTIMATE_VALUES = [1, 2, 3, 5, 8, 13, 21, 34];
+const ESTIMATE_VALUES = [1, 2, 3, 5, 8, 13, 21];
 
 function canManage(principal: CmsPrincipal | null): boolean {
   return Boolean(principal?.is_superuser || principal?.permissions.includes("app.sessions.manage"));
@@ -1534,6 +1534,15 @@ function ControlRoom({
             titleClassName="text-xl md:text-3xl"
             linkClassName="md:text-base"
           />
+          {task?.story_points_by_track ? (
+            <div className="mt-3 flex flex-wrap gap-2">
+              {Object.entries(task.story_points_by_track).map(([track, value]) => (
+                <Badge key={track} tone="success">
+                  {(estimationTracks.find((item) => item.key === track)?.label ?? track)}: {value} SP
+                </Badge>
+              ))}
+            </div>
+          ) : null}
           <p className="mt-2 text-sm text-ink3">{meta.description}</p>
         </div>
         <div className="rounded-lg border border-line bg-line2 px-4 py-3 text-right">
@@ -1643,6 +1652,10 @@ function ControlRoom({
       {showFinalEstimate ? (
         splitMode ? (
           <FinalEstimateTracksBlock
+            // Key by task so per-track selections never leak from the
+            // previous task into the next one (the block stays mounted
+            // across task transitions while phase is voting/results).
+            key={task?.task_id ?? "no-task"}
             tracks={estimationTracks.length > 0 ? estimationTracks : modeOption.tracks}
             currentByTrack={task?.story_points_by_track ?? null}
             busy={busy}
@@ -1748,75 +1761,114 @@ function LiveVotesPanel({
   // boolean voted flag.
   const voteByName = new Map<string, string>();
   for (const vote of liveVotes) voteByName.set(vote.name, vote.value);
+  const grouped = useMemo(() => {
+    const groups = new Map<string, typeof participants>();
+    for (const participant of participants) {
+      const label = participant.track_label ?? "Общая оценка";
+      groups.set(label, [...(groups.get(label) ?? []), participant]);
+    }
+    return Array.from(groups.entries());
+  }, [participants]);
 
   return (
     <div className="rounded-lg border border-line bg-line2 p-4">
       <p className="text-xs font-semibold uppercase tracking-wide text-ink3">Голоса (видны только вам)</p>
-      <div className="mt-3 grid gap-2 md:grid-cols-2">
+      <div className="mt-3 space-y-3">
         {participants.length === 0 ? (
           <p className="text-sm text-ink3">Пока никого не подключилось — отправьте ссылку команде.</p>
-        ) : participants.map((participant, idx) => {
-          const value = voteByName.get(participant.name);
-          const voted = Boolean(value);
-          return (
-            <div
-              key={`${participant.name}-${idx}`}
-              className={cn(
-                "grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-3 rounded-lg border bg-surface px-3 py-2.5",
-                voted ? "border-blue/30" : "border-line",
-              )}
-            >
-              <span className="min-w-0 whitespace-normal break-all text-sm font-semibold leading-5 text-ink">
-                {participant.name}
+        ) : grouped.map(([groupLabel, groupParticipants]) => (
+          <div key={groupLabel} className="rounded-lg border border-line bg-surface/70 p-3">
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <p className="text-xs font-bold uppercase tracking-wide text-ink3">{groupLabel}</p>
+              <span className="text-xs tabular-nums text-ink3">
+                {groupParticipants.filter((participant) => participant.voted).length}/{groupParticipants.length}
               </span>
-              {voted ? (
-                <span className="rounded-md bg-blue px-2 py-0.5 text-sm font-bold tabular-nums text-white">{value}</span>
-              ) : (
-                <span className="pt-0.5 text-xs font-semibold text-ink3">ждёт…</span>
-              )}
             </div>
-          );
-        })}
+            <div className="grid gap-2 md:grid-cols-2">
+              {groupParticipants.map((participant, idx) => {
+                const value = voteByName.get(participant.name);
+                const voted = Boolean(value);
+                const roleLabel = participant.role ? participant.role.toUpperCase() : null;
+                return (
+                  <div
+                    key={`${participant.name}-${idx}`}
+                    className={cn(
+                      "grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-3 rounded-lg border bg-surface px-3 py-2.5",
+                      voted ? "border-blue/30" : "border-line",
+                    )}
+                  >
+                    <span className="min-w-0 text-sm font-semibold leading-5 text-ink">
+                      <span className="block min-w-0 break-words">{participant.name}</span>
+                      {roleLabel ? (
+                        <span className="mt-1 block max-w-full whitespace-normal break-words text-[10px] font-bold uppercase leading-4 tracking-wide text-ink4">
+                          {roleLabel}
+                        </span>
+                      ) : null}
+                    </span>
+                    {voted ? (
+                      <span className="rounded-md bg-blue px-2 py-0.5 text-sm font-bold tabular-nums text-white">{value}</span>
+                    ) : (
+                      <span className="pt-0.5 text-xs font-semibold text-ink3">ждёт…</span>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   );
 }
 
 function ResultsPanel({ revealedVotes }: { revealedVotes: NamedVote[] }) {
-  const distribution = useMemo(() => {
-    const counts: Record<string, number> = {};
-    for (const vote of revealedVotes) counts[vote.value] = (counts[vote.value] ?? 0) + 1;
-    return Object.entries(counts).sort((a, b) => b[1] - a[1]);
+  const grouped = useMemo(() => {
+    const groups = new Map<string, NamedVote[]>();
+    for (const vote of revealedVotes) {
+      const label = vote.track_label ?? "Общая оценка";
+      groups.set(label, [...(groups.get(label) ?? []), vote]);
+    }
+    return Array.from(groups.entries());
   }, [revealedVotes]);
-  const max = distribution.reduce((acc, [, count]) => Math.max(acc, count), 1);
 
   return (
     <div className="rounded-lg border border-line bg-line2 p-4">
       <p className="text-xs font-semibold uppercase tracking-wide text-ink3">Распределение голосов</p>
-      {distribution.length === 0 ? (
+      {grouped.length === 0 ? (
         <p className="mt-2 text-sm text-ink3">Никто не проголосовал.</p>
       ) : (
-        <div className="mt-3 space-y-2">
-          {distribution.map(([value, count]) => (
-            <div key={value} className="flex items-center gap-3">
-              <span className="w-10 shrink-0 rounded-md bg-blue px-2 py-1 text-center text-sm font-bold tabular-nums text-white">{value}</span>
-              <div className="h-2 flex-1 overflow-hidden rounded-full bg-line">
-                <div className="h-full rounded-full bg-blue" style={{ width: `${(count / max) * 100}%` }} />
+        <div className="mt-3 space-y-4">
+          {grouped.map(([groupLabel, votes]) => {
+            const counts: Record<string, number> = {};
+            for (const vote of votes) counts[vote.value] = (counts[vote.value] ?? 0) + 1;
+            const distribution = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+            const max = distribution.reduce((acc, [, count]) => Math.max(acc, count), 1);
+          return (
+            <div key={groupLabel} className="rounded-lg border border-line bg-surface/70 p-3">
+              <p className="text-xs font-bold uppercase tracking-wide text-ink3">{groupLabel}</p>
+              <div className="mt-3 space-y-2">
+                {distribution.map(([value, count]) => (
+                  <div key={`${groupLabel}-${value}`} className="flex items-center gap-3">
+                    <span className="w-10 shrink-0 rounded-md bg-blue px-2 py-1 text-center text-sm font-bold tabular-nums text-white">{value}</span>
+                    <div className="h-2 flex-1 overflow-hidden rounded-full bg-line">
+                      <div className="h-full rounded-full bg-blue" style={{ width: `${(count / max) * 100}%` }} />
+                    </div>
+                    <span className="w-12 shrink-0 text-right text-sm font-semibold tabular-nums text-ink2">×{count}</span>
+                  </div>
+                ))}
               </div>
-              <span className="w-12 shrink-0 text-right text-sm font-semibold tabular-nums text-ink2">×{count}</span>
+              <div className="mt-3 flex flex-wrap gap-1.5">
+                {votes.map((vote, idx) => (
+                  <span key={`${vote.name}-${idx}`} className="rounded-md border border-line bg-surface px-2 py-1 text-xs font-semibold text-ink2">
+                    {vote.name} → <span className="text-blue">{vote.value}</span>
+                  </span>
+                ))}
+              </div>
             </div>
-          ))}
+          );
+          })}
         </div>
       )}
-      {revealedVotes.length > 0 ? (
-        <div className="mt-4 flex flex-wrap gap-1.5">
-          {revealedVotes.map((vote, idx) => (
-            <span key={`${vote.name}-${idx}`} className="rounded-md border border-line bg-surface px-2 py-1 text-xs font-semibold text-ink2">
-              {vote.name} → <span className="text-blue">{vote.value}</span>
-            </span>
-          ))}
-        </div>
-      ) : null}
     </div>
   );
 }
@@ -1842,9 +1894,9 @@ function FinalEstimateTracksBlock({
   const [values, setValues] = useState<Record<string, number>>({});
 
   useEffect(() => {
-    if (currentByTrack) {
-      setValues(currentByTrack);
-    }
+    // Sync from the server snapshot; reset when the task has no saved
+    // tracks so stale selections never survive a task change.
+    setValues(currentByTrack ?? {});
   }, [currentByTrack]);
 
   const complete = tracks.every((track) => values[track.key] != null);
@@ -1963,12 +2015,23 @@ function HistoryCard({
     <div className="flex w-64 shrink-0 flex-col rounded-lg border border-line bg-surface p-3">
       <div className="flex items-center justify-between gap-2">
         {entry.jira_key ? <Badge tone="info">{entry.jira_key}</Badge> : <Badge>Manual</Badge>}
-        {entry.story_points !== null ? (
+        {entry.story_points_by_track ? (
+          <span className="text-[11px] font-semibold uppercase text-ink4">split SP</span>
+        ) : entry.story_points !== null ? (
           <span className="rounded-md bg-emerald-100 px-2 py-0.5 text-xs font-bold tabular-nums text-emerald-700">{entry.story_points} SP</span>
         ) : (
           <span className="text-[11px] font-semibold uppercase text-ink4">no SP</span>
         )}
       </div>
+      {entry.story_points_by_track ? (
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {Object.entries(entry.story_points_by_track).map(([track, value]) => (
+            <span key={track} className="rounded-md bg-emerald-100 px-2 py-0.5 text-[11px] font-bold text-emerald-700">
+              {track}: {value}
+            </span>
+          ))}
+        </div>
+      ) : null}
       <Button
         size="sm"
         variant="secondary"

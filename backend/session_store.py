@@ -53,6 +53,7 @@ class SessionState:
     current_batch_id: Optional[str] = None
     current_batch_started_at: Optional[str] = None
     tasks_version: int = 0
+    estimation_mode: str = "sp"
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -62,6 +63,7 @@ class SessionState:
                 str(user_id): {
                     "name": data["name"],
                     "role": data["role"].value if hasattr(data["role"], "value") else data["role"],
+                    **({"team_role": data.get("team_role")} if data.get("team_role") else {}),
                 }
                 for user_id, data in self.participants.items()
             },
@@ -76,6 +78,7 @@ class SessionState:
             "current_batch_id": self.current_batch_id,
             "current_batch_started_at": self.current_batch_started_at,
             "tasks_version": self.tasks_version,
+            "estimation_mode": self.estimation_mode,
         }
 
     @classmethod
@@ -91,6 +94,7 @@ class SessionState:
                 participants[user_id] = {
                     "name": data.get("name", "Unknown"),
                     "role": UserRole(data.get("role", UserRole.PARTICIPANT.value)),
+                    "team_role": data.get("team_role"),
                 }
             except (ValueError, KeyError):
                 continue
@@ -117,6 +121,7 @@ class SessionState:
             current_batch_id=payload.get("current_batch_id"),
             current_batch_started_at=payload.get("current_batch_started_at"),
             tasks_version=int(payload.get("tasks_version", 0)),
+            estimation_mode=str(payload.get("estimation_mode") or "sp"),
         )
 
     def ensure_task_votes_initialized(self) -> None:

@@ -238,6 +238,7 @@ def _anonymized_retro_snapshot(retro: Retrospective) -> dict:
         "phase": retro.phase,
         "active_section_id": retro.active_section_id,
         "section_deadline": retro.section_deadline,
+        "visited_section_ids": list(retro.visited_section_ids),
         "participants_count": len(retro.participants),
         "cards": [
             {
@@ -321,6 +322,7 @@ def _retro_from_anonymized_snapshot(data: dict, retro_id: int) -> Retrospective:
         phase=str(data.get("phase", PHASE_DONE)),
         active_section_id=data.get("active_section_id"),
         section_deadline=data.get("section_deadline"),
+        visited_section_ids=[str(section_id) for section_id in data.get("visited_section_ids", [])],
         ai_summary=data.get("ai_summary"),
         version=int(data.get("version", 0)),
     )
@@ -411,6 +413,7 @@ def _build_retro_state(retro: Retrospective, viewer_id: Optional[int] = None) ->
         "phase": retro.phase,
         "active_section_id": retro.active_section_id,
         "section_deadline": retro.section_deadline,
+        "visited_section_ids": list(retro.visited_section_ids),
         "votes_per_person": retro.votes_per_person,
         "default_section_seconds": retro.default_section_seconds,
         "sections": [s.to_dict() for s in retro.sections],
@@ -630,7 +633,7 @@ async def retro_websocket(websocket: WebSocket, token: str) -> None:
         return
 
     channel = _retro_channel(retro_id)
-    listen_task = asyncio.create_task(redis_pubsub_listener(redis_client, token, channel, websocket))
+    listen_task = asyncio.create_task(redis_pubsub_listener(REDIS_URL, token, channel, websocket))
     try:
         while True:
             try:

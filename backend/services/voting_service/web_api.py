@@ -353,7 +353,6 @@ async def web_vote(body: WebVoteRequest, request: Request) -> dict:
 
     p_data_json = json.loads(p_data)
     user_id = p_data_json["user_id"]
-    team_role = p_data_json.get("role")
 
     use_case = WebVoteUseCase(request.app.state.repository)
     try:
@@ -367,49 +366,8 @@ async def web_vote(body: WebVoteRequest, request: Request) -> dict:
     except WebVoteError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
-    # Build and publish state update
-    task = session.current_task
-    voter_ids = {uid for uid in session.participants if session.can_vote(uid)}
-    voted_count = sum(1 for uid in voter_ids if participant_has_voted(session, task, uid))
-    total_voters = len(voter_ids)
-
     channel = _channel_name(chat_id, topic_id)
-
-    voter_name = session.participants[user_id].name if user_id in session.participants else "Unknown"
-
-    if voted_count >= total_voters and total_voters > 0:
-        # All voted — publish full results
-        results = build_flat_results(session, task)
-        payload = json.dumps({
-            "type": "results",
-            "votes": results,
-            "track_results": build_track_results(session, task),
-            "task": {
-                "task_id": task.task_id,
-                "text": task.text,
-                "jira_key": task.jira_key,
-                "story_points": task.story_points,
-                "story_points_by_track": dict(task.story_points_by_track) if task.story_points_by_track else None,
-                "ai_summary": task.ai_summary,
-                "description": task.description,
-                "description_adf": task.description_adf,
-                "description_html": task.description_html,
-                "index": session.current_task_index + 1,
-                "total": len(session.tasks_queue),
-            },
-            **estimation_mode_payload(session.estimation_mode),
-        })
-    else:
-        # Live-votes mode: broadcast the actual value too, not just "x voted".
-        # Was previously gated behind manager Reveal — see the Reveal removal
-        # cleanup in this commit.
-        payload = json.dumps({
-            "type": "vote_cast",
-            "voter_name": voter_name,
-            "voter_value": body.value,
-            "voted_count": voted_count,
-            "total_voters": total_voters,
-        })
+    payload = json.dumps({"type": "session_state", "state": _build_web_session_state(session)})
 
     # Best-effort: vote was already persisted; do not surface pub/sub errors.
     try:
@@ -455,7 +413,7 @@ async def websocket_endpoint(websocket: WebSocket, token: str) -> None:
 
     # Run pub/sub listener and a receive task concurrently; exit when either finishes
     listen_task = asyncio.create_task(
-        redis_pubsub_listener(redis_client, token, channel, websocket)
+        redis_pubsub_listener(REDIS_URL, token, channel, websocket)
     )
 
     try:
