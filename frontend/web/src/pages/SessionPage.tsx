@@ -71,6 +71,7 @@ function SessionInner({ token }: { token: string }) {
         <VotePage
           task={state.task}
           participants={state.participants}
+          estimation={state}
           onVote={vote}
           error={error}
           onLogoClick={requestLeaveSession}

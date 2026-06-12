@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional
 
+from app.domain.estimation import clear_task_votes
 from app.domain.session import Session
 from app.domain.task import Task
 from app.ports.session_repository import SessionRepository
@@ -121,11 +122,13 @@ def _reopen_completed_task(session: Session, task_id: str) -> Task:
 
     task = _find_completed_task_reference(session, task_id)
     preserved_sp = task.story_points
+    preserved_sp_by_track = dict(task.story_points_by_track)
     _remove_completed_task_from_buckets(session, task_id)
 
-    task.votes.clear()
+    clear_task_votes(task, session.estimation_mode)
     task.completed_at = None
     task.story_points = preserved_sp
+    task.story_points_by_track = preserved_sp_by_track
     task.touch()
 
     insert_at = max(0, min(session.current_task_index, len(session.tasks_queue)))

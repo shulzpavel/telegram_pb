@@ -30,6 +30,8 @@ import { ManagerBottomDock } from "./ManagerBottomDock";
 import { ManagerSessionChrome } from "./ManagerSessionChrome";
 import { managerApi } from "./api/managerClient";
 import type { CompletedTask, JiraPreview, ManagerSession, ManagerSessionRef, NamedVote, TaskItem, TaskMutation } from "./api/managerTypes";
+import EstimationModePicker, { DEFAULT_ESTIMATION_MODE } from "./components/EstimationModePicker";
+import { getEstimationModeOption, isSplitEstimationMode, type EstimationMode } from "../../shared/lib/estimationModes";
 
 const PHASE_META: Record<string, { label: string; tone: "info" | "success" | "warning" | "danger" | "neutral"; description: string }> = {
   waiting: { label: "Готовы к старту", tone: "warning",  description: "Очередь задач сформирована — ждём команду и жмём Start." },
@@ -434,6 +436,7 @@ function ManagerWorkspace({
 }) {
   const navigate = useNavigate();
   const [session, setSession] = useState<ManagerSession | null>(null);
+  const [estimationMode, setEstimationMode] = useState<EstimationMode>(DEFAULT_ESTIMATION_MODE);
   const [tasks, setTasks] = useState<TaskItem[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
   const [taskQuery, setTaskQuery] = useState("");
@@ -446,6 +449,12 @@ function ManagerWorkspace({
   /** Background prefetch cache for the next history page. Keyed by cursor
    *  so we never accidentally serve a stale entry. */
   const historyPrefetchRef = useRef<{ cursor: string; items: CompletedTask[]; nextCursor: string | null; total: number } | null>(null);
+
+  useEffect(() => {
+    if (session?.estimation_mode) {
+      setEstimationMode(session.estimation_mode);
+    }
+  }, [session?.estimation_mode]);
 
   const loadTasks = useCallback(async (
     ref: ManagerSessionRef,
@@ -632,11 +641,11 @@ function ManagerWorkspace({
     return () => { alive = false; };
   }, [cachedChatId, cachedTopicId, cachedToken, cachedTitle, onSessionRef]);
 
-  async function createSession(title: string) {
+  async function createSession(title: string, mode: EstimationMode = estimationMode) {
     setBusy("create");
     setError(null);
     try {
-      const created = await managerApi.createSession(title);
+      const created = await managerApi.createSession(title, undefined, mode);
       const ref = storeSession(created);
       onSessionRef(ref);
       setSession(normalizeFullSession(created));
@@ -718,8 +727,6 @@ function ManagerWorkspace({
   const autoNextGuard = useRef<string | null>(null);
   async function selectFinalEstimate(value: number) {
     if (!sessionRef || !session?.state.task) return;
-    // Use the manager-only current_task_id (always present) as the dedup key
-    // so we never auto-next twice for the same live task.
     const taskKey = session.current_task_id ?? session.state.task.task_id ?? "";
     if (!taskKey) return;
     if (autoNextGuard.current === taskKey) return;
@@ -728,6 +735,35 @@ function ManagerWorkspace({
     setError(null);
     try {
       await managerApi.finalEstimate(sessionRef.chatId, value);
+      const advanced = await managerApi.next(sessionRef.chatId);
+      setSession((prev) =>
+        mergePaginatedRefresh(prev, {
+          ...advanced,
+          token: sessionRef.token,
+          invite_url: sessionRef.inviteUrl,
+          title: sessionRef.title,
+        }),
+      );
+      historyPrefetchRef.current = null;
+      await loadTasks(sessionRef, "replace");
+    } catch (err) {
+      autoNextGuard.current = null;
+      setError(err instanceof Error ? err.message : "Final estimate failed");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function selectFinalEstimateTracks(tracks: Record<string, number>) {
+    if (!sessionRef || !session?.state.task) return;
+    const taskKey = session.current_task_id ?? session.state.task.task_id ?? "";
+    if (!taskKey) return;
+    if (autoNextGuard.current === taskKey) return;
+    autoNextGuard.current = taskKey;
+    setBusy("estimate");
+    setError(null);
+    try {
+      await managerApi.finalEstimateTracks(sessionRef.chatId, tracks);
       const advanced = await managerApi.next(sessionRef.chatId);
       setSession((prev) =>
         mergePaginatedRefresh(prev, {
@@ -807,7 +843,12 @@ function ManagerWorkspace({
         <ManagerTopBar principal={principal} />
         <div className="mx-auto mt-10 max-w-xl">
           {error ? <Alert tone="danger" className="mb-4">{error}</Alert> : null}
-          <CreateSessionPanel loading={busy === "create"} onCreate={createSession} />
+          <CreateSessionPanel
+            loading={busy === "create"}
+            estimationMode={estimationMode}
+            onEstimationModeChange={setEstimationMode}
+            onCreate={createSession}
+          />
           <Surface className="mt-4 p-4">
             <h2 className="text-sm font-bold text-ink">Быстрый тест на реальных задачах</h2>
             <p className="mt-1 text-sm text-ink3">Создаст живую demo session с Jira-like задачами и ссылкой для команды.</p>
@@ -916,12 +957,17 @@ function ManagerWorkspace({
         loading={loading}
         busy={busy}
         canStart={session.tasks_queue_count > 0 && phase === "waiting"}
-        onStart={() => applyAction("start", () => managerApi.start(sessionRef.chatId))}
+        estimationMode={estimationMode}
+        onEstimationModeChange={setEstimationMode}
+        estimationModeLabel={session.estimation_mode_label}
+        estimationTracks={session.estimation_tracks ?? []}
+        onStart={() => applyAction("start", () => managerApi.start(sessionRef.chatId, estimationMode))}
         onGenerateAiSummary={() => applyAction("ai-summary", () => managerApi.generateAiSummary(sessionRef.chatId))}
         onNext={() => applyAction("next", () => managerApi.next(sessionRef.chatId))}
         onSkip={() => applyAction("skip", () => managerApi.skip(sessionRef.chatId))}
         onOpenReport={finishAndOpenReport}
         onFinalEstimate={selectFinalEstimate}
+        onFinalEstimateTracks={selectFinalEstimateTracks}
         onReopenCompleted={reopenCompletedTask}
       />
     </div>
@@ -1106,7 +1152,17 @@ function CockpitShell({
   );
 }
 
-function CreateSessionPanel({ loading, onCreate }: { loading: boolean; onCreate: (title: string) => Promise<void> }) {
+function CreateSessionPanel({
+  loading,
+  estimationMode,
+  onEstimationModeChange,
+  onCreate,
+}: {
+  loading: boolean;
+  estimationMode: EstimationMode;
+  onEstimationModeChange: (mode: EstimationMode) => void;
+  onCreate: (title: string, mode: EstimationMode) => Promise<void>;
+}) {
   const [title, setTitle] = useState("Sprint planning");
   return (
     <Surface className="p-6">
@@ -1114,7 +1170,22 @@ function CreateSessionPanel({ loading, onCreate }: { loading: boolean; onCreate:
       <p className="mt-2 text-sm leading-6 text-ink3">Сначала создайте комнату. После этого появится ссылка для участников, очередь задач и панель управления голосованием.</p>
       <div className="mt-6 space-y-4">
         <TextField label="Название" value={title} onChange={(event) => setTitle(event.target.value)} />
-        <Button variant="primary" className="w-full" loading={loading} disabled={loading || !title.trim()} onClick={() => onCreate(title.trim())}>
+        <div>
+          <p className="mb-2 text-sm font-semibold text-ink">Как оцениваем</p>
+          <EstimationModePicker
+            value={estimationMode}
+            onChange={onEstimationModeChange}
+            disabled={loading}
+            compact
+          />
+        </div>
+        <Button
+          variant="primary"
+          className="w-full"
+          loading={loading}
+          disabled={loading || !title.trim()}
+          onClick={() => onCreate(title.trim(), estimationMode)}
+        >
           Создать сессию
         </Button>
       </div>
@@ -1387,12 +1458,17 @@ function ControlRoom({
   loading,
   busy,
   canStart,
+  estimationMode,
+  onEstimationModeChange,
+  estimationModeLabel,
+  estimationTracks,
   onStart,
   onGenerateAiSummary,
   onNext,
   onSkip,
   onOpenReport,
   onFinalEstimate,
+  onFinalEstimateTracks,
   onReopenCompleted,
 }: {
   phase: string;
@@ -1411,12 +1487,17 @@ function ControlRoom({
   loading: boolean;
   busy: string | null;
   canStart: boolean;
+  estimationMode: EstimationMode;
+  onEstimationModeChange: (mode: EstimationMode) => void;
+  estimationModeLabel?: string;
+  estimationTracks: Array<{ key: string; label: string }>;
   onStart: () => void;
   onGenerateAiSummary: () => void;
   onNext: () => void;
   onSkip: () => void;
   onOpenReport: () => void;
   onFinalEstimate: (value: number) => void;
+  onFinalEstimateTracks: (tracks: Record<string, number>) => void;
   onReopenCompleted: (taskId: string) => void;
 }) {
   const meta = PHASE_META[phase] ?? PHASE_META.waiting;
@@ -1431,6 +1512,8 @@ function ControlRoom({
   const revealedVotes = phase === "results" ? (results ?? []) : [];
 
   const showFinalEstimate = (phase === "voting" || phase === "results") && task !== null;
+  const splitMode = isSplitEstimationMode(estimationMode);
+  const modeOption = getEstimationModeOption(estimationMode);
 
   return (
     <Surface className="relative isolate min-h-0 p-4 md:p-6">
@@ -1441,6 +1524,9 @@ function ControlRoom({
             <Badge tone={meta.tone}>{meta.label}</Badge>
             {task ? <span className="text-xs font-semibold text-ink3">Задача {task.index} из {task.total}</span> : null}
             {task?.jira_key ? <Badge tone="info">{task.jira_key}</Badge> : null}
+            {phase !== "waiting" && estimationModeLabel ? (
+              <Badge tone="neutral">{estimationModeLabel}</Badge>
+            ) : null}
           </div>
           <TaskTextBlock
             text={task?.text}
@@ -1478,6 +1564,16 @@ function ControlRoom({
             : null;
         return (
           <>
+            {phase === "waiting" ? (
+              <div className="mt-6 space-y-3">
+                <p className="text-sm font-semibold text-ink">Как оцениваем в этой сессии</p>
+                <EstimationModePicker
+                  value={estimationMode}
+                  onChange={onEstimationModeChange}
+                  disabled={busy !== null}
+                />
+              </div>
+            ) : null}
             <div className="mt-6 flex flex-wrap gap-2">
               {phase === "waiting" ? (
                 <Button
@@ -1545,11 +1641,20 @@ function ControlRoom({
           distribution / voter roster. Hidden in waiting/complete phases
           where there is nothing to estimate. */}
       {showFinalEstimate ? (
-        <FinalEstimateBlock
-          currentSp={task?.story_points ?? null}
-          busy={busy}
-          onFinalEstimate={onFinalEstimate}
-        />
+        splitMode ? (
+          <FinalEstimateTracksBlock
+            tracks={estimationTracks.length > 0 ? estimationTracks : modeOption.tracks}
+            currentByTrack={task?.story_points_by_track ?? null}
+            busy={busy}
+            onSubmit={onFinalEstimateTracks}
+          />
+        ) : (
+          <FinalEstimateBlock
+            currentSp={task?.story_points ?? null}
+            busy={busy}
+            onFinalEstimate={onFinalEstimate}
+          />
+        )
       ) : null}
 
       {/* JIRA DESCRIPTION — same component the voters see, rendered
@@ -1723,6 +1828,66 @@ function ResultsPanel({ revealedVotes }: { revealedVotes: NamedVote[] }) {
  * in an estimate at any moment without scrolling past the live
  * distribution.
  */
+function FinalEstimateTracksBlock({
+  tracks,
+  currentByTrack,
+  busy,
+  onSubmit,
+}: {
+  tracks: Array<{ key: string; label: string }>;
+  currentByTrack: Record<string, number> | null;
+  busy: string | null;
+  onSubmit: (tracks: Record<string, number>) => void;
+}) {
+  const [values, setValues] = useState<Record<string, number>>({});
+
+  useEffect(() => {
+    if (currentByTrack) {
+      setValues(currentByTrack);
+    }
+  }, [currentByTrack]);
+
+  const complete = tracks.every((track) => values[track.key] != null);
+
+  return (
+    <div className="mt-4 rounded-lg border border-line bg-surface p-4">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <p className="text-sm font-bold text-ink">Зафиксируйте итоговую оценку по трекам</p>
+        <p className="text-xs text-ink3">Выберите SP для каждого направления, затем перейдём к следующей задаче.</p>
+      </div>
+      <div className="mt-4 grid gap-4 md:grid-cols-2">
+        {tracks.map((track) => (
+          <div key={track.key} className="rounded-lg border border-line bg-line2/40 p-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-ink3">{track.label}</p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {ESTIMATE_VALUES.map((value) => (
+                <Button
+                  key={`${track.key}-${value}`}
+                  size="sm"
+                  variant={values[track.key] === value ? "primary" : "secondary"}
+                  disabled={busy !== null}
+                  onClick={() => setValues((prev) => ({ ...prev, [track.key]: value }))}
+                >
+                  {value}
+                </Button>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+      <Button
+        className="mt-4"
+        variant="primary"
+        disabled={!complete || busy !== null}
+        loading={busy === "estimate"}
+        onClick={() => onSubmit(values)}
+      >
+        Зафиксировать и перейти дальше
+      </Button>
+    </div>
+  );
+}
+
 function FinalEstimateBlock({
   currentSp,
   busy,

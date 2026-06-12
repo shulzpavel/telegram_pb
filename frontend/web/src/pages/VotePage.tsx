@@ -1,5 +1,5 @@
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import { type MouseEvent, useEffect, useState } from "react";
+import { type MouseEvent, useEffect, useMemo, useState } from "react";
 import AiSummaryView from "../components/AiSummaryView";
 import JiraDescriptionPanel from "../components/JiraDescriptionPanel";
 import ParticipantChip from "../components/ParticipantChip";
@@ -15,33 +15,50 @@ import {
   Surface,
   ThemeToggle,
 } from "../design-system";
-import { ParticipantStatus, TaskInfo } from "../hooks/useSession";
+import { ParticipantStatus, TaskInfo, WebSessionState } from "../hooks/useSession";
+import { loadWebIdentity } from "../shared/lib/participantIdentity";
+import {
+  getEstimationModeOption,
+  isSplitEstimationMode,
+  resolveTrackForRole,
+  resolveTrackLabel,
+} from "../shared/lib/estimationModes";
 
-/**
- * Ten Fibonacci-style vote values rendered as a single 5-column grid. The
- * grid keeps tap targets aligned across viewports (column widths follow the
- * container, gap stays consistent) and reflows from 5×2 on mobile to 5×2 on
- * desktop. We intentionally avoid 2 different layouts to keep CLS at zero
- * when the viewport changes mid-session (foldables, browser chrome resize).
- */
 const VOTE_VALUES = ["0", "1", "2", "3", "5", "8", "13", "21", "34", "?"];
 
 interface VotePageProps {
   task: TaskInfo;
   participants: ParticipantStatus[];
-  onVote: (value: string) => Promise<boolean>;
+  estimation?: Pick<
+    WebSessionState,
+    "estimation_mode" | "estimation_mode_label" | "estimation_mode_description" | "estimation_tracks"
+  >;
+  onVote: (value: string, track?: string | null) => Promise<boolean>;
   error: string | null;
   onLogoClick?: (event: MouseEvent<HTMLAnchorElement>) => void;
 }
 
-export default function VotePage({ task, participants, onVote, error, onLogoClick }: VotePageProps) {
+export default function VotePage({
+  task,
+  participants,
+  estimation,
+  onVote,
+  error,
+  onLogoClick,
+}: VotePageProps) {
   const reduceMotion = useReducedMotion();
   const [selected, setSelected] = useState<string | null>(null);
   const [voted, setVoted] = useState(false);
 
-  // Reset local "voted" UI whenever the active task changes so the participant
-  // is not stuck on the previous task's success screen after the manager
-  // advances or restarts voting.
+  const identity = loadWebIdentity();
+  const voterTrack = useMemo(
+    () => resolveTrackForRole(estimation?.estimation_mode, identity?.role ?? null),
+    [estimation?.estimation_mode, identity?.role],
+  );
+  const voterTrackLabel = resolveTrackLabel(estimation?.estimation_mode, voterTrack);
+  const modeOption = getEstimationModeOption(estimation?.estimation_mode);
+  const splitMode = isSplitEstimationMode(estimation?.estimation_mode);
+
   const taskKey = task.task_id ?? `${task.index}-${task.text}`;
   useEffect(() => {
     setSelected(null);
@@ -52,10 +69,8 @@ export default function VotePage({ task, participants, onVote, error, onLogoClic
     if (voted) return;
     setSelected(value);
     setVoted(true);
-    const ok = await onVote(value);
+    const ok = await onVote(value, voterTrack);
     if (!ok) {
-      // Server rejected the vote — let the participant try again instead of
-      // showing a permanent "you voted" screen.
       setVoted(false);
       setSelected(null);
     }
@@ -72,14 +87,14 @@ export default function VotePage({ task, participants, onVote, error, onLogoClic
 
   return (
     <div className="flex min-h-screen-mobile flex-col app-gradient-bg">
-      {/* Sticky header. `pt-safe` honors the iPhone notch; `bg-surface/80
-          backdrop-blur` keeps focus on the cards below while staying legible
-          over scrolled content. */}
       <AutoHideAppHeader className="z-10 border-line/60 bg-surface/85">
         <div className="flex min-h-14 w-full items-center gap-2 px-3 pt-safe sm:gap-3 sm:px-4 md:px-8">
           <BrandHomeLink size="sm" showWordmark={false} className="shrink-0 sm:hidden" onClick={onLogoClick} />
           <BrandHomeLink size="sm" className="hidden min-w-0 sm:inline-flex" onClick={onLogoClick} />
           <div className="ml-auto flex min-w-0 shrink-0 items-center gap-1.5 sm:gap-2">
+            {estimation?.estimation_mode_label ? (
+              <Badge tone="neutral">{estimation.estimation_mode_label}</Badge>
+            ) : null}
             {task.jira_key ? <Badge tone="info">{task.jira_key}</Badge> : null}
             <span className="text-xs font-medium tabular-nums text-ink3">
               {task.index}&thinsp;/&thinsp;{task.total}
@@ -89,17 +104,7 @@ export default function VotePage({ task, participants, onVote, error, onLogoClic
         </div>
       </AutoHideAppHeader>
 
-      {/* Main layout.
-          Mobile: single column, order = vote → description → AI → task → participants
-                  (action-first, context-second; thumb reaches the cards
-                  without scrolling past the spec body).
-          md+: two-column grid with a fixed-width left sidebar (Task /
-               Progress / Participants) and a wider centre column that
-               renders Vote → Description → AI summary. The centre
-               column gets a hard ``max-w`` so on ultra-wide displays
-               the description doesn't stretch into 200-column text. */}
       <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-4 px-4 py-4 pb-safe-6 md:grid md:grid-cols-[18rem_minmax(0,1fr)] md:gap-8 md:px-8 md:py-6 lg:grid-cols-[20rem_minmax(0,1fr)]">
-        {/* === Left sidebar (Task / Progress / Participants) ============== */}
         <AnimatePresence mode="wait">
           <motion.aside
             key={taskKey}
@@ -116,6 +121,11 @@ export default function VotePage({ task, participants, onVote, error, onLogoClic
                 fallback="Без названия"
                 titleClassName="text-base md:text-lg"
               />
+              {splitMode && voterTrackLabel ? (
+                <p className="mt-2 text-xs text-ink3">
+                  Ваша зона оценки: <span className="font-semibold text-ink">{voterTrackLabel}</span>
+                </p>
+              ) : null}
               <div className="mt-3 md:mt-4">
                 <div className="mb-1.5 flex items-center justify-between text-2xs text-ink3">
                   <span>Прогресс</span>
@@ -135,7 +145,21 @@ export default function VotePage({ task, participants, onVote, error, onLogoClic
                       name={p.name}
                       voted={p.voted}
                       value={p.value ?? null}
+                      suffix={p.track_label ?? undefined}
                     />
+                  ))}
+                </div>
+              </Surface>
+            ) : null}
+
+            {splitMode && modeOption.tracks.length > 0 ? (
+              <Surface className="p-4 md:p-5">
+                <p className="mb-2 text-2xs font-semibold uppercase tracking-widest text-ink3">Треки оценки</p>
+                <div className="flex flex-wrap gap-2">
+                  {modeOption.tracks.map((track) => (
+                    <Badge key={track.key} tone={track.key === voterTrack ? "info" : "neutral"}>
+                      {track.label}
+                    </Badge>
                   ))}
                 </div>
               </Surface>
@@ -143,12 +167,6 @@ export default function VotePage({ task, participants, onVote, error, onLogoClic
           </motion.aside>
         </AnimatePresence>
 
-        {/* === Centre column (Vote → Description → AI summary) ============ */}
-        {/* `mx-auto max-w-2xl` caps line length on ultra-wide displays so
-            Description stays readable. `min-w-0` lets it shrink properly
-            inside the grid track on narrow viewports. `order-*` keeps
-            the vote card first on mobile (thumb reach) but in column 2
-            on md+ (visual hierarchy). */}
         <section className="order-1 flex w-full min-w-0 flex-col gap-4 md:order-2 md:mx-auto md:max-w-2xl md:gap-6">
           <Surface className="flex min-h-[22rem] flex-col items-stretch justify-center p-4 md:p-6">
             <AnimatePresence mode="wait" initial={false}>
@@ -169,7 +187,8 @@ export default function VotePage({ task, participants, onVote, error, onLogoClic
                   <div>
                     <p className="text-lg font-bold text-ink md:text-xl">Вы проголосовали!</p>
                     <p className="mt-1 text-sm text-ink3 md:text-base">
-                      Ваш выбор: <span className="text-lg font-bold text-blue">{selected}</span>
+                      Ваш выбор{voterTrackLabel ? ` (${voterTrackLabel})` : ""}:{" "}
+                      <span className="text-lg font-bold text-blue">{selected}</span>
                     </p>
                   </div>
                   <p className="text-xs text-ink4 md:text-sm">Ожидаем остальных участников…</p>
@@ -185,12 +204,8 @@ export default function VotePage({ task, participants, onVote, error, onLogoClic
                   transition={transitionBase}
                 >
                   <p className="mb-1 text-center text-2xs font-semibold uppercase tracking-widest text-ink3 md:text-left md:text-xs">
-                    Выберите оценку
+                    {splitMode && voterTrackLabel ? `Выберите ${voterTrackLabel}` : "Выберите оценку"}
                   </p>
-                  {/* Tell the user up-front that the vote is final after
-                      submission — surfacing this expectation here avoids
-                      a "wait, can I change it?" moment on the voted
-                      screen. Compact, single line, single visual weight. */}
                   <p className="mb-3 text-center text-2xs text-ink4 md:mb-4 md:text-left">
                     Выбор подтвердится сразу после тапа и сразу станет виден всей команде.
                   </p>
@@ -205,8 +220,6 @@ export default function VotePage({ task, participants, onVote, error, onLogoClic
                       />
                     ))}
                   </div>
-                  {/* Reserve a fixed-height row so inline server errors don't
-                      push the grid up when they appear/disappear. */}
                   <div className="mt-3 min-h-[3.25rem]">
                     <AnimatePresence initial={false}>
                       {error ? (
@@ -236,11 +249,6 @@ export default function VotePage({ task, participants, onVote, error, onLogoClic
             />
           ) : null}
 
-          {/* AI summary is rendered last in the centre column — same
-              component the manager sees in the cockpit, so the two
-              screens are byte-identical (description, methods, SP dev/
-              test/final, assumptions). Only appears when the manager
-              has actually generated the summary. */}
           {task.ai_summary ? (
             <AiSummaryView
               summary={task.ai_summary}

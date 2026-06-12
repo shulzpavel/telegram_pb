@@ -52,6 +52,7 @@ class JoinWebSessionUseCase:
         topic_id: Optional[int],
         user_id: int,
         display_name: str,
+        team_role: Optional[str] = None,
     ) -> WebJoinResult:
         added = False
 
@@ -60,11 +61,14 @@ class JoinWebSessionUseCase:
             existing = session.participants.get(user_id)
             if existing:
                 existing.name = display_name
+                if team_role:
+                    existing.team_role = team_role
                 return
             session.participants[user_id] = Participant(
                 user_id=user_id,
                 name=display_name,
                 role=UserRole.PARTICIPANT,
+                team_role=team_role,
             )
             added = True
 

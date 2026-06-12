@@ -7,6 +7,7 @@ interface ParticipantChipProps {
   /** Live vote value. When present, replaces the "ждёт…" indicator with
    *  the actual pick — votes are no longer hidden behind a manager Reveal. */
   value?: string | null;
+  suffix?: string;
 }
 
 const AVATAR_COLORS = [
@@ -32,7 +33,7 @@ function initials(name: string): string {
     .join("");
 }
 
-export default function ParticipantChip({ name, voted, value }: ParticipantChipProps) {
+export default function ParticipantChip({ name, voted, value, suffix }: ParticipantChipProps) {
   const color = colorForName(name);
   const reduceMotion = useReducedMotion();
   const showValue = voted && value != null && value !== "";
@@ -58,6 +59,7 @@ export default function ParticipantChip({ name, voted, value }: ParticipantChipP
 
       <span className={`min-w-0 whitespace-normal break-words text-xs font-medium leading-tight transition-colors duration-200 ${voted ? "text-ink2" : "text-ink3"}`}>
         {name}
+        {suffix ? <span className="text-ink4"> · {suffix}</span> : null}
       </span>
 
       {/* Live vote value (shown to every participant now that Reveal is gone)

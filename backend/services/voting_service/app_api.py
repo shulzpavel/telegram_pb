@@ -19,6 +19,15 @@ from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
+from app.domain.estimation import (
+    build_flat_results,
+    clear_task_votes,
+    estimation_mode_payload,
+    get_mode_config,
+    is_split_mode,
+    normalise_estimation_mode,
+    VALID_ESTIMATION_MODES,
+)
 from app.domain.session import Session
 from app.domain.task import Task
 from app.usecases.close_session import CloseSessionUseCase
@@ -114,6 +123,11 @@ DEMO_TASKS = [
 class AppSessionCreateRequest(BaseModel):
     title: str = Field(default="Planning Poker", min_length=1, max_length=120)
     team_id: Optional[int] = None
+    estimation_mode: Optional[str] = None
+
+
+class AppSessionStartRequest(BaseModel):
+    estimation_mode: Optional[str] = None
 
 
 class AppSessionRenameRequest(BaseModel):
@@ -121,7 +135,8 @@ class AppSessionRenameRequest(BaseModel):
 
 
 class FinalEstimateRequest(BaseModel):
-    value: int = Field(ge=0, le=1000)
+    value: Optional[int] = Field(default=None, ge=0, le=1000)
+    tracks: Optional[dict[str, int]] = None
 
 
 class ReopenCompletedRequest(BaseModel):
@@ -284,16 +299,14 @@ def _serialize_completed_task(session: Session, task: Task, *, bucket_index: Opt
     Used by manager state (HistoryStrip), Finish summary and CSV export. The
     vote breakdown is *not* exposed to participants — see ``_build_web_session_state``.
     """
-    votes: list[dict] = []
-    for uid, value in task.votes.items():
-        participant = session.participants.get(uid)
-        votes.append({"name": participant.name if participant else "—", "value": value})
+    votes = build_flat_results(session, task)
 
     distribution: dict[str, int] = {}
-    for value in task.votes.values():
+    for row in votes:
+        value = row["value"]
         distribution[value] = distribution.get(value, 0) + 1
 
-    unique_numeric: set[str] = {value for value in task.votes.values() if value not in {"?", "coffee"}}
+    unique_numeric: set[str] = {row["value"] for row in votes if row["value"] not in {"?", "coffee", "skip"}}
     consensus = len(unique_numeric) == 1 if unique_numeric else False
 
     return {
@@ -302,13 +315,14 @@ def _serialize_completed_task(session: Session, task: Task, *, bucket_index: Opt
         "summary": task.summary,
         "url": task.url,
         "story_points": task.story_points,
+        "story_points_by_track": dict(task.story_points_by_track) if task.story_points_by_track else None,
         "source": task.source,
         "completed_at": task.completed_at,
         "bucket_index": bucket_index,
         "ai_summary": task.ai_summary,
         "votes": votes,
         "distribution": distribution,
-        "voter_count": len(task.votes),
+        "voter_count": len(votes),
         "consensus": consensus,
     }
 
@@ -388,11 +402,7 @@ def _current_task_votes(session: Session) -> list[dict]:
     task = session.current_task
     if not task:
         return []
-    votes: list[dict] = []
-    for uid, value in task.votes.items():
-        participant = session.participants.get(uid)
-        votes.append({"name": participant.name if participant else "—", "value": value})
-    return votes
+    return build_flat_results(session, task)
 
 
 def _manager_session_payload(
@@ -442,6 +452,7 @@ def _manager_session_payload(
         "completed_next_cursor": completed_next_cursor,
         "team_id": team_id,
         "team": team,
+        **estimation_mode_payload(session.estimation_mode),
     }
 
 
@@ -502,6 +513,15 @@ async def create_app_session(
     chat_id = _new_app_chat_id()
     topic_id = None
     session = await _get_repo_session(repo, chat_id, topic_id)
+    if body.estimation_mode:
+        mode = normalise_estimation_mode(body.estimation_mode)
+        if mode not in VALID_ESTIMATION_MODES:
+            raise HTTPException(status_code=400, detail="Invalid estimation mode")
+
+        def set_mode(session: Session) -> None:
+            session.estimation_mode = mode
+
+        session, _ = await _mutate_repo_session(repo, chat_id, topic_id, set_mode)
     cms_store = getattr(request.app.state, "cms_store", None)
     if cms_store is not None:
         await cms_store.set_session_team_by_chat(chat_id, topic_id, resolved_team_id)
@@ -570,7 +590,7 @@ async def create_demo_session(request: Request, reset: bool = Query(default=Fals
             session.current_batch_started_at = datetime.utcnow().isoformat()
             session.revealed_task_id = None
             if session.current_task:
-                session.current_task.votes.clear()
+                clear_task_votes(session.current_task, session.estimation_mode)
 
         session.bump_tasks_version()
 
@@ -999,11 +1019,19 @@ async def app_start_session(
     chat_id: int,
     request: Request,
     topic_id: Optional[int] = None,
+    body: Optional[AppSessionStartRequest] = None,
     actor: CmsPrincipal = Depends(_require_manager_session),
 ) -> dict:
+    start_body = body or AppSessionStartRequest()
+
     def mutate(session: Session) -> Optional[str]:
         if not session.tasks_queue:
             return "Add at least one task before starting."
+        if start_body.estimation_mode:
+            mode = normalise_estimation_mode(start_body.estimation_mode)
+            if mode not in VALID_ESTIMATION_MODES:
+                return "Invalid estimation mode"
+            session.estimation_mode = mode
         session.normalize_current_task_index()
         session.batch_completed = False
         started = datetime.utcnow().isoformat()
@@ -1011,7 +1039,7 @@ async def app_start_session(
         session.last_batch_started_at = started  # preserved through next/finish for summary
         session.revealed_task_id = None
         if session.current_task:
-            session.current_task.votes.clear()
+            clear_task_votes(session.current_task, session.estimation_mode)
         session.bump_tasks_version()
         return None
 
@@ -1119,7 +1147,7 @@ async def app_next_task(
             session.current_task_index += 1
         session.revealed_task_id = None
         if session.current_task:
-            session.current_task.votes.clear()
+            clear_task_votes(session.current_task, session.estimation_mode)
             session.current_batch_started_at = datetime.utcnow().isoformat()
             session.batch_completed = False
         else:
@@ -1162,7 +1190,7 @@ async def app_skip_task(
             session.current_task_index += 1
         session.revealed_task_id = None
         if session.current_task:
-            session.current_task.votes.clear()
+            clear_task_votes(session.current_task, session.estimation_mode)
             session.current_batch_started_at = datetime.utcnow().isoformat()
             session.batch_completed = False
         else:
@@ -1235,8 +1263,24 @@ async def app_set_final_estimate(
     def mutate(session: Session) -> Optional[str]:
         if not session.current_task:
             return "No active task."
-        session.current_task.story_points = body.value
-        session.current_task.touch()
+        task = session.current_task
+        if is_split_mode(session.estimation_mode):
+            if not body.tracks:
+                return "Final estimate requires per-track values for this estimation mode."
+            config = get_mode_config(session.estimation_mode)
+            allowed = {track.key for track in config.tracks}
+            for track_key, value in body.tracks.items():
+                if track_key not in allowed:
+                    return f"Unknown track: {track_key}"
+                if value < 0 or value > 1000:
+                    return "Track value out of range"
+            task.story_points_by_track = {key: int(value) for key, value in body.tracks.items()}
+            task.story_points = sum(task.story_points_by_track.values()) or None
+        else:
+            if body.value is None:
+                return "Final estimate value is required."
+            task.story_points = body.value
+        task.touch()
         session.bump_tasks_version()
         return None
 
@@ -1244,7 +1288,17 @@ async def app_set_final_estimate(
     if error:
         raise HTTPException(status_code=400, detail=error)
     await _publish_state(request, session)
-    await _audit(request, "app.session.final_estimate", actor.username, "ok", {"chat_id": chat_id, "value": body.value})
+    await _audit(
+        request,
+        "app.session.final_estimate",
+        actor.username,
+        "ok",
+        {
+            "chat_id": chat_id,
+            "value": body.value,
+            "tracks": body.tracks,
+        },
+    )
     return _manager_session_payload(session)
 
 

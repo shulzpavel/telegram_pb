@@ -12,6 +12,17 @@ import redis.asyncio as aioredis
 from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
+from app.domain.estimation import (
+    all_voters_have_voted,
+    build_flat_results,
+    build_track_results,
+    estimation_mode_payload,
+    get_mode_config,
+    get_participant_vote_value,
+    is_split_mode,
+    participant_has_voted,
+    resolve_track_for_participant,
+)
 from app.usecases.web_join import JoinWebSessionUseCase
 from app.usecases.web_vote import WebVoteError, WebVoteUseCase
 # NOTE: ``_ensure_current_task_description`` is imported lazily inside the
@@ -68,6 +79,7 @@ class WebVoteRequest(BaseModel):
     token: str
     participant_id: str
     value: str
+    track: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -120,6 +132,7 @@ async def _get_web_session_state(
 def _build_web_session_state(session) -> dict:
     """Build WebSessionState dict from an already loaded session."""
     task = session.current_task
+    mode_config = get_mode_config(session.estimation_mode)
     task_info = None
     if task:
         task_info = {
@@ -127,6 +140,7 @@ def _build_web_session_state(session) -> dict:
             "text": task.text,
             "jira_key": task.jira_key,
             "story_points": task.story_points,
+            "story_points_by_track": dict(task.story_points_by_track) if task.story_points_by_track else None,
             "ai_summary": task.ai_summary,
             # Captured at Jira import time. Voter UI prefers
             # ``description_adf`` (rich Jira formatting) and falls back
@@ -143,58 +157,53 @@ def _build_web_session_state(session) -> dict:
     if session.batch_completed:
         phase = "complete"
     elif task and session.current_batch_started_at:
-        voted_ids = set(task.votes.keys()) if task else set()
-        voter_ids = {uid for uid, p in session.participants.items() if session.can_vote(uid)}
         if session.revealed_task_id == task.task_id:
             phase = "results"
-        elif voter_ids and voted_ids >= voter_ids:
+        elif all_voters_have_voted(session, task):
             phase = "results"
         else:
             phase = "voting"
     else:
         phase = "waiting"
 
-    # Participants: name + voted bool + (NEW) live vote value.
-    #
-    # Previously voters only saw who had/hadn't voted — actual values were
-    # hidden until the manager pressed Reveal. Product decision: kill the
-    # Reveal stage entirely and show live values to everyone, manager and
-    # voter alike. `value` is `None` for participants who haven't voted yet
-    # and `phase` still flips to "results" once everyone has voted so the
-    # FinalEstimate UI lights up, but the votes themselves are no longer
-    # gated.
     participants = []
     if task:
-        voted_ids = set(task.votes.keys())
         for uid, p in session.participants.items():
             if session.can_vote(uid):
+                voted = participant_has_voted(session, task, uid)
                 participants.append({
                     "name": p.name,
-                    "voted": uid in voted_ids,
-                    "value": task.votes.get(uid) if uid in voted_ids else None,
+                    "role": p.team_role,
+                    "voted": voted,
+                    "value": get_participant_vote_value(session, task, uid) if voted else None,
+                    "track": resolve_track_for_participant(session, uid),
+                    "track_label": next(
+                        (track.label for track in mode_config.tracks if track.key == resolve_track_for_participant(session, uid)),
+                        None,
+                    ),
                 })
     else:
         for uid, p in session.participants.items():
             if session.can_vote(uid):
-                participants.append({"name": p.name, "voted": False, "value": None})
+                participants.append({
+                    "name": p.name,
+                    "role": p.team_role,
+                    "voted": False,
+                    "value": None,
+                    "track": resolve_track_for_participant(session, uid),
+                    "track_label": None,
+                })
 
-    # Results: always include the per-name vote breakdown when there's an
-    # active task. Frontend used to only render this in `phase == results`,
-    # but since votes are live now we expose them as soon as they arrive.
-    # The `phase` field still drives FinalEstimate visibility.
-    results = None
-    if task:
-        results = [
-            {"name": session.participants[uid].name, "value": val}
-            for uid, val in task.votes.items()
-            if uid in session.participants
-        ]
+    results = build_flat_results(session, task) if task else None
+    track_results = build_track_results(session, task) if task and is_split_mode(session.estimation_mode) else None
 
     return {
         "task": task_info,
         "phase": phase,
         "participants": participants,
         "results": results,
+        "track_results": track_results,
+        **estimation_mode_payload(session.estimation_mode),
     }
 
 
@@ -275,7 +284,7 @@ async def web_join(body: WebJoinRequest, request: Request) -> dict:
         )
 
     use_case = JoinWebSessionUseCase(request.app.state.repository)
-    result = await use_case.execute(chat_id, topic_id, user_id, display_name)
+    result = await use_case.execute(chat_id, topic_id, user_id, display_name, team_role=team_role)
 
     # Backfill the current task's Jira description on first join so the
     # voter sees the spec immediately. Helper mutates ``result.session``
@@ -342,19 +351,26 @@ async def web_vote(body: WebVoteRequest, request: Request) -> dict:
     if not p_data:
         raise HTTPException(status_code=403, detail="Participant not found or session expired")
 
-    user_id = json.loads(p_data)["user_id"]
+    p_data_json = json.loads(p_data)
+    user_id = p_data_json["user_id"]
+    team_role = p_data_json.get("role")
 
     use_case = WebVoteUseCase(request.app.state.repository)
     try:
-        session = await use_case.execute(chat_id, topic_id, user_id, body.value)
+        session = await use_case.execute(
+            chat_id,
+            topic_id,
+            user_id,
+            body.value,
+            track=body.track,
+        )
     except WebVoteError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
     # Build and publish state update
     task = session.current_task
-    voted_ids = set(task.votes.keys())
     voter_ids = {uid for uid in session.participants if session.can_vote(uid)}
-    voted_count = len(voted_ids & voter_ids)
+    voted_count = sum(1 for uid in voter_ids if participant_has_voted(session, task, uid))
     total_voters = len(voter_ids)
 
     channel = _channel_name(chat_id, topic_id)
@@ -363,19 +379,17 @@ async def web_vote(body: WebVoteRequest, request: Request) -> dict:
 
     if voted_count >= total_voters and total_voters > 0:
         # All voted — publish full results
-        results = [
-            {"name": session.participants[uid].name, "value": val}
-            for uid, val in task.votes.items()
-            if uid in session.participants
-        ]
+        results = build_flat_results(session, task)
         payload = json.dumps({
             "type": "results",
             "votes": results,
+            "track_results": build_track_results(session, task),
             "task": {
                 "task_id": task.task_id,
                 "text": task.text,
                 "jira_key": task.jira_key,
                 "story_points": task.story_points,
+                "story_points_by_track": dict(task.story_points_by_track) if task.story_points_by_track else None,
                 "ai_summary": task.ai_summary,
                 "description": task.description,
                 "description_adf": task.description_adf,
@@ -383,6 +397,7 @@ async def web_vote(body: WebVoteRequest, request: Request) -> dict:
                 "index": session.current_task_index + 1,
                 "total": len(session.tasks_queue),
             },
+            **estimation_mode_payload(session.estimation_mode),
         })
     else:
         # Live-votes mode: broadcast the actual value too, not just "x voted".

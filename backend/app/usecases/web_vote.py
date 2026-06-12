@@ -12,6 +12,13 @@ from __future__ import annotations
 
 from typing import Optional
 
+from app.domain.estimation import (
+    cast_vote_value,
+    is_split_mode,
+    normalise_estimation_mode,
+    resolve_track,
+    resolve_track_for_participant,
+)
 from app.domain.session import Session
 from app.ports.session_repository import SessionRepository
 
@@ -41,6 +48,7 @@ class WebVoteUseCase:
         topic_id: Optional[int],
         user_id: int,
         vote_value: str,
+        track: Optional[str] = None,
     ) -> Session:
         """Persist the vote and return the post-mutation session.
 
@@ -58,13 +66,20 @@ class WebVoteUseCase:
             if ok:
                 return await _load_session(repo, chat_id, topic_id)
             session = await _load_session(repo, chat_id, topic_id)
-            _raise_rejection_reason(session, user_id)
+            _raise_rejection_reason(session, user_id, track)
             # _raise_rejection_reason always raises; keep mypy/IDE happy.
             raise WebVoteError("Vote rejected", 403)
 
         def mutate(session: Session) -> None:
-            _raise_rejection_reason(session, user_id)
-            session.current_task.votes[user_id] = vote_value  # type: ignore[union-attr]
+            _raise_rejection_reason(session, user_id, track)
+            resolved_track = _resolve_vote_track(session, user_id, track)
+            cast_vote_value(
+                session.current_task,  # type: ignore[arg-type]
+                session.estimation_mode,
+                user_id,
+                resolved_track,
+                vote_value,
+            )
 
         session, _ = await repo.mutate_session(chat_id, topic_id, mutate)
         return session
@@ -80,7 +95,21 @@ async def _load_session(
     return await repo.get_session(chat_id, topic_id)
 
 
-def _raise_rejection_reason(session: Session, user_id: int) -> None:
+def _resolve_vote_track(session: Session, user_id: int, track: Optional[str]) -> Optional[str]:
+    mode = normalise_estimation_mode(session.estimation_mode)
+    if not is_split_mode(mode):
+        return None
+    participant = session.participants.get(user_id)
+    team_role = participant.team_role if participant else None
+    expected = resolve_track(mode, team_role)
+    if not expected:
+        raise WebVoteError("Participant role is not mapped to an estimation track", status_code=400)
+    if track and track != expected:
+        raise WebVoteError("Vote track does not match participant role", status_code=400)
+    return expected
+
+
+def _raise_rejection_reason(session: Session, user_id: int, track: Optional[str] = None) -> None:
     """Translate session state into a structured ``WebVoteError``.
 
     Returns silently when the vote would be accepted. Otherwise raises
@@ -91,3 +120,5 @@ def _raise_rejection_reason(session: Session, user_id: int) -> None:
         raise WebVoteError("No active task", status_code=400)
     if not session.can_vote(user_id):
         raise WebVoteError("Not authorized to vote", status_code=403)
+    if is_split_mode(session.estimation_mode):
+        _resolve_vote_track(session, user_id, track)

@@ -31,6 +31,10 @@ class Task:
     url: Optional[str] = None
     story_points: Optional[int] = None
     votes: Dict[int, str] = field(default_factory=dict)
+    # Split estimation modes: track_key -> {user_id -> vote_value}
+    track_votes: Dict[str, Dict[int, str]] = field(default_factory=dict)
+    # Final estimate per track for split modes (front/back/qa, dev/test).
+    story_points_by_track: Dict[str, int] = field(default_factory=dict)
     completed_at: Optional[str] = None
     jql: Optional[str] = None
     source: str = "manual"
@@ -62,6 +66,11 @@ class Task:
             "url": self.url,
             "story_points": self.story_points,
             "votes": {str(k): v for k, v in self.votes.items()},
+            "track_votes": {
+                track: {str(uid): value for uid, value in votes.items()}
+                for track, votes in self.track_votes.items()
+            },
+            "story_points_by_track": dict(self.story_points_by_track),
             "completed_at": self.completed_at,
             "jql": self.jql,
             "source": self.source,
@@ -82,6 +91,24 @@ class Task:
                 votes = {int(k): v for k, v in data["votes"].items()}
             except (ValueError, TypeError):
                 votes = {}
+        track_votes: Dict[str, Dict[int, str]] = {}
+        raw_track_votes = data.get("track_votes")
+        if isinstance(raw_track_votes, dict):
+            for track_key, track_data in raw_track_votes.items():
+                if not isinstance(track_data, dict):
+                    continue
+                try:
+                    track_votes[str(track_key)] = {int(uid): value for uid, value in track_data.items()}
+                except (ValueError, TypeError):
+                    continue
+        story_points_by_track: Dict[str, int] = {}
+        raw_sp_by_track = data.get("story_points_by_track")
+        if isinstance(raw_sp_by_track, dict):
+            for track_key, value in raw_sp_by_track.items():
+                try:
+                    story_points_by_track[str(track_key)] = int(value)
+                except (TypeError, ValueError):
+                    continue
         task_id = str(data.get("task_id") or data.get("id") or _legacy_task_id(data, legacy_context))
         source = data.get("source")
         if source not in {"jira", "manual"}:
@@ -115,6 +142,8 @@ class Task:
             url=data.get("url"),
             story_points=data.get("story_points"),
             votes=votes,
+            track_votes=track_votes,
+            story_points_by_track=story_points_by_track,
             completed_at=data.get("completed_at"),
             jql=data.get("jql"),
             source=source,

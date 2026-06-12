@@ -1,12 +1,18 @@
 import type { Page } from "../../../shared/types/pagination";
+import type { EstimationMode } from "../../../shared/lib/estimationModes";
 import type { JiraPreview, TaskItem } from "../../cms/api/cmsTypes";
 import type { WebSessionState } from "../../../hooks/useSession";
 
-/** Per-participant vote for one task. Live votes are visible to every
- *  participant now — the manager-only Reveal stage was removed. */
+export interface EstimationTrackInfo {
+  key: string;
+  label: string;
+}
+
 export interface NamedVote {
   name: string;
   value: string;
+  track?: string;
+  track_label?: string;
 }
 
 export interface AiTaskSummary {
@@ -33,6 +39,7 @@ export interface CompletedTask {
   summary: string;
   url: string | null;
   story_points: number | null;
+  story_points_by_track?: Record<string, number> | null;
   source: string;
   completed_at: string | null;
   bucket_index: number | null;
@@ -55,6 +62,10 @@ export interface ManagerSession {
   tasks_queue_count: number;
   current_task_id: string | null;
   current_batch_started_at: string | null;
+  estimation_mode?: EstimationMode;
+  estimation_mode_label?: string;
+  estimation_mode_description?: string;
+  estimation_tracks?: EstimationTrackInfo[];
   state: WebSessionState;
   /** Manager-only: actual votes cast for the live task (with names). */
   current_task_votes: NamedVote[];
