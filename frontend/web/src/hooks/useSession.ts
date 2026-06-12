@@ -7,6 +7,7 @@ export interface TaskInfo {
   text: string;
   jira_key?: string;
   story_points?: number | null;
+  story_points_by_track?: Record<string, number> | null;
   ai_summary?: AiTaskSummary | null;
   /** Jira description body captured at import time. `null`/undefined for
    *  manual tasks or when the import-time fetch came back empty. */
@@ -48,11 +49,20 @@ export interface ParticipantStatus {
    *  hidden until the manager pressed Reveal — that stage has been removed,
    *  so the server now always sends the real value. */
   value?: string | null;
+  track?: string | null;
+  track_label?: string | null;
 }
 
 export interface VoteResult {
   name: string;
   value: string;
+  track?: string;
+  track_label?: string;
+}
+
+export interface EstimationTrackInfo {
+  key: string;
+  label: string;
 }
 
 export type Phase = "joining" | "waiting" | "voting" | "results" | "complete";
@@ -62,6 +72,11 @@ export interface WebSessionState {
   phase: Phase;
   participants: ParticipantStatus[];
   results?: VoteResult[];
+  track_results?: Record<string, VoteResult[]> | null;
+  estimation_mode?: string;
+  estimation_mode_label?: string;
+  estimation_mode_description?: string;
+  estimation_tracks?: EstimationTrackInfo[];
 }
 
 interface UseSessionReturn {
@@ -70,7 +85,7 @@ interface UseSessionReturn {
   participantId: string | null;
   join: (name: string, role: ParticipantRole) => Promise<void>;
   /** Returns true on a successful vote, false on server-side rejection. */
-  vote: (value: string) => Promise<boolean>;
+  vote: (value: string, track?: string | null) => Promise<boolean>;
   error: string | null;
 }
 
@@ -139,7 +154,12 @@ export function useSession(token: string): UseSessionReturn {
             ...(prev ?? { task: null, participants: [] }),
             phase: "results",
             results: msg.votes as VoteResult[],
+            track_results: msg.track_results ?? prev?.track_results ?? null,
             task: msg.task ?? prev?.task ?? null,
+            estimation_mode: msg.estimation_mode ?? prev?.estimation_mode,
+            estimation_mode_label: msg.estimation_mode_label ?? prev?.estimation_mode_label,
+            estimation_mode_description: msg.estimation_mode_description ?? prev?.estimation_mode_description,
+            estimation_tracks: msg.estimation_tracks ?? prev?.estimation_tracks,
           }));
         } else if (msg.type === "next_task") {
           setState((prev) => ({
@@ -235,7 +255,7 @@ export function useSession(token: string): UseSessionReturn {
   );
 
   const vote = useCallback(
-    async (value: string): Promise<boolean> => {
+    async (value: string, track?: string | null): Promise<boolean> => {
       if (!participantId) return false;
       setError(null);
       let resp: Response;
@@ -243,7 +263,12 @@ export function useSession(token: string): UseSessionReturn {
         resp = await fetch(apiUrl("/web/vote"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ token, participant_id: participantId, value }),
+          body: JSON.stringify({
+            token,
+            participant_id: participantId,
+            value,
+            track: track ?? undefined,
+          }),
         });
       } catch (e) {
         setError(e instanceof Error ? e.message : "Network error");

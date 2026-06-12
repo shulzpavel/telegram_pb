@@ -33,6 +33,7 @@ import redis.asyncio as aioredis
 from fastapi import Cookie, Depends, Header, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from app.domain.estimation import MAX_STORY_POINTS
 from app.domain.session import Session
 from app.domain.task import Task
 from app.usecases.manage_tasks import TaskMutationResult, TaskQueueError
@@ -71,7 +72,7 @@ class TaskInput(BaseModel):
     summary: str = Field(min_length=1, max_length=500)
     jira_key: Optional[str] = Field(default=None, max_length=64)
     url: Optional[str] = Field(default=None, max_length=1000)
-    story_points: Optional[int] = Field(default=None, ge=0, le=1000)
+    story_points: Optional[int] = Field(default=None, ge=0, le=MAX_STORY_POINTS)
 
 
 class TaskCreateRequest(TaskInput):

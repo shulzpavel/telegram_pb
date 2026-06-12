@@ -2,7 +2,7 @@
 
 import os
 from collections import OrderedDict
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Mapping, Optional
 from datetime import datetime, timedelta
 
 from app.adapters.jira_http import JiraHttpClient
@@ -85,6 +85,13 @@ class JiraServiceClient:
                 del self._cache[key]
 
         return await self._client.update_story_points(issue_key, story_points)
+
+    async def update_story_points_fields(self, issue_key: str, fields: Mapping[str, int]) -> Dict[str, bool]:
+        """Update multiple story-point fields with partial success."""
+        for key in list(self._cache.keys()):
+            if issue_key in key:
+                del self._cache[key]
+        return await self._client.update_story_points_fields(issue_key, fields)
 
     def get_issue_url(self, issue_key: str) -> str:
         """Get issue URL."""

@@ -36,6 +36,10 @@ def _retro(**overrides) -> Retrospective:
     return base
 
 
+def _mark_all_sections_opened(retro: Retrospective) -> None:
+    retro.visited_section_ids = [section.section_id for section in retro.sections]
+
+
 # ---------------------------------------------------------------------------
 # Card collection
 # ---------------------------------------------------------------------------
@@ -121,6 +125,7 @@ def _seed_cards(retro: Retrospective, count: int) -> None:
 def test_vote_toggles_and_respects_budget():
     retro = _retro(votes_per_person=2)
     _seed_cards(retro, 3)
+    _mark_all_sections_opened(retro)
     retro.start_voting()
 
     retro.toggle_vote("c0", user_id=-1)
@@ -150,6 +155,7 @@ def test_vote_rejected_outside_voting_phase():
 def test_vote_unknown_card_404():
     retro = _retro()
     _seed_cards(retro, 1)
+    _mark_all_sections_opened(retro)
     retro.start_voting()
     with pytest.raises(RetroError) as info:
         retro.toggle_vote("missing", user_id=-1)
@@ -159,6 +165,7 @@ def test_vote_unknown_card_404():
 def test_grouping_moves_votes_to_group_and_blocks_card_votes():
     retro = _retro(votes_per_person=2)
     _seed_cards(retro, 3)
+    _mark_all_sections_opened(retro)
     retro.start_voting()
     retro.toggle_vote("c0", user_id=-1)
     retro.toggle_vote("c1", user_id=-2)
@@ -203,6 +210,7 @@ def test_rename_and_ungroup_restores_card_voting():
     assert retro.ungroup(group.group_id) is True
     assert retro.groups == []
     assert retro.find_card("c0").group_id is None
+    _mark_all_sections_opened(retro)
     retro.start_voting()
     retro.toggle_vote("c0", user_id=-1)
     assert retro.votes_used_by(-1) == 1
@@ -211,6 +219,7 @@ def test_rename_and_ungroup_restores_card_voting():
 def test_group_mutations_rejected_after_done():
     retro = _retro()
     _seed_cards(retro, 2)
+    _mark_all_sections_opened(retro)
     retro.start_voting()
     retro.start_discussion()
     retro.finalize()
@@ -231,6 +240,8 @@ def test_phase_flow_lobby_to_done():
     retro.open_section("task", deadline="2026-01-01T00:05:00")
     assert retro.phase == PHASE_COLLECTING
     assert retro.active_section_id == "task"
+    retro.open_section("sprint", deadline=None)
+    retro.open_section("process", deadline=None)
     retro.start_voting()
     assert retro.phase == PHASE_VOTING
     assert retro.active_section_id is None
@@ -243,6 +254,7 @@ def test_phase_flow_lobby_to_done():
 def test_open_section_after_voting_is_rejected():
     retro = _retro()
     retro.open_section("task", deadline=None)
+    _mark_all_sections_opened(retro)
     retro.start_voting()
     with pytest.raises(RetroError) as info:
         retro.open_section("task", deadline=None)
@@ -256,6 +268,26 @@ def test_open_unknown_section_404():
     assert info.value.status_code == 404
 
 
+def test_start_voting_requires_all_sections_opened():
+    retro = _retro()
+    retro.open_section("task", deadline=None)
+
+    with pytest.raises(RetroError) as info:
+        retro.start_voting()
+
+    assert info.value.status_code == 409
+    assert "Сначала откройте все секции" in info.value.message
+
+
+def test_open_section_tracks_visited_sections_once():
+    retro = _retro()
+    retro.open_section("task", deadline=None)
+    retro.open_section("sprint", deadline=None)
+    retro.open_section("task", deadline=None)
+
+    assert retro.visited_section_ids == ["task", "sprint"]
+
+
 # ---------------------------------------------------------------------------
 # Action items
 # ---------------------------------------------------------------------------
@@ -264,6 +296,7 @@ def test_open_unknown_section_404():
 def test_action_items_add_and_remove():
     retro = _retro()
     retro.open_section("task", deadline=None)
+    _mark_all_sections_opened(retro)
     retro.start_voting()
     retro.start_discussion()
     item = retro.add_action_item(item_id="a1", text="Fix CI", assignee="lead", created_at="t")
@@ -304,6 +337,7 @@ def test_factory_round_trip_preserves_state():
         author_name="a@x.test",
         created_at="t",
     )
+    _mark_all_sections_opened(retro)
     retro.start_voting()
     retro.toggle_vote("c0", user_id=-1)
     retro.start_discussion()
@@ -318,6 +352,7 @@ def test_factory_round_trip_preserves_state():
     assert [s.section_id for s in restored.sections] == ["task", "sprint", "process"]
     assert restored.votes_per_person == 4
     assert restored.phase == PHASE_DISCUSSING
+    assert restored.visited_section_ids == ["task", "sprint", "process"]
     assert restored.find_card("c0").votes == {-1}
     assert restored.action_items[0].text == "do"
     assert restored.participants[-7].role == "backend"
@@ -326,6 +361,7 @@ def test_factory_round_trip_preserves_state():
 def test_factory_round_trip_preserves_groups():
     retro = _retro(votes_per_person=3)
     _seed_cards(retro, 2)
+    _mark_all_sections_opened(retro)
     retro.start_voting()
     retro.toggle_vote("c0", user_id=-1)
     retro.create_group(group_id="g1", title="Grouped", card_ids=["c0", "c1"], created_at="t")

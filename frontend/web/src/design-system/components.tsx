@@ -263,13 +263,22 @@ export function SelectField({
           dropdown, not a plain text input. The native `<select>` still
           opens its OS picker on iOS/Android (best mobile UX), our SVG
           just provides the visual affordance. */}
-      <div className="relative">
+      <div
+        className={cn(
+          "group relative rounded-lg",
+          "focus-within:ring-2 focus-within:ring-blue/20 focus-within:ring-offset-2 focus-within:ring-offset-canvas",
+        )}
+      >
         <select
           id={inputId}
           className={cn(
             inputClassName,
-            "appearance-none pr-9",
-            error ? "border-red focus:border-red focus:ring-red/20" : "",
+            "cursor-pointer appearance-none pr-12",
+            "bg-surface",
+            "hover:border-blue/50 hover:shadow-card",
+            "focus:ring-0 focus:ring-offset-0",
+            "disabled:cursor-not-allowed",
+            error ? "border-red focus:border-red" : "",
           )}
           aria-invalid={Boolean(error) || undefined}
           aria-describedby={hint || error ? descriptionId : undefined}
@@ -277,7 +286,9 @@ export function SelectField({
         >
           {children}
         </select>
-        <ChevronDownIcon className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink3" />
+        <span className="pointer-events-none absolute right-2 top-1/2 inline-flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md border border-line bg-surface text-ink3 transition-colors group-hover:border-blue/40 group-hover:text-blue">
+          <ChevronDownIcon className="h-4 w-4" />
+        </span>
       </div>
       <FieldMessage id={descriptionId} error={error} hint={hint} reserveSpace={reserveMessageSpace} />
     </div>

@@ -3,6 +3,7 @@
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
+from app.domain.estimation import DEFAULT_ESTIMATION_MODE, normalise_estimation_mode
 from app.domain.participant import Participant
 from app.domain.task import Task
 from config import UserRole
@@ -29,6 +30,7 @@ class Session:
     last_batch_started_at: Optional[str] = None
     revealed_task_id: Optional[str] = None
     tasks_version: int = 0
+    estimation_mode: str = DEFAULT_ESTIMATION_MODE
 
     @property
     def current_task(self) -> Optional[Task]:
@@ -100,6 +102,7 @@ class SessionFactory:
             "last_batch_started_at": session.last_batch_started_at,
             "revealed_task_id": session.revealed_task_id,
             "tasks_version": session.tasks_version,
+            "estimation_mode": session.estimation_mode,
         }
 
     @staticmethod
@@ -139,4 +142,5 @@ class SessionFactory:
             last_batch_started_at=data.get("last_batch_started_at"),
             revealed_task_id=data.get("revealed_task_id"),
             tasks_version=data.get("tasks_version", 0),
+            estimation_mode=normalise_estimation_mode(data.get("estimation_mode")),
         )

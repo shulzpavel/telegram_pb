@@ -3,6 +3,7 @@
 from datetime import datetime
 from typing import Optional
 
+from app.domain.estimation import clear_task_votes
 from app.domain.session import Session
 from app.ports.session_repository import SessionRepository
 
@@ -25,7 +26,7 @@ class StartBatchUseCase:
         session.current_batch_started_at = datetime.utcnow().isoformat()
         session.revealed_task_id = None
         if session.current_task:
-            session.current_task.votes.clear()
+            clear_task_votes(session.current_task, session.estimation_mode)
         session.bump_tasks_version()
         
         await self.session_repo.save_session(session)

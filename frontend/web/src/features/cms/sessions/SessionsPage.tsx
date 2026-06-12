@@ -21,7 +21,9 @@ import type { FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { cmsFetch, cmsSessionsApi, cmsTasksApi, type CmsTaskBody } from "../api/cmsClient";
 import { managerApi } from "../../manager/api/managerClient";
+import EstimationModePicker, { DEFAULT_ESTIMATION_MODE } from "../../manager/components/EstimationModePicker";
 import { storeManagerSession } from "../../manager/ManagerPage";
+import type { EstimationMode } from "../../../shared/lib/estimationModes";
 import type {
   CmsPrincipal,
   JiraPreview,
@@ -90,6 +92,7 @@ export default function SessionsPage({ principal, canManageTasks, canManageSessi
   // title, and an in-flight indicator.
   const [createOpen, setCreateOpen] = useState(false);
   const [createTitle, setCreateTitle] = useState("");
+  const [createEstimationMode, setCreateEstimationMode] = useState<EstimationMode>(DEFAULT_ESTIMATION_MODE);
   const [createBusy, setCreateBusy] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const [createTeamId, setCreateTeamId] = useTeamIdState(teams, createOpen);
@@ -133,13 +136,14 @@ export default function SessionsPage({ principal, canManageTasks, canManageSessi
       return;
     }
     try {
-      const session = await managerApi.createSession(title, teamId);
+      const session = await managerApi.createSession(title, teamId, createEstimationMode);
       // Cache the just-minted invite token so the cockpit doesn't
       // immediately call regenerate-invite (which would burn the
       // token we just got from the create response).
       storeManagerSession(session);
       setCreateOpen(false);
       setCreateTitle("");
+      setCreateEstimationMode(DEFAULT_ESTIMATION_MODE);
       navigate(`/cms/sessions/${session.chat_id}/cockpit`);
     } catch (err) {
       setCreateError(err instanceof Error ? err.message : "Не удалось создать сессию");
@@ -432,8 +436,10 @@ export default function SessionsPage({ principal, canManageTasks, canManageSessi
         busy={createBusy}
         error={createError}
         onTitleChange={setCreateTitle}
+        estimationMode={createEstimationMode}
+        onEstimationModeChange={setCreateEstimationMode}
         onTeamIdChange={setCreateTeamId}
-        dirty={createTitle.trim().length > 0 || createTeamId !== ""}
+        dirty={createTitle.trim().length > 0 || createTeamId !== "" || createEstimationMode !== DEFAULT_ESTIMATION_MODE}
         onCancel={() => {
           if (createBusy) return;
           setCreateOpen(false);
@@ -480,6 +486,8 @@ export default function SessionsPage({ principal, canManageTasks, canManageSessi
 function CreateSessionDialog({
   open,
   title,
+  estimationMode,
+  onEstimationModeChange,
   teamId,
   teams,
   showTeamPicker,
@@ -495,6 +503,8 @@ function CreateSessionDialog({
 }: {
   open: boolean;
   title: string;
+  estimationMode: EstimationMode;
+  onEstimationModeChange: (mode: EstimationMode) => void;
   teamId: number | "";
   teams: import("../api/cmsTypes").CmsTeam[];
   showTeamPicker: boolean;
@@ -619,6 +629,18 @@ function CreateSessionDialog({
             }}
           />
         ) : null}
+        <div>
+          <p className="mb-2 text-sm font-semibold text-ink">Как оцениваем</p>
+          <EstimationModePicker
+            value={estimationMode}
+            onChange={(next) => {
+              setConfirmCancel(false);
+              onEstimationModeChange(next);
+            }}
+            disabled={busy}
+            compact
+          />
+        </div>
         {error ? <Alert tone="danger">{error}</Alert> : null}
       </form>
     </BottomSheet>

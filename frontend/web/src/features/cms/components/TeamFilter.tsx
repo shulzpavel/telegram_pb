@@ -11,7 +11,8 @@ interface TeamFilterProps {
 export function TeamFilter({ teams, value, onChange, disabled }: TeamFilterProps) {
   return (
     <SelectField
-      label="Команда"
+      aria-label="Команда"
+      className="md:max-w-[220px]"
       value={value}
       disabled={disabled}
       onChange={(event) => onChange(event.target.value)}

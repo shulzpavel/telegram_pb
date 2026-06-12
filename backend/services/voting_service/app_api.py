@@ -19,6 +19,17 @@ from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
+from app.domain.estimation import (
+    build_flat_results,
+    clear_task_votes,
+    estimation_mode_payload,
+    get_mode_config,
+    MAX_STORY_POINTS,
+    is_split_mode,
+    normalise_estimation_mode,
+    resolve_track_for_participant,
+    VALID_ESTIMATION_MODES,
+)
 from app.domain.session import Session
 from app.domain.task import Task
 from app.usecases.close_session import CloseSessionUseCase
@@ -114,6 +125,11 @@ DEMO_TASKS = [
 class AppSessionCreateRequest(BaseModel):
     title: str = Field(default="Planning Poker", min_length=1, max_length=120)
     team_id: Optional[int] = None
+    estimation_mode: Optional[str] = None
+
+
+class AppSessionStartRequest(BaseModel):
+    estimation_mode: Optional[str] = None
 
 
 class AppSessionRenameRequest(BaseModel):
@@ -121,7 +137,8 @@ class AppSessionRenameRequest(BaseModel):
 
 
 class FinalEstimateRequest(BaseModel):
-    value: int = Field(ge=0, le=1000)
+    value: Optional[int] = Field(default=None, ge=0, le=MAX_STORY_POINTS)
+    tracks: Optional[dict[str, int]] = None
 
 
 class ReopenCompletedRequest(BaseModel):
@@ -284,16 +301,14 @@ def _serialize_completed_task(session: Session, task: Task, *, bucket_index: Opt
     Used by manager state (HistoryStrip), Finish summary and CSV export. The
     vote breakdown is *not* exposed to participants — see ``_build_web_session_state``.
     """
-    votes: list[dict] = []
-    for uid, value in task.votes.items():
-        participant = session.participants.get(uid)
-        votes.append({"name": participant.name if participant else "—", "value": value})
+    votes = _completed_vote_rows(session, task)
 
     distribution: dict[str, int] = {}
-    for value in task.votes.values():
+    for row in votes:
+        value = row["value"]
         distribution[value] = distribution.get(value, 0) + 1
 
-    unique_numeric: set[str] = {value for value in task.votes.values() if value not in {"?", "coffee"}}
+    unique_numeric: set[str] = {row["value"] for row in votes if row["value"] not in {"?", "coffee", "skip"}}
     consensus = len(unique_numeric) == 1 if unique_numeric else False
 
     return {
@@ -302,15 +317,80 @@ def _serialize_completed_task(session: Session, task: Task, *, bucket_index: Opt
         "summary": task.summary,
         "url": task.url,
         "story_points": task.story_points,
+        "story_points_by_track": dict(task.story_points_by_track) if task.story_points_by_track else None,
         "source": task.source,
         "completed_at": task.completed_at,
         "bucket_index": bucket_index,
         "ai_summary": task.ai_summary,
         "votes": votes,
         "distribution": distribution,
-        "voter_count": len(task.votes),
+        "voter_count": len(votes),
         "consensus": consensus,
     }
+
+
+def _completed_vote_rows(session: Session, task: Task) -> list[dict]:
+    """Votes with participant role/track metadata for reports and exports."""
+    if not is_split_mode(session.estimation_mode):
+        return [
+            {
+                "name": session.participants[uid].name if uid in session.participants else "—",
+                "value": value,
+                "role": (
+                    session.participants[uid].team_role
+                    if uid in session.participants
+                    else None
+                ),
+                "track": None,
+                "track_label": None,
+            }
+            for uid, value in task.votes.items()
+        ]
+
+    config = get_mode_config(session.estimation_mode)
+    track_label_by_key = {track.key: track.label for track in config.tracks}
+    rows: list[dict] = []
+    for track_key, track_votes in task.track_votes.items():
+        for uid, value in track_votes.items():
+            participant = session.participants.get(uid)
+            rows.append(
+                {
+                    "name": participant.name if participant else "—",
+                    "value": value,
+                    "role": participant.team_role if participant else None,
+                    "track": track_key,
+                    "track_label": track_label_by_key.get(track_key, track_key),
+                }
+            )
+    return rows
+
+
+def _participant_report_rows(session: Session) -> list[dict]:
+    config = get_mode_config(session.estimation_mode)
+    track_label_by_key = {track.key: track.label for track in config.tracks}
+    rows: list[dict] = []
+    for uid, participant in session.participants.items():
+        if not session.can_vote(uid):
+            continue
+        track_key = None
+        if is_split_mode(session.estimation_mode):
+            track_key = resolve_track_for_participant(session, uid)
+        rows.append(
+            {
+                "name": participant.name,
+                "role": participant.team_role,
+                "track": track_key,
+                "track_label": track_label_by_key.get(track_key) if track_key else None,
+            }
+        )
+    return sorted(rows, key=lambda item: (str(item.get("track_label") or ""), str(item["name"]).casefold()))
+
+
+def _final_estimate_label(entry: dict) -> str:
+    by_track = entry.get("story_points_by_track")
+    if isinstance(by_track, dict) and by_track:
+        return ", ".join(f"{track}: {value}" for track, value in by_track.items())
+    return str(entry["story_points"]) if entry["story_points"] is not None else "—"
 
 
 def _completed_tasks_in_batch(session: Session):
@@ -388,11 +468,7 @@ def _current_task_votes(session: Session) -> list[dict]:
     task = session.current_task
     if not task:
         return []
-    votes: list[dict] = []
-    for uid, value in task.votes.items():
-        participant = session.participants.get(uid)
-        votes.append({"name": participant.name if participant else "—", "value": value})
-    return votes
+    return build_flat_results(session, task)
 
 
 def _manager_session_payload(
@@ -442,6 +518,7 @@ def _manager_session_payload(
         "completed_next_cursor": completed_next_cursor,
         "team_id": team_id,
         "team": team,
+        **estimation_mode_payload(session.estimation_mode),
     }
 
 
@@ -502,6 +579,15 @@ async def create_app_session(
     chat_id = _new_app_chat_id()
     topic_id = None
     session = await _get_repo_session(repo, chat_id, topic_id)
+    if body.estimation_mode:
+        mode = normalise_estimation_mode(body.estimation_mode)
+        if mode not in VALID_ESTIMATION_MODES:
+            raise HTTPException(status_code=400, detail="Invalid estimation mode")
+
+        def set_mode(session: Session) -> None:
+            session.estimation_mode = mode
+
+        session, _ = await _mutate_repo_session(repo, chat_id, topic_id, set_mode)
     cms_store = getattr(request.app.state, "cms_store", None)
     if cms_store is not None:
         await cms_store.set_session_team_by_chat(chat_id, topic_id, resolved_team_id)
@@ -570,7 +656,7 @@ async def create_demo_session(request: Request, reset: bool = Query(default=Fals
             session.current_batch_started_at = datetime.utcnow().isoformat()
             session.revealed_task_id = None
             if session.current_task:
-                session.current_task.votes.clear()
+                clear_task_votes(session.current_task, session.estimation_mode)
 
         session.bump_tasks_version()
 
@@ -999,11 +1085,19 @@ async def app_start_session(
     chat_id: int,
     request: Request,
     topic_id: Optional[int] = None,
+    body: Optional[AppSessionStartRequest] = None,
     actor: CmsPrincipal = Depends(_require_manager_session),
 ) -> dict:
+    start_body = body or AppSessionStartRequest()
+
     def mutate(session: Session) -> Optional[str]:
         if not session.tasks_queue:
             return "Add at least one task before starting."
+        if start_body.estimation_mode:
+            mode = normalise_estimation_mode(start_body.estimation_mode)
+            if mode not in VALID_ESTIMATION_MODES:
+                return "Invalid estimation mode"
+            session.estimation_mode = mode
         session.normalize_current_task_index()
         session.batch_completed = False
         started = datetime.utcnow().isoformat()
@@ -1011,7 +1105,7 @@ async def app_start_session(
         session.last_batch_started_at = started  # preserved through next/finish for summary
         session.revealed_task_id = None
         if session.current_task:
-            session.current_task.votes.clear()
+            clear_task_votes(session.current_task, session.estimation_mode)
         session.bump_tasks_version()
         return None
 
@@ -1119,7 +1213,7 @@ async def app_next_task(
             session.current_task_index += 1
         session.revealed_task_id = None
         if session.current_task:
-            session.current_task.votes.clear()
+            clear_task_votes(session.current_task, session.estimation_mode)
             session.current_batch_started_at = datetime.utcnow().isoformat()
             session.batch_completed = False
         else:
@@ -1162,7 +1256,7 @@ async def app_skip_task(
             session.current_task_index += 1
         session.revealed_task_id = None
         if session.current_task:
-            session.current_task.votes.clear()
+            clear_task_votes(session.current_task, session.estimation_mode)
             session.current_batch_started_at = datetime.utcnow().isoformat()
             session.batch_completed = False
         else:
@@ -1235,8 +1329,24 @@ async def app_set_final_estimate(
     def mutate(session: Session) -> Optional[str]:
         if not session.current_task:
             return "No active task."
-        session.current_task.story_points = body.value
-        session.current_task.touch()
+        task = session.current_task
+        if is_split_mode(session.estimation_mode):
+            if not body.tracks:
+                return "Final estimate requires per-track values for this estimation mode."
+            config = get_mode_config(session.estimation_mode)
+            allowed = {track.key for track in config.tracks}
+            for track_key, value in body.tracks.items():
+                if track_key not in allowed:
+                    return f"Unknown track: {track_key}"
+                if value < 0 or value > MAX_STORY_POINTS:
+                    return f"Track value must be between 0 and {MAX_STORY_POINTS} SP"
+            task.story_points_by_track = {key: int(value) for key, value in body.tracks.items()}
+            task.story_points = None
+        else:
+            if body.value is None:
+                return "Final estimate value is required."
+            task.story_points = body.value
+        task.touch()
         session.bump_tasks_version()
         return None
 
@@ -1244,7 +1354,17 @@ async def app_set_final_estimate(
     if error:
         raise HTTPException(status_code=400, detail=error)
     await _publish_state(request, session)
-    await _audit(request, "app.session.final_estimate", actor.username, "ok", {"chat_id": chat_id, "value": body.value})
+    await _audit(
+        request,
+        "app.session.final_estimate",
+        actor.username,
+        "ok",
+        {
+            "chat_id": chat_id,
+            "value": body.value,
+            "tracks": body.tracks,
+        },
+    )
     return _manager_session_payload(session)
 
 
@@ -1365,7 +1485,11 @@ def _summary_payload(
         completed = full_completed[:limit]
         completed_next_cursor = str(len(completed)) if len(completed) < len(full_completed) else None
 
-    with_estimate = sum(1 for entry in full_completed if entry["story_points"] is not None)
+    with_estimate = sum(
+        1
+        for entry in full_completed
+        if entry["story_points"] is not None or entry.get("story_points_by_track")
+    )
     consensus_count = sum(1 for entry in full_completed if entry["consensus"])
     total_voters = sum(entry["voter_count"] for entry in full_completed)
     total_story_points = sum(
@@ -1373,6 +1497,16 @@ def _summary_payload(
         for entry in full_completed
         if entry["story_points"] is not None
     )
+    total_story_points_by_track: dict[str, int] = {}
+    for entry in full_completed:
+        by_track = entry.get("story_points_by_track")
+        if not isinstance(by_track, dict):
+            continue
+        for track_key, value in by_track.items():
+            try:
+                total_story_points_by_track[track_key] = total_story_points_by_track.get(track_key, 0) + int(value)
+            except (TypeError, ValueError):
+                continue
 
     # We persist a snapshot of the batch start time so finish/auto-next-on-last
     # don't erase it. Fall back to the current live timestamp for in-flight
@@ -1394,6 +1528,8 @@ def _summary_payload(
         {participant.name for participant in session.participants.values() if participant.name},
         key=str.casefold,
     )
+    participants_detailed = _participant_report_rows(session)
+    estimation_payload = estimation_mode_payload(session.estimation_mode)
 
     return {
         "chat_id": session.chat_id,
@@ -1403,9 +1539,11 @@ def _summary_payload(
         "started_at": started_at,
         "finished_at": finished_at,
         "tasks_queue_count": len(session.tasks_queue),
+        **estimation_payload,
         "completed_tasks": completed,
         "completed_next_cursor": completed_next_cursor,
         "participants": participant_names,
+        "participants_detailed": participants_detailed,
         "stats": {
             # Aggregates are always computed across the full batch so the UI
             # can show truthful totals before pulling every task into memory.
@@ -1414,6 +1552,7 @@ def _summary_payload(
             "consensus_count": consensus_count,
             "votes_cast": total_voters,
             "total_story_points": total_story_points,
+            "total_story_points_by_track": total_story_points_by_track,
         },
     }
 
@@ -1460,6 +1599,53 @@ def _format_distribution(distribution: dict[str, int]) -> str:
         return ""
     pairs = sorted(distribution.items(), key=lambda kv: (-kv[1], kv[0]))
     return ", ".join(f"{value}×{count}" for value, count in pairs)
+
+
+def _format_track_totals(totals: dict[str, int]) -> str:
+    if not totals:
+        return "—"
+    return ", ".join(f"{track}: {value}" for track, value in totals.items())
+
+
+def _format_task_track_results(entry: dict) -> str:
+    votes = entry.get("votes") or []
+    if not votes:
+        return "—"
+
+    groups: dict[str, list[dict]] = {}
+    for vote in votes:
+        label = vote.get("track_label") or "Общая оценка"
+        groups.setdefault(label, []).append(vote)
+
+    parts: list[str] = []
+    for track_label, track_votes in groups.items():
+        track_key = next((vote.get("track") for vote in track_votes if vote.get("track")), None)
+        final_value = None
+        by_track = entry.get("story_points_by_track")
+        if track_key and isinstance(by_track, dict):
+            final_value = by_track.get(track_key)
+        elif entry.get("story_points") is not None:
+            final_value = entry.get("story_points")
+
+        distribution: dict[str, int] = {}
+        participant_bits: list[str] = []
+        for vote in track_votes:
+            raw_value = vote.get("value")
+            # Explicit None/empty check: a vote of 0 is a legitimate value
+            # and must not collapse into the "—" placeholder.
+            value = "—" if raw_value is None or raw_value == "" else str(raw_value)
+            distribution[value] = distribution.get(value, 0) + 1
+            role = f" [{vote.get('role')}]" if vote.get("role") else ""
+            participant_bits.append(f"{vote.get('name') or '—'}{role}: {value}")
+
+        final_label = f"final {final_value} SP" if final_value is not None else "final —"
+        parts.append(
+            f"{track_label} ({final_label}; {_format_distribution(distribution) or '—'}; "
+            + "; ".join(participant_bits)
+            + ")"
+        )
+
+    return " | ".join(parts)
 
 
 def _normalise_cell_text(value: object) -> str:
@@ -1526,7 +1712,9 @@ def _markdown_report(summary: dict) -> str:
         "",
         "## Summary",
         "",
+        f"- **Estimation method:** {_md_escape(summary.get('estimation_mode_label') or 'SP')}",
         f"- **TOTAL SP:** {stats['total_story_points']}",
+        f"- **Split SP totals:** {_md_escape(_format_track_totals(stats.get('total_story_points_by_track') or {}))}",
         f"- **Completed tasks:** {stats['total_completed']}",
         f"- **With final estimate:** {stats['with_estimate']} / {stats['total_completed']}",
         f"- **Consensus:** {stats['consensus_count']} / {stats['total_completed']}",
@@ -1536,18 +1724,31 @@ def _markdown_report(summary: dict) -> str:
         "",
         "## Participants",
         "",
-        ", ".join(_md_escape(name) for name in summary["participants"]) or "—",
+        "| Participant | Role | Track |",
+        "|---|---|---|",
+    ]
+    participants_detailed = summary.get("participants_detailed") or []
+    if participants_detailed:
+        for participant in participants_detailed:
+            lines.append(
+                f"| {_md_escape(participant.get('name'))} | "
+                f"{_md_escape(participant.get('role') or '—')} | "
+                f"{_md_escape(participant.get('track_label') or '—')} |"
+            )
+    else:
+        lines.append("| — | — | — |")
+    lines.extend([
         "",
         "## Results By Task",
         "",
-    ]
+    ])
 
     if not summary["completed_tasks"]:
         lines.extend(["No completed tasks.", ""])
         return "\n".join(lines).strip() + "\n"
 
     lines.extend([
-        "| # | Task | Final SP | Votes | Consensus | AI Description |",
+        "| # | Task | Final SP | Results | Consensus | AI Description |",
         "|---:|---|---:|---|---|---|",
     ])
     for idx, entry in enumerate(summary["completed_tasks"], start=1):
@@ -1563,8 +1764,8 @@ def _markdown_report(summary: dict) -> str:
                 [
                     str(idx),
                     task,
-                    str(entry["story_points"]) if entry["story_points"] is not None else "—",
-                    _md_escape(_format_distribution(entry["distribution"]) or "—"),
+                    _md_escape(_final_estimate_label(entry)),
+                    _md_escape(_format_task_track_results(entry)),
                     "yes" if entry["consensus"] else "no",
                     _md_escape(ai_table_value or "—"),
                 ]
@@ -1580,7 +1781,7 @@ def _markdown_report(summary: dict) -> str:
             "",
             f"### {idx}. {_md_escape(title)}",
             "",
-            f"- **Final SP:** {entry['story_points'] if entry['story_points'] is not None else '—'}",
+            f"- **Final SP:** {_md_escape(_final_estimate_label(entry))}",
             f"- **Distribution:** {_md_escape(_format_distribution(entry['distribution']) or '—')}",
         ])
         if entry.get("url"):
@@ -1624,12 +1825,17 @@ def _markdown_report(summary: dict) -> str:
                 lines.append(f"- **AI assumptions:** {_md_escape(ai_assumptions)}")
             if ai_estimation_model:
                 lines.append(f"- **AI estimation model:** {_md_escape(ai_estimation_model)}")
-        lines.extend(["", "| Participant | Vote |", "|---|---|"])
+        lines.extend(["", "| Track | Role | Participant | Vote |", "|---|---|---|---|"])
         if entry["votes"]:
             for vote in entry["votes"]:
-                lines.append(f"| {_md_escape(vote['name'])} | {_md_escape(vote['value'])} |")
+                lines.append(
+                    f"| {_md_escape(vote.get('track_label') or '—')} | "
+                    f"{_md_escape(vote.get('role') or '—')} | "
+                    f"{_md_escape(vote['name'])} | "
+                    f"{_md_escape(vote['value'])} |"
+                )
         else:
-            lines.append("| — | — |")
+            lines.append("| — | — | — | — |")
         lines.extend(["", "---", ""])
 
     return "\n".join(lines).strip() + "\n"
@@ -1649,11 +1855,13 @@ def _csv_report(summary: dict) -> str:
     writer.writerow(["Started", summary["started_at"] or "—"])
     writer.writerow(["Finished", summary["finished_at"] or "—"])
     writer.writerow(["Phase", summary["phase"]])
+    writer.writerow(["Estimation Method", summary.get("estimation_mode_label") or "SP"])
     writer.writerow([])
 
     writer.writerow(["Summary"])
     writer.writerow(["Metric", "Value"])
     writer.writerow(["TOTAL SP", stats["total_story_points"]])
+    writer.writerow(["Split SP totals", _format_track_totals(stats.get("total_story_points_by_track") or {})])
     writer.writerow(["Completed tasks", stats["total_completed"]])
     writer.writerow(["With final estimate", f"{stats['with_estimate']} / {stats['total_completed']}"])
     writer.writerow(["Consensus", f"{stats['consensus_count']} / {stats['total_completed']}"])
@@ -1661,10 +1869,19 @@ def _csv_report(summary: dict) -> str:
     writer.writerow([])
 
     writer.writerow(["Participants"])
-    if participant_names:
-        writer.writerow(["Name"])
+    participants_detailed = summary.get("participants_detailed") or []
+    if participants_detailed:
+        writer.writerow(["Name", "Role", "Track"])
+        for participant in participants_detailed:
+            writer.writerow([
+                participant.get("name") or "—",
+                participant.get("role") or "—",
+                participant.get("track_label") or "—",
+            ])
+    elif participant_names:
+        writer.writerow(["Name", "Role", "Track"])
         for name in participant_names:
-            writer.writerow([name])
+            writer.writerow([name, "—", "—"])
     else:
         writer.writerow(["—"])
     writer.writerow([])
@@ -1675,7 +1892,8 @@ def _csv_report(summary: dict) -> str:
         "Jira Key",
         "Task",
         "Final SP",
-        "Votes",
+        "Estimation Method",
+        "Results",
         "Consensus",
         "AI Description",
         "AI Complexity",
@@ -1705,8 +1923,9 @@ def _csv_report(summary: dict) -> str:
             idx,
             entry["jira_key"] or "",
             entry["summary"],
-            entry["story_points"] if entry["story_points"] is not None else "—",
-            _format_distribution(entry["distribution"]) or "—",
+            _final_estimate_label(entry),
+            summary.get("estimation_mode_label") or "SP",
+            _format_task_track_results(entry),
             "yes" if entry["consensus"] else "no",
             ai_description or "—",
             ai_complexity or "—",
@@ -1723,7 +1942,7 @@ def _csv_report(summary: dict) -> str:
     writer.writerow([])
 
     writer.writerow(["Vote Details"])
-    writer.writerow(["Task #", "Jira Key", "Task", "Participant", "Vote"])
+    writer.writerow(["Task #", "Jira Key", "Task", "Method", "Track", "Role", "Participant", "Vote"])
     for idx, entry in enumerate(summary["completed_tasks"], start=1):
         if entry["votes"]:
             for vote in entry["votes"]:
@@ -1731,11 +1950,14 @@ def _csv_report(summary: dict) -> str:
                     idx,
                     entry["jira_key"] or "",
                     entry["summary"],
+                    summary.get("estimation_mode_label") or "SP",
+                    vote.get("track_label") or "—",
+                    vote.get("role") or "—",
                     vote["name"],
                     vote["value"],
                 ])
         else:
-            writer.writerow([idx, entry["jira_key"] or "", entry["summary"], "—", "—"])
+            writer.writerow([idx, entry["jira_key"] or "", entry["summary"], summary.get("estimation_mode_label") or "SP", "—", "—", "—", "—"])
 
     return buf.getvalue()
 

@@ -1,4 +1,5 @@
 import { appUrl } from "../../../app/config";
+import type { EstimationMode } from "../../../shared/lib/estimationModes";
 import { requestJson } from "../../../shared/api/http";
 import type {
   CompletedTasksPage,
@@ -27,10 +28,14 @@ function query(params: Record<string, string | number | null | undefined>): stri
 }
 
 export const managerApi = {
-  createSession: (title: string, teamId?: number | null) =>
+  createSession: (title: string, teamId?: number | null, estimationMode?: EstimationMode) =>
     appFetch<ManagerSession>("/sessions", {
       method: "POST",
-      body: JSON.stringify({ title, team_id: teamId ?? undefined }),
+      body: JSON.stringify({
+        title,
+        team_id: teamId ?? undefined,
+        estimation_mode: estimationMode ?? undefined,
+      }),
     }),
 
   demoSession: (reset = false) =>
@@ -148,7 +153,11 @@ export const managerApi = {
       }),
     }),
 
-  start: (chatId: number) => appFetch<ManagerSession>(`/sessions/${chatId}/start`, { method: "POST" }),
+  start: (chatId: number, estimationMode?: EstimationMode) =>
+    appFetch<ManagerSession>(`/sessions/${chatId}/start`, {
+      method: "POST",
+      body: JSON.stringify({ estimation_mode: estimationMode ?? undefined }),
+    }),
   generateAiSummary: (chatId: number) => appFetch<ManagerSession>(`/sessions/${chatId}/ai-summary`, { method: "POST" }),
   next: (chatId: number) => appFetch<ManagerSession>(`/sessions/${chatId}/next`, { method: "POST" }),
   skip: (chatId: number) => appFetch<ManagerSession>(`/sessions/${chatId}/skip`, { method: "POST" }),
@@ -162,6 +171,12 @@ export const managerApi = {
     appFetch<ManagerSession>(`/sessions/${chatId}/final-estimate`, {
       method: "POST",
       body: JSON.stringify({ value }),
+    }),
+
+  finalEstimateTracks: (chatId: number, tracks: Record<string, number>) =>
+    appFetch<ManagerSession>(`/sessions/${chatId}/final-estimate`, {
+      method: "POST",
+      body: JSON.stringify({ tracks }),
     }),
 
   reopenCompletedTask: (

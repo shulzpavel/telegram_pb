@@ -182,13 +182,15 @@ def test_csv_report_is_sectioned_and_contains_total() -> None:
 
     assert ["Planning Poker Report"] in rows
     assert ["TOTAL SP", "8"] in rows
+    assert ["Estimation Method", "SP"] in rows
     assert ["Results By Task"] in rows
     assert [
         "1",
         "BB-1",
         "Checkout flow",
         "8",
-        "8×1",
+        "SP",
+        "Общая оценка (final 8 SP; 8×1; dev@betboom.com: 8)",
         "yes",
         "Payment rollout",
         "Medium",
@@ -203,4 +205,88 @@ def test_csv_report_is_sectioned_and_contains_total() -> None:
         "",
     ] in rows
     assert ["Vote Details"] in rows
-    assert ["1", "BB-1", "Checkout flow", "dev@betboom.com", "8"] in rows
+    assert ["1", "BB-1", "Checkout flow", "SP", "—", "—", "dev@betboom.com", "8"] in rows
+
+
+def test_summary_report_includes_split_method_roles_tracks_and_votes() -> None:
+    session = Session(chat_id=1, topic_id=None, estimation_mode="sp_dev_test")
+    session.participants[1] = Participant(
+        user_id=1,
+        name="frontend@betboom.com",
+        role=UserRole.PARTICIPANT,
+        team_role="frontend",
+    )
+    session.participants[2] = Participant(
+        user_id=2,
+        name="qa@betboom.com",
+        role=UserRole.PARTICIPANT,
+        team_role="qa",
+    )
+    task = Task(
+        jira_key="BB-2",
+        summary="Split checkout",
+        story_points_by_track={"dev": 8, "test": 5},
+    )
+    task.track_votes = {
+        "dev": {1: "8"},
+        "test": {2: "5"},
+    }
+    session.batch_completed = True
+    session.last_batch = [task]
+
+    summary = _summary_payload(session, title="Sprint Planning")
+
+    assert summary["estimation_mode_label"] == "SP Dev / Test"
+    assert summary["stats"]["total_story_points"] == 0
+    assert summary["stats"]["total_story_points_by_track"] == {"dev": 8, "test": 5}
+    assert summary["participants_detailed"] == [
+        {"name": "frontend@betboom.com", "role": "frontend", "track": "dev", "track_label": "SP Dev"},
+        {"name": "qa@betboom.com", "role": "qa", "track": "test", "track_label": "SP Test"},
+    ]
+    assert summary["completed_tasks"][0]["votes"] == [
+        {
+            "name": "frontend@betboom.com",
+            "value": "8",
+            "role": "frontend",
+            "track": "dev",
+            "track_label": "SP Dev",
+        },
+        {
+            "name": "qa@betboom.com",
+            "value": "5",
+            "role": "qa",
+            "track": "test",
+            "track_label": "SP Test",
+        },
+    ]
+
+    markdown = _markdown_report(summary)
+    assert "**Estimation method:** SP Dev / Test" in markdown
+    assert "SP Dev (final 8 SP; 8×1; frontend@betboom.com [frontend]: 8)" in markdown
+    assert "| SP Dev | frontend | frontend@betboom.com | 8 |" in markdown
+    assert "| SP Test | qa | qa@betboom.com | 5 |" in markdown
+
+    rows = list(csv.reader(io.StringIO(_csv_report(summary))))
+    assert ["Split SP totals", "dev: 8, test: 5"] in rows
+    assert ["frontend@betboom.com", "frontend", "SP Dev"] in rows
+    assert [
+        "1",
+        "BB-2",
+        "Split checkout",
+        "dev: 8, test: 5",
+        "SP Dev / Test",
+        "SP Dev (final 8 SP; 8×1; frontend@betboom.com [frontend]: 8) | SP Test (final 5 SP; 5×1; qa@betboom.com [qa]: 5)",
+        "no",
+        "—",
+        "—",
+        "—",
+        "—",
+        "—",
+        "—",
+        "—",
+        "—",
+        "—",
+        "",
+        "",
+    ] in rows
+    assert ["1", "BB-2", "Split checkout", "SP Dev / Test", "SP Dev", "frontend", "frontend@betboom.com", "8"] in rows

@@ -262,24 +262,24 @@ export default function AuditEventsPage() {
           <option value="ok">Успех</option>
           <option value="failed">Ошибка</option>
         </SelectField>
-        <TextField
-          className="xl:col-span-3"
-          aria-label="Начало периода"
-          label="С"
-          type="datetime-local"
-          value={fromFilter}
-          onChange={(event) => setFromFilter(event.target.value)}
-          reserveMessageSpace={false}
-        />
-        <TextField
-          className="xl:col-span-3"
-          aria-label="Конец периода"
-          label="По"
-          type="datetime-local"
-          value={toFilter}
-          onChange={(event) => setToFilter(event.target.value)}
-          reserveMessageSpace={false}
-        />
+        <div className="grid grid-cols-2 gap-2 md:col-span-2 xl:col-span-6">
+          <TextField
+            aria-label="Начало периода"
+            label="С"
+            type="datetime-local"
+            value={fromFilter}
+            onChange={(event) => setFromFilter(event.target.value)}
+            reserveMessageSpace={false}
+          />
+          <TextField
+            aria-label="Конец периода"
+            label="По"
+            type="datetime-local"
+            value={toFilter}
+            onChange={(event) => setToFilter(event.target.value)}
+            reserveMessageSpace={false}
+          />
+        </div>
         <Button
           variant="ghost"
           onClick={() => {

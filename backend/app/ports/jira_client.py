@@ -1,7 +1,7 @@
 """Jira client interface."""
 
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Mapping, Optional
 
 
 class JiraClient(ABC):
@@ -21,6 +21,14 @@ class JiraClient(ABC):
     async def update_story_points(self, issue_key: str, story_points: int) -> bool:
         """Update story points for issue."""
         pass
+
+    async def update_story_points_fields(self, issue_key: str, fields: Mapping[str, int]) -> Dict[str, bool]:
+        """Update one or more Jira story-point fields for issue."""
+        results: Dict[str, bool] = {}
+        for field_id, value in fields.items():
+            if field_id:
+                results[field_id] = await self.update_story_points(issue_key, value)
+        return results
 
     @abstractmethod
     async def parse_jira_request(self, text: str, max_results: int = 500) -> Optional[List[Dict[str, Any]]]:

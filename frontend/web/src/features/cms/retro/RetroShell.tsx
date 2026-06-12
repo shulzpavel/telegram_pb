@@ -33,7 +33,9 @@ import { RetroAiView } from "./RetroAiView";
 import { RetroBoard, RetroOutcomesPanel } from "./RetroBoard";
 import {
   DEFAULT_RETRO_SECTIONS,
+  allRetroSectionsOpened,
   formatCountdown,
+  nextUnopenedSection,
   phaseLabel,
   type RetroAiSummary,
   type RetroLiveState,
@@ -835,6 +837,10 @@ function ManagerControls({
   onStartDiscussion: () => void;
   onFinalize: () => void;
 }) {
+  const visited = new Set(state.visited_section_ids ?? []);
+  const allSectionsOpened = allRetroSectionsOpened(state);
+  const nextSection = nextUnopenedSection(state);
+
   return (
     <Surface className="space-y-3 p-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -845,20 +851,53 @@ function ManagerControls({
       </div>
 
       {state.phase === "lobby" || state.phase === "collecting" ? (
-        <div className="space-y-2">
-          <p className="text-xs text-ink3">Откройте секцию для сбора карточек:</p>
-          <div className="flex flex-wrap gap-2">
-            {state.sections.map((section) => (
-              <Button
-                key={section.section_id}
-                size="sm"
-                variant={state.active_section_id === section.section_id ? "primary" : "secondary"}
-                onClick={() => onOpenSection(section.section_id)}
-                disabled={busy}
-              >
-                {section.title}
-              </Button>
-            ))}
+        <div className="space-y-3">
+          <div>
+            <p className="text-xs text-ink3">Откройте секции по очереди для сбора карточек:</p>
+            <p className="mt-1 text-xs text-ink4">
+              {allSectionsOpened
+                ? "Все блоки были открыты, можно переходить к голосованию."
+                : nextSection
+                  ? `Следующий блок: ${nextSection.title}`
+                  : "Выберите первый блок."}
+            </p>
+          </div>
+          <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+            {state.sections.map((section, index) => {
+              const active = state.active_section_id === section.section_id;
+              const done = visited.has(section.section_id) && !active;
+              const next = nextSection?.section_id === section.section_id;
+              const status = active ? "открыта" : done ? "пройдено" : next ? "следующая" : "ожидает";
+              const tone = active ? "info" : done ? "success" : next ? "warning" : "neutral";
+              const stateClass = active
+                ? "border-blue/40 bg-blue/10"
+                : done
+                  ? "border-green/35 bg-green/10"
+                  : next
+                    ? "border-amber/35 bg-amber/10"
+                    : "border-line bg-surface hover:bg-line2";
+
+              return (
+                <button
+                  key={section.section_id}
+                  type="button"
+                  onClick={() => onOpenSection(section.section_id)}
+                  disabled={busy}
+                  className={[
+                    "rounded-lg border px-3 py-2 text-left transition-colors",
+                    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue/30",
+                    stateClass,
+                    busy ? "cursor-not-allowed opacity-60" : "",
+                  ].join(" ")}
+                >
+                  <span className="text-[10px] font-bold uppercase tracking-wide text-ink4">Блок {index + 1}</span>
+                  <span className="mt-1 block text-sm font-semibold text-ink">{section.title}</span>
+                  <span className="mt-2 inline-flex">
+                    <Badge tone={tone}>{status}</Badge>
+                  </span>
+                </button>
+              );
+            })}
           </div>
           <div className="flex flex-wrap gap-2 pt-1">
             {state.phase === "collecting" ? (
@@ -866,9 +905,18 @@ function ManagerControls({
                 Приостановить сбор
               </Button>
             ) : null}
-            <Button size="sm" variant="primary" onClick={onStartVoting} disabled={busy || state.phase === "lobby"}>
+            <Button
+              size="sm"
+              variant="primary"
+              onClick={onStartVoting}
+              disabled={busy || state.phase === "lobby" || !allSectionsOpened}
+              title={!allSectionsOpened ? "Сначала откройте все блоки ретро" : undefined}
+            >
               Перейти к голосованию →
             </Button>
+            {!allSectionsOpened ? (
+              <span className="self-center text-xs text-ink3">Голосование откроется после всех блоков.</span>
+            ) : null}
           </div>
         </div>
       ) : null}
