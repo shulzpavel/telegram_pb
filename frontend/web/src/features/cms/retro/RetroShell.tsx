@@ -29,12 +29,15 @@ import {
   type RetroSectionConfig,
 } from "../api/cmsClient";
 import { useUnsavedChangesGuard } from "../hooks/useUnsavedChangesGuard";
+import { GroupingSelectionBar } from "./GroupingSelectionBar";
 import { RetroAiView } from "./RetroAiView";
 import { RetroBoard, RetroOutcomesPanel } from "./RetroBoard";
 import {
   DEFAULT_RETRO_SECTIONS,
+  MIN_GROUP_CARDS,
   allRetroSectionsOpened,
   formatCountdown,
+  groupableCards,
   nextUnopenedSection,
   phaseLabel,
   type RetroAiSummary,
@@ -667,11 +670,7 @@ function RetroCockpit({
 
   useEffect(() => {
     if (!state) return;
-    const selectable = new Set(
-      state.cards
-        .filter((card) => !card.group_id && !card.is_grouped)
-        .map((card) => card.card_id),
-    );
+    const selectable = new Set(groupableCards(state).map((card) => card.card_id));
     setSelectedCardIds((prev) => {
       const next = new Set([...prev].filter((cardId) => selectable.has(cardId)));
       return next.size === prev.size ? prev : next;
@@ -683,6 +682,7 @@ function RetroCockpit({
   const countdown = formatCountdown(state.section_deadline, now);
   const effectiveAi = state.ai_summary ?? ai;
   const selectedCardsCount = selectedCardIds.size;
+  const groupableCount = groupableCards(state).length;
 
   function toggleCardSelection(cardId: string) {
     setSelectedCardIds((prev) => {
@@ -711,7 +711,8 @@ function RetroCockpit({
   }
 
   return (
-    <div className="space-y-5">
+    // Bottom padding keeps the floating grouping bar from covering content.
+    <div className={["space-y-5", selectedCardsCount > 0 ? "pb-32" : ""].join(" ")}>
       <SectionHeader
         title={state.title}
         description={`Фаза: ${phaseLabel(state.phase)}`}
@@ -773,30 +774,42 @@ function RetroCockpit({
         />
       ) : null}
 
-      {canManage ? (
-        <GroupingPanel
-          state={state}
-          busy={busy}
-          selectedCount={selectedCardsCount}
-          title={groupTitle}
-          onTitleChange={setGroupTitle}
-          onCreate={() => void createGroup()}
-          onClear={() => setSelectedCardIds(new Set())}
-          onRename={(groupId, title) =>
-            run(() => cmsRetroApi.renameGroup(retroId, groupId, { title }), "Группа переименована")
-          }
-          onUngroup={(groupId) => run(() => cmsRetroApi.ungroup(retroId, groupId), "Группа разобрана")}
-        />
+      {canManage && groupableCount >= MIN_GROUP_CARDS ? (
+        <p className="text-xs text-ink3">
+          Похожие карточки можно объединить: отметьте их чекбоксами — внизу появится панель группировки.
+        </p>
       ) : null}
 
       <RetroBoard
         state={state}
         countdown={countdown}
-        selectableCards={canManage && state.cards.some((card) => !card.group_id && !card.is_grouped)}
+        selectableCards={canManage && groupableCount > 0}
         selectedCardIds={selectedCardIds}
         onToggleCardSelection={toggleCardSelection}
+        groupActions={
+          canManage
+            ? {
+                busy,
+                onRename: (groupId, title) =>
+                  run(() => cmsRetroApi.renameGroup(retroId, groupId, { title }), "Группа переименована"),
+                onUngroup: (groupId) =>
+                  run(() => cmsRetroApi.ungroup(retroId, groupId), "Группа разобрана"),
+              }
+            : undefined
+        }
       />
       <RetroOutcomesPanel state={state} showAi={false} />
+
+      {canManage ? (
+        <GroupingSelectionBar
+          selectedCount={selectedCardsCount}
+          title={groupTitle}
+          busy={busy}
+          onTitleChange={setGroupTitle}
+          onCreate={() => void createGroup()}
+          onClear={() => setSelectedCardIds(new Set())}
+        />
+      ) : null}
 
       {state.phase === "done" ? (
         <Surface className="space-y-3 p-4">
@@ -934,112 +947,6 @@ function ManagerControls({
       ) : null}
 
       {state.phase === "done" ? <Badge tone="success">Ретро завершено</Badge> : null}
-    </Surface>
-  );
-}
-
-function GroupingPanel({
-  state,
-  busy,
-  selectedCount,
-  title,
-  onTitleChange,
-  onCreate,
-  onClear,
-  onRename,
-  onUngroup,
-}: {
-  state: RetroLiveState;
-  busy: boolean;
-  selectedCount: number;
-  title: string;
-  onTitleChange: (value: string) => void;
-  onCreate: () => void;
-  onClear: () => void;
-  onRename: (groupId: string, title: string) => void;
-  onUngroup: (groupId: string) => void;
-}) {
-  const [renameDrafts, setRenameDrafts] = useState<Record<string, string>>({});
-  const ungroupedCount = state.cards.filter((card) => !card.group_id && !card.is_grouped).length;
-
-  function draftFor(groupId: string, fallback: string): string {
-    return renameDrafts[groupId] ?? fallback;
-  }
-
-  return (
-    <Surface className="space-y-3 p-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <p className="text-sm font-semibold text-ink3">Группировка похожих карточек</p>
-          <p className="mt-1 text-xs text-ink3">
-            Выберите карточки чекбоксами на доске, задайте название группы. Команда будет голосовать за группу.
-          </p>
-        </div>
-        <Badge tone={selectedCount >= 2 ? "info" : "neutral"}>
-          Выбрано: {selectedCount}
-        </Badge>
-      </div>
-
-      {ungroupedCount > 1 ? (
-        <div className="flex flex-col gap-2 md:flex-row md:items-end">
-          <TextField
-            className="md:max-w-sm"
-            label="Название группы"
-            reserveMessageSpace={false}
-            placeholder="Например: Проблемы с релизами"
-            value={title}
-            onChange={(event) => onTitleChange(event.target.value)}
-          />
-          <Button
-            variant="primary"
-            size="sm"
-            onClick={onCreate}
-            disabled={busy || selectedCount < 2 || !title.trim()}
-          >
-            Сгруппировать
-          </Button>
-          <Button variant="ghost" size="sm" onClick={onClear} disabled={busy || selectedCount === 0}>
-            Сбросить выбор
-          </Button>
-        </div>
-      ) : (
-        <p className="text-xs text-ink4">Для группировки нужно минимум две негруппированные карточки.</p>
-      )}
-
-      {state.groups.length > 0 ? (
-        <div className="space-y-2 border-t border-line pt-3">
-          <p className="text-xs font-semibold uppercase tracking-wide text-ink3">Созданные группы</p>
-          {state.groups.map((group) => (
-            <div key={group.group_id} className="rounded-lg border border-line bg-surface p-3">
-              <div className="flex flex-col gap-2 md:flex-row md:items-end">
-                <TextField
-                  className="md:max-w-sm"
-                  label="Название"
-                  reserveMessageSpace={false}
-                  value={draftFor(group.group_id, group.title)}
-                  onChange={(event) =>
-                    setRenameDrafts((prev) => ({ ...prev, [group.group_id]: event.target.value }))
-                  }
-                />
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  disabled={busy || !draftFor(group.group_id, group.title).trim()}
-                  onClick={() => onRename(group.group_id, draftFor(group.group_id, group.title))}
-                >
-                  Переименовать
-                </Button>
-                <Button variant="ghost" size="sm" disabled={busy} onClick={() => onUngroup(group.group_id)}>
-                  Разгруппировать
-                </Button>
-              </div>
-              <p className="mt-2 text-xs text-ink3">
-                Карточек: {group.card_ids.length} · голосов: {group.vote_count}
-              </p>
-            </div>
-          ))}
-        </div>
-      ) : null}
     </Surface>
   );
 }

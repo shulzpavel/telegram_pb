@@ -153,7 +153,11 @@ export function useRetro(
       });
 
     return () => {
+      // Reset the guard so a remounted effect re-runs the join. Without this,
+      // React StrictMode's dev double-mount discarded the join response and
+      // left participantId null (silently breaking card adds on the dev server).
       cancelled = true;
+      autoJoinStarted.current = false;
     };
   }, [anonKey, mockEnabled, options.participant, participantId, pidKey, token]);
 

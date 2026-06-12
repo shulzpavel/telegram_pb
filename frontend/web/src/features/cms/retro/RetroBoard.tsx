@@ -1,13 +1,21 @@
 import { useState } from "react";
-import { Badge, Button, Surface, TextareaField } from "../../../design-system";
+import { Badge, Button, Surface, TextField, TextareaField } from "../../../design-system";
 import {
   canAddToSection,
   groupsBySection,
   phaseLabel,
   ungroupedCardsBySection,
+  type RetroGroupView,
   type RetroLiveState,
 } from "./retroLogic";
 import { RetroAiView } from "./RetroAiView";
+
+/** Manager-only inline controls on group cards. Omit on the participant board. */
+export interface RetroGroupActions {
+  busy: boolean;
+  onRename: (groupId: string, title: string) => void;
+  onUngroup: (groupId: string) => void;
+}
 
 interface RetroBoardProps {
   state: RetroLiveState;
@@ -20,6 +28,7 @@ interface RetroBoardProps {
   selectableCards?: boolean;
   selectedCardIds?: Set<string>;
   onToggleCardSelection?: (cardId: string) => void;
+  groupActions?: RetroGroupActions;
 }
 
 export function RetroBoard({
@@ -32,6 +41,7 @@ export function RetroBoard({
   selectableCards = false,
   selectedCardIds,
   onToggleCardSelection,
+  groupActions,
 }: RetroBoardProps) {
   const grouped = ungroupedCardsBySection(state);
   const groups = groupsBySection(state);
@@ -122,6 +132,7 @@ export function RetroBoard({
                                 </li>
                               ))}
                             </ul>
+                            {groupActions ? <GroupInlineActions group={group} actions={groupActions} /> : null}
                           </div>
                           {voting && onToggleVote ? (
                             <button
@@ -206,6 +217,72 @@ export function RetroBoard({
           );
         })}
       </div>
+    </div>
+  );
+}
+
+/** Rename / ungroup controls rendered directly on the group card. */
+function GroupInlineActions({ group, actions }: { group: RetroGroupView; actions: RetroGroupActions }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(group.title);
+
+  function startEditing() {
+    setDraft(group.title);
+    setEditing(true);
+  }
+
+  function save() {
+    const clean = draft.trim();
+    if (!clean) return;
+    actions.onRename(group.group_id, clean);
+    setEditing(false);
+  }
+
+  if (editing) {
+    return (
+      <div className="flex flex-wrap items-center gap-2 pt-1">
+        <TextField
+          className="min-w-0 flex-1"
+          aria-label="Новое название группы"
+          reserveMessageSpace={false}
+          value={draft}
+          disabled={actions.busy}
+          autoFocus
+          onChange={(event) => setDraft(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              save();
+            }
+            if (event.key === "Escape") {
+              event.preventDefault();
+              setEditing(false);
+            }
+          }}
+        />
+        <Button variant="secondary" size="sm" onClick={save} disabled={actions.busy || !draft.trim()}>
+          Сохранить
+        </Button>
+        <Button variant="ghost" size="sm" onClick={() => setEditing(false)} disabled={actions.busy}>
+          Отмена
+        </Button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-1 pt-1">
+      <Button variant="ghost" size="sm" onClick={startEditing} disabled={actions.busy}>
+        Переименовать
+      </Button>
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={() => actions.onUngroup(group.group_id)}
+        disabled={actions.busy}
+      >
+        Разгруппировать
+      </Button>
     </div>
   );
 }
