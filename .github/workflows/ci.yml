@@ -89,7 +89,7 @@ jobs:
           docker compose -f docker-compose.prod.yml --env-file infra/deploy/prod.env.example config >/tmp/planning-poker-prod-compose.yml
 
   deploy-web:
-    name: Deploy web to production
+    name: Deploy backend and web to production
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs:
       - backend
@@ -110,7 +110,7 @@ jobs:
             set -euo pipefail
             cd /opt/planning-poker
             git pull --ff-only origin main
-            ./infra/deploy/deploy-web-prod.sh
+            ./infra/deploy/deploy-prod.sh
 
   notify-result:
     name: Notify deploy pipeline result

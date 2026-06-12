@@ -95,19 +95,26 @@ Open:
 
 ## Update
 
+Full-stack rollout (backend + web) — use this by default; any change in
+`backend/` only reaches production through it:
+
+```bash
+cd /opt/planning-poker
+./infra/deploy/deploy-prod.sh
+```
+
+Sequence: `git pull --ff-only origin main` → build `voting-service`,
+`jira-service`, `web` → `up -d` → wait for the voting-service health check.
+
+Web-only rollout (frontend-only changes, faster):
+
 ```bash
 cd /opt/planning-poker
 ./infra/deploy/deploy-web-prod.sh
-# or:
-make deploy-web-prod
 ```
 
-This script performs the exact web rollout sequence:
-
-1. `git pull --ff-only origin main`
-2. `docker compose ... build web`
-3. `docker compose ... up -d web`
-4. `docker compose ... ps web`
+> **Warning:** `deploy-web-prod.sh` rebuilds only the `web` container and
+> silently leaves backend services on the old image.
 
 ## Telegram deploy alerts
 
@@ -177,7 +184,7 @@ pass, the `deploy-web` job connects to the server over SSH and runs:
 
 ```bash
 cd /opt/planning-poker
-./infra/deploy/deploy-web-prod.sh
+./infra/deploy/deploy-prod.sh
 ```
 
 ### One-time setup
