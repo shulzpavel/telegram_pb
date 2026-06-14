@@ -2528,6 +2528,7 @@ async def cms_add_scope_queue_issue_comment(
 async def cms_analyze_scope_board(
     board_id: int,
     request: Request,
+    async_mode: bool = Query(False, alias="async"),
     actor: CmsPrincipal = Depends(require_permission(PERM_PLANNER_VIEW)),
 ) -> dict:
     store = _get_cms_store(request)
@@ -2547,7 +2548,34 @@ async def cms_analyze_scope_board(
         error_detail="Слишком много AI-запросов, попробуйте позже",
     )
 
+    from services.voting_service.ai_job_runners import run_scope_ai_job
+    from services.voting_service.ai_jobs import find_cached_scope_summary, get_job, get_or_create_job, job_public_view, spawn_ai_job
     from services.voting_service.scope_ai_llm import LlmScopeError, generate_scope_analysis
+
+    snapshot_refreshed_at = snapshot.get("refreshed_at") if isinstance(snapshot, dict) else None
+    cached = find_cached_scope_summary(board, snapshot_refreshed_at)
+    if cached:
+        await _audit(
+            request,
+            "cms.scope_board.analyze",
+            actor.username,
+            "ok",
+            {"board_id": board_id, "health": cached.get("health"), "cached": True},
+        )
+        return {"ai_summary": cached, "board": board, "cached": True}
+
+    if async_mode:
+        redis = await _get_redis(request)
+        job_id, is_new = await get_or_create_job(
+            redis,
+            kind="scope",
+            resource_key=f"board:{board_id}",
+            actor=actor.username,
+        )
+        if is_new:
+            spawn_ai_job(run_scope_ai_job(request.app, job_id=job_id, board_id=board_id, actor_username=actor.username))
+        job_record = await get_job(redis, job_id)
+        return job_public_view(job_record or {"job_id": job_id, "status": "queued", "phase": "queued", "message": "В очереди"})
 
     http_session = getattr(request.app.state, "http_session", None)
     if http_session is None:
@@ -2567,7 +2595,7 @@ async def cms_analyze_scope_board(
     updated = await store.save_scope_board_ai_summary(
         board_id,
         summary,
-        snapshot_refreshed_at=snapshot.get("refreshed_at") if isinstance(snapshot, dict) else None,
+        snapshot_refreshed_at=snapshot_refreshed_at,
     )
     if not updated:
         raise HTTPException(status_code=404, detail="Scope board not found")
@@ -2579,6 +2607,29 @@ async def cms_analyze_scope_board(
         {"board_id": board_id, "health": summary.get("health")},
     )
     return {"ai_summary": summary, "board": updated}
+
+
+@cms_router.get("/cms/scope-boards/{board_id}/analyze/jobs/{job_id}")
+async def cms_scope_analyze_job_status(
+    board_id: int,
+    job_id: str,
+    request: Request,
+    actor: CmsPrincipal = Depends(require_permission(PERM_PLANNER_VIEW)),
+) -> dict:
+    board = await _get_cms_store(request).get_scope_board(board_id)
+    if not board:
+        raise HTTPException(status_code=404, detail="Scope board not found")
+    assert_record_access(actor, board)
+
+    from services.voting_service.ai_jobs import get_job, job_public_view
+
+    redis = await _get_redis(request)
+    job = await get_job(redis, job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="AI job not found")
+    if job.get("kind") != "scope" or job.get("resource_key") != f"board:{board_id}":
+        raise HTTPException(status_code=404, detail="AI job not found")
+    return job_public_view(job)
 
 
 @cms_router.delete("/cms/scope-boards/{board_id}")

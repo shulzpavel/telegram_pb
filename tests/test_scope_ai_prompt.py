@@ -31,6 +31,8 @@ def test_system_prompt_pins_schema_keys():
         "недоверенный ввод",
         "Открытые вопросы",
         "Нагрузка по ролям",
+        "пересекающийся срез",
+        "не сравнивай сумму ролей напрямую с capacity",
     ):
         assert fragment in prompt
 

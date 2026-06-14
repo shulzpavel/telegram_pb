@@ -1127,6 +1127,7 @@ async def app_generate_ai_summary(
     chat_id: int,
     request: Request,
     topic_id: Optional[int] = None,
+    async_mode: bool = Query(False, alias="async"),
     actor: CmsPrincipal = Depends(_require_manager_session),
 ) -> dict:
     """Generate a facilitator-facing AI hint for the current voting task via Anthropic.
@@ -1149,6 +1150,34 @@ async def app_generate_ai_summary(
         raise HTTPException(status_code=400, detail="Start voting before generating an AI summary.")
 
     task = session.current_task
+    if task.ai_summary:
+        return _manager_session_payload(session)
+
+    from services.voting_service.ai_job_runners import run_session_ai_summary_job
+    from services.voting_service.ai_jobs import get_job, get_or_create_job, job_public_view, spawn_ai_job
+
+    if async_mode:
+        redis = request.app.state.web_redis
+        job_id, is_new = await get_or_create_job(
+            redis,
+            kind="session_ai_summary",
+            resource_key=f"session:{chat_id}:{task.task_id}",
+            actor=actor.username,
+        )
+        if is_new:
+            spawn_ai_job(
+                run_session_ai_summary_job(
+                    request.app,
+                    job_id=job_id,
+                    chat_id=chat_id,
+                    topic_id=topic_id,
+                    task_id=task.task_id,
+                    actor_username=actor.username,
+                )
+            )
+        job_record = await get_job(redis, job_id)
+        return job_public_view(job_record or {"job_id": job_id, "status": "queued", "phase": "queued", "message": "В очереди"})
+
     http_session = request.app.state.http_session
     jira_context = None
     if task.jira_key:
@@ -1196,6 +1225,29 @@ async def app_generate_ai_summary(
         {"chat_id": chat_id, "task_id": session.current_task_id, "source": summary.get("source")},
     )
     return _manager_session_payload(session)
+
+
+@app_router.get("/app/sessions/{chat_id}/ai-summary/jobs/{job_id}")
+async def app_ai_summary_job_status(
+    chat_id: int,
+    job_id: str,
+    request: Request,
+    topic_id: Optional[int] = None,
+    actor: CmsPrincipal = Depends(_require_manager_session),
+) -> dict:
+    session = await _get_repo_session(request.app.state.repository, chat_id, topic_id)
+    if not session.current_task:
+        raise HTTPException(status_code=400, detail="No active task")
+
+    from services.voting_service.ai_jobs import get_job, job_public_view
+
+    redis = request.app.state.web_redis
+    job = await get_job(redis, job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="AI job not found")
+    if job.get("kind") != "session_ai_summary" or not str(job.get("resource_key", "")).startswith(f"session:{chat_id}:"):
+        raise HTTPException(status_code=404, detail="AI job not found")
+    return job_public_view(job)
 
 
 @app_router.post("/app/sessions/{chat_id}/next")

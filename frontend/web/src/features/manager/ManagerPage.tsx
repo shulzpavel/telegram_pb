@@ -20,7 +20,7 @@ import { apiUrl } from "../../app/config";
 import TaskTextBlock from "../../components/TaskTextBlock";
 import JiraDescriptionPanel from "../../components/JiraDescriptionPanel";
 import AiSummaryView from "../../components/AiSummaryView";
-import { AiSparkleButton, Alert, Badge, Button, ConfirmDialog, EmptyState, ScrollArea, Spinner, Surface, TextField, TextareaField, ThemeToggle, cn, useTheme, useToast, type ThemeMode } from "../../design-system";
+import { AiGenerationProgress, AiSparkleButton, Alert, Badge, Button, ConfirmDialog, EmptyState, ScrollArea, Spinner, Surface, TextField, TextareaField, ThemeToggle, cn, useTheme, useToast, type ThemeMode } from "../../design-system";
 import { cmsAuthApi, hasCmsAuthHint } from "../cms/api/cmsClient";
 import type { CmsPrincipal } from "../cms/api/cmsTypes";
 import CmsLoginPage from "../cms/auth/CmsLoginPage";
@@ -28,8 +28,9 @@ import { normalizeOptionalNumber, normalizeOptionalText } from "../cms/sessions/
 import { ManagerTopBar } from "./ManagerTopBar";
 import { ManagerBottomDock } from "./ManagerBottomDock";
 import { ManagerSessionChrome } from "./ManagerSessionChrome";
-import { managerApi } from "./api/managerClient";
+import { managerApi, type SessionAiSummaryResult, type SessionAiSummaryStartResponse } from "./api/managerClient";
 import type { CompletedTask, JiraPreview, ManagerSession, ManagerSessionRef, NamedVote, TaskItem, TaskMutation } from "./api/managerTypes";
+import { pollAiJob } from "../../shared/lib/pollAiJob";
 import EstimationModePicker, { DEFAULT_ESTIMATION_MODE } from "./components/EstimationModePicker";
 import { getEstimationModeOption, isSplitEstimationMode, type EstimationMode } from "../../shared/lib/estimationModes";
 
@@ -442,6 +443,8 @@ function ManagerWorkspace({
   const [taskQuery, setTaskQuery] = useState("");
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
+  const [aiSummaryBusy, setAiSummaryBusy] = useState(false);
+  const [aiSummaryProgress, setAiSummaryProgress] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const toast = useToast();
   const [historyLoadingMore, setHistoryLoadingMore] = useState(false);
@@ -713,13 +716,65 @@ function ManagerWorkspace({
     } catch (err) {
       const message = err instanceof Error ? err.message : `${label} failed`;
       setError(message);
-      if (label === "ai-summary") {
-        toast.error(message, { title: "AI summary не сгенерирован" });
-      }
     } finally {
       setBusy(null);
     }
   }
+
+  const generateAiSummary = useCallback(async () => {
+    if (!sessionRef) return;
+    setAiSummaryBusy(true);
+    setAiSummaryProgress("Запускаем AI...");
+    setError(null);
+    try {
+      const started = await managerApi.startAiSummary(sessionRef.chatId, sessionRef.topicId);
+      if (isManagerSessionAiStart(started)) {
+        setSession((prev) =>
+          mergePaginatedRefresh(prev, {
+            ...started,
+            token: sessionRef.token,
+            invite_url: sessionRef.inviteUrl,
+            title: sessionRef.title,
+          }),
+        );
+        historyPrefetchRef.current = null;
+        await loadTasks(sessionRef, "replace");
+        toast.success("AI подсказка готова");
+        return;
+      }
+
+      const jobId = started.job_id;
+      if (!jobId) {
+        throw new Error("AI job was not started");
+      }
+
+      const result = await pollAiJob<SessionAiSummaryResult>(
+        () => managerApi.getAiSummaryJob(sessionRef.chatId, jobId, sessionRef.topicId),
+        {
+          intervalMs: 1200,
+          onProgress: (job) => setAiSummaryProgress(job.message ?? "AI готовит подсказку..."),
+        }
+      );
+      setSession((prev) =>
+        mergePaginatedRefresh(prev, {
+          ...result.session,
+          token: sessionRef.token,
+          invite_url: sessionRef.inviteUrl,
+          title: sessionRef.title,
+        }),
+      );
+      historyPrefetchRef.current = null;
+      await loadTasks(sessionRef, "replace");
+      toast.success(result.cached ? "AI подсказка уже актуальна" : "AI подсказка готова");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "AI summary не сгенерирован";
+      setError(message);
+      toast.error(message, { title: "AI summary не сгенерирован" });
+    } finally {
+      setAiSummaryBusy(false);
+      setAiSummaryProgress(null);
+    }
+  }, [loadTasks, sessionRef, toast]);
 
   // Auto-advance to the next task as soon as the manager picks a final SP.
   // Last-task case (no more tasks ahead) lands the session in phase=complete
@@ -956,13 +1011,15 @@ function ManagerWorkspace({
         results={session.state.results ?? null}
         loading={loading}
         busy={busy}
+        aiSummaryBusy={aiSummaryBusy}
+        aiSummaryProgress={aiSummaryProgress}
         canStart={session.tasks_queue_count > 0 && phase === "waiting"}
         estimationMode={estimationMode}
         onEstimationModeChange={setEstimationMode}
         estimationModeLabel={session.estimation_mode_label}
         estimationTracks={session.estimation_tracks ?? []}
         onStart={() => applyAction("start", () => managerApi.start(sessionRef.chatId, estimationMode))}
-        onGenerateAiSummary={() => applyAction("ai-summary", () => managerApi.generateAiSummary(sessionRef.chatId))}
+        onGenerateAiSummary={() => void generateAiSummary()}
         onNext={() => applyAction("next", () => managerApi.next(sessionRef.chatId))}
         onSkip={() => applyAction("skip", () => managerApi.skip(sessionRef.chatId))}
         onOpenReport={finishAndOpenReport}
@@ -1457,6 +1514,8 @@ function ControlRoom({
   results,
   loading,
   busy,
+  aiSummaryBusy,
+  aiSummaryProgress,
   canStart,
   estimationMode,
   onEstimationModeChange,
@@ -1486,6 +1545,8 @@ function ControlRoom({
   results: NamedVote[] | null;
   loading: boolean;
   busy: string | null;
+  aiSummaryBusy: boolean;
+  aiSummaryProgress: string | null;
   canStart: boolean;
   estimationMode: EstimationMode;
   onEstimationModeChange: (mode: EstimationMode) => void;
@@ -1599,8 +1660,8 @@ function ControlRoom({
               {phase === "voting" ? (
                 <AiSparkleButton
                   size="lg"
-                  disabled={!task || busy !== null}
-                  loading={busy === "ai-summary"}
+                  disabled={!task || aiSummaryBusy}
+                  loading={aiSummaryBusy}
                   onClick={onGenerateAiSummary}
                   title={!task ? "Сначала нужна текущая задача" : "Сгенерировать подсказку для оценки задачи"}
                 >
@@ -1639,6 +1700,14 @@ function ControlRoom({
               <p className="mt-2 text-xs text-ink3" role="status" aria-live="polite">
                 {disabledReason}
               </p>
+            ) : null}
+            {aiSummaryProgress ? (
+              <div className="mt-3">
+                <AiGenerationProgress
+                  message={aiSummaryProgress}
+                  detail="Подсказка появится в карточке текущей задачи."
+                />
+              </div>
             ) : null}
           </>
         );
@@ -2518,4 +2587,8 @@ function TaskAddPanel({
 
     </div>
   );
+}
+
+function isManagerSessionAiStart(response: SessionAiSummaryStartResponse): response is ManagerSession {
+  return "state" in response && "chat_id" in response;
 }

@@ -50,11 +50,27 @@ def _max_context_chars() -> int:
 
 
 def _max_output_tokens() -> int:
-    return max(512, int(os.getenv("ANTHROPIC_MAX_OUTPUT_TOKENS", "1600")))
+    return max(512, int(os.getenv("ANTHROPIC_MAX_OUTPUT_TOKENS", "1200")))
+
+
+def _task_context_chars() -> int:
+    return max(1200, int(os.getenv("AI_SUMMARY_MAX_CONTEXT_CHARS", str(min(_max_context_chars(), 3500)))))
 
 
 def llm_configured() -> bool:
     return bool(_anthropic_api_key())
+
+
+def _compact_long_text(text: str, limit: int) -> str:
+    """Keep the beginning and end of long specs; Confluence often hides key
+    acceptance criteria near the bottom.
+    """
+    cleaned = text.strip()
+    if len(cleaned) <= limit:
+        return cleaned
+    head = max(400, int(limit * 0.62))
+    tail = max(300, limit - head - 32)
+    return f"{cleaned[:head]}\n…\n{cleaned[-tail:]}"
 
 
 def _strip_json_fences(text: str) -> str:
@@ -123,7 +139,7 @@ def _validate_summary_payload(payload: dict[str, Any]) -> dict[str, Any]:
     methods = [str(item).strip() for item in methods_raw if str(item).strip()]
     if not methods:
         raise LlmSummaryError("LLM summary methods must not be empty", status_code=502)
-    methods = methods[:6]
+    methods = methods[:4]
 
     complexity = str(payload.get("complexity") or "").strip()
     if not complexity:
@@ -153,14 +169,14 @@ def _validate_summary_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
     assumptions_raw = payload.get("assumptions")
     if isinstance(assumptions_raw, list):
-        assumptions = [str(item).strip() for item in assumptions_raw if str(item).strip()][:6]
+        assumptions = [str(item).strip()[:180] for item in assumptions_raw if str(item).strip()][:3]
     else:
         assumptions = []
 
     return {
-        "description": description[:2000],
+        "description": description[:900],
         "methods": methods,
-        "complexity": complexity[:500],
+        "complexity": complexity[:320],
         "sp_dev": sp_dev_raw,
         "sp_test": sp_test_raw,
         "sp_final": sp_final,
@@ -213,15 +229,15 @@ def _build_task_context(task: Task, jira_context: Optional[dict[str, Any]]) -> s
             lines.append(f"jira_components: {', '.join(str(item) for item in components)}")
         description_from_context = str(jira_context.get("description") or "").strip()
         if description_from_context:
-            lines.append(f"jira_description:\n{description_from_context}")
+            lines.append(f"jira_description:\n{_compact_long_text(description_from_context, 3000)}")
 
     # Fallback to the description we captured at import time when the
     # live jira-service call didn't return one (offline jira, demo mode,
     # cache miss, …). Avoids dropping the planning spec from the prompt.
     if not description_from_context and task.description:
-        lines.append(f"jira_description:\n{task.description.strip()}")
+        lines.append(f"jira_description:\n{_compact_long_text(task.description.strip(), 3000)}")
 
-    return truncate_text("\n".join(lines), _max_context_chars())
+    return truncate_text("\n".join(lines), _task_context_chars())
 
 
 def _system_prompt() -> str:
@@ -246,49 +262,18 @@ def _system_prompt() -> str:
     Output language is Russian to match the rest of the product UI.
     """
     return (
-        "Ты помогаешь команде разработки оценивать задачи в Story Points "
-        "(SP) во время планирования. Отвечай ОДНИМ JSON-объектом без markdown-"
-        "ограждений, строго по схеме:\n"
+        "Ты помогаешь оценивать задачи в Story Points (SP). Верни ОДИН компактный JSON без markdown, строго по схеме:\n"
         '{"description": string, "methods": string[], "complexity": string, '
         '"sp_dev": 1|2|3|5|8|13|18, "sp_test": 1|2|3|5|8|13|18, '
         '"sp_final": 1|2|3|5|8|13|18, "scale_label": string, '
         '"confidence": "low"|"medium"|"high", "assumptions": string[]}\n'
-        "\n"
-        "Поля:\n"
-        "- description: 2-4 предложения по-русски: что задача даёт пользователю/системе и что нужно проверить.\n"
-        "- methods: 3-5 коротких пунктов по-русски — зоны внимания (API, UI, данные, тесты, интеграция, миграции и т.д.).\n"
-        "- complexity: одно предложение по-русски, почему именно такая сложность.\n"
-        "- sp_dev: оценка только разработческой части — анализ, реализация, unit-тесты, ревью-фиксы, уточнения у аналитика/дизайнера.\n"
-        "- sp_test: оценка только QA-части — изучение задачи, тест-кейсы, прогон, проверка фиксов, обновление автотестов, регресс-риски в смежном функционале.\n"
-        "- sp_final ОБЯЗАН быть равен max(sp_dev, sp_test). Не среднее, не сумма.\n"
-        "- scale_label: короткий ярлык вида '5 SP — средняя'.\n"
-        "- confidence: low/medium/high — насколько уверена оценка с учётом неопределённости.\n"
-        "- assumptions: явные предположения и риски (по 1 короткой строке), особенно если в требованиях есть пробелы.\n"
-        "\n"
-        "Ключевые правила:\n"
-        "- Story Points — это относительная сложность, объём и риск, НЕ время.\n"
-        "- Формула SP = max(SP dev, SP test).\n"
-        "- Допустимы только значения шкалы Фибоначчи: 1, 2, 3, 5, 8, 13, 18. Никаких других.\n"
-        "- 18 SP — это сигнал к декомпозиции. Если задача тянет на 18 SP, добавь в assumptions пункт о необходимости разбиения на подзадачи.\n"
-        "- Эпики как единая задача не оцениваются. Если входной контекст похож на эпик (контейнер для историй), укажи это в assumptions и оцени саму типовую историю внутри, либо поставь 13/18 + пометку 'требуется декомпозиция'.\n"
-        "- Если требования размытые, есть открытые вопросы или неизвестны технические детали — поставь 8 или 13 SP и обязательно перечисли неопределённости в assumptions, confidence=low/medium.\n"
-        "- Если задача — spike/исследование без реализации, ставь 1-2 SP и поясни в assumptions.\n"
-        "- Зависимости от других команд и ожидание ответа партнёра/дизайна — включаются в оценку, если блокируют разработку. Это снижает confidence и/или повышает SP.\n"
-        "- Не оценивай: митинги, ретро, обучение без цели реализации, общение в чатах, чисто документация без разработки. Если контекст об этом — поставь 1 SP и в assumptions честно скажи 'не подлежит SP-оценке'.\n"
-        "\n"
-        "Шкала (для калибровки):\n"
-        "- 1 SP — очень лёгкая: понятно сразу, без зависимостей. Пример: добавить чекбокс по уже существующему полю API.\n"
-        "- 2 SP — лёгкая: одно уточнение или одна зависимость. Пример: добавить поле в API + чекбокс на фронте без бизнес-логики.\n"
-        "- 3 SP — небольшая: умеренная логика, проверки, несколько мелких зависимостей. Пример: карточка пользователя из готовых данных + новый endpoint.\n"
-        "- 5 SP — средняя: глубокий анализ, работа с зависимостями, возможны небольшие изменения архитектуры/бизнес-логики, простая b2b-интеграция.\n"
-        "- 8 SP — выше среднего: большая задача, есть неопределённость, несколько зависимостей, изменения архитектуры или бизнес-логики, b2b-интеграция.\n"
-        "- 13 SP — сложная: много неизвестных, сильные риски, кандидат на декомпозицию, серьёзные изменения архитектуры/логики, сложная b2b-интеграция, новая бизнес-механика.\n"
-        "- 18 SP — очень сложная: на грани разумной декомпозиции, кардинальные изменения архитектуры/инфраструктуры. Обязательно декомпозировать перед реализацией.\n"
-        "\n"
-        "Опирайся ТОЛЬКО на переданный контекст задачи. Не выдумывай дополнительный объём, который не упомянут. "
-        "Если контекст пуст или непонятен — confidence=low, sp_final=8, в assumptions напиши, что нужны уточнения.\n"
-        "Даже если описание очень большое, короткое или неполное, всё равно оцени по доступному контексту. "
-        "Верни только компактный валидный JSON: без markdown, без комментариев, без текста до или после объекта."
+        "Лимиты: description 1-2 предложения; methods 2-4; complexity 1 предложение; assumptions 0-3, строки до 140 символов.\n"
+        "Story Points = относительная сложность/объём/риск, не время. Формула: sp_final = max(sp_dev, sp_test) / max(SP dev, SP test). "
+        "Шкала Фибоначчи: 1 SP, 2 SP, 3 SP, 5 SP, 8 SP, 13 SP, 18 SP; других значений нельзя. "
+        "18 SP = декомпозиция. Эпики не оценивай как одну задачу: укажи декомпозицию и ставь 13/18. "
+        "Если требования размыты или описание большое, короткое или неполное: confidence=low/medium, SP 8/13 и assumptions с рисками. "
+        "Если это spike/исследование без реализации: 1-2 SP. Не оценивай митинги, ретро, обучение, чаты и чистую документацию: 1 SP и пояснение. "
+        "Опирайся только на контекст, не выдумывай объём. Верни только валидный JSON."
     )
 
 

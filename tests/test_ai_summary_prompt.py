@@ -272,9 +272,8 @@ def test_build_task_context_uses_stored_description_when_jira_context_missing() 
     assert "Bonus tab spec captured from Jira at import time." in context
 
 
-def test_build_task_context_default_limit_keeps_large_confluence_specs(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The default prompt budget must fit large linked Confluence pages better
-    than the old 6k-char limit, while still allowing env override."""
+def test_build_task_context_compacts_large_confluence_specs_preserving_tail(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Large linked Confluence pages should be compact but keep tail requirements."""
     from app.domain.task import Task
     from services.voting_service.ai_summary_llm import _build_task_context
 
@@ -285,7 +284,7 @@ def test_build_task_context_default_limit_keeps_large_confluence_specs(monkeypat
         jira_context=None,
     )
     assert "TAIL_REQUIREMENT_FROM_CONFLUENCE" in context
-    assert len(context) > 7000
+    assert len(context) < 4000
 
 
 def test_validator_corrects_sp_final_below_max() -> None:

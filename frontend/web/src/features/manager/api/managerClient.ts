@@ -1,6 +1,7 @@
 import { appUrl } from "../../../app/config";
 import type { EstimationMode } from "../../../shared/lib/estimationModes";
 import { requestJson } from "../../../shared/api/http";
+import type { AiJobResponse } from "../../../shared/lib/pollAiJob";
 import type {
   CompletedTasksPage,
   JiraPreview,
@@ -10,6 +11,15 @@ import type {
   TaskMutation,
   TaskPage,
 } from "./managerTypes";
+
+export type SessionAiSummaryResult = {
+  session: ManagerSession;
+  cached?: boolean;
+};
+
+export type SessionAiSummaryStartResponse =
+  | ManagerSession
+  | AiJobResponse<SessionAiSummaryResult>;
 
 function appFetch<T>(path: string, init?: RequestInit): Promise<T> {
   return requestJson<T>(appUrl(path), {
@@ -158,7 +168,17 @@ export const managerApi = {
       method: "POST",
       body: JSON.stringify({ estimation_mode: estimationMode ?? undefined }),
     }),
-  generateAiSummary: (chatId: number) => appFetch<ManagerSession>(`/sessions/${chatId}/ai-summary`, { method: "POST" }),
+  generateAiSummary: (chatId: number, topicId: number | null = null) =>
+    appFetch<ManagerSession>(`/sessions/${chatId}/ai-summary${query({ topic_id: topicId })}`, { method: "POST" }),
+  startAiSummary: (chatId: number, topicId: number | null = null) =>
+    appFetch<SessionAiSummaryStartResponse>(
+      `/sessions/${chatId}/ai-summary${query({ topic_id: topicId, async: "1" })}`,
+      { method: "POST" }
+    ),
+  getAiSummaryJob: (chatId: number, jobId: string, topicId: number | null = null) =>
+    appFetch<AiJobResponse<SessionAiSummaryResult>>(
+      `/sessions/${chatId}/ai-summary/jobs/${encodeURIComponent(jobId)}${query({ topic_id: topicId })}`
+    ),
   next: (chatId: number) => appFetch<ManagerSession>(`/sessions/${chatId}/next`, { method: "POST" }),
   skip: (chatId: number) => appFetch<ManagerSession>(`/sessions/${chatId}/skip`, { method: "POST" }),
   finish: (chatId: number) => appFetch<ManagerSession>(`/sessions/${chatId}/finish`, { method: "POST" }),

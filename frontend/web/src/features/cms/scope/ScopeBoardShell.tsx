@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Navigate, Route, Routes, useNavigate, useParams } from "react-router-dom";
 import {
   Alert,
+  AiGenerationProgress,
   AiSparkleButton,
   Badge,
   Button,
@@ -16,11 +17,14 @@ import {
 } from "../../../design-system";
 import {
   cmsScopeApi,
+  type ScopeAiAnalyzeResult,
+  type ScopeAnalyzeStartResponse,
   type ScopeBoardIssue,
   type ScopeBoardRecord,
   type ScopeBoardSnapshot,
   type ScopePriorityQueueKind,
 } from "../api/cmsClient";
+import { pollAiJob } from "../../../shared/lib/pollAiJob";
 import type { CmsPrincipal } from "../api/cmsTypes";
 import {
   HelpCallout,
@@ -509,14 +513,17 @@ function ScopeBoardEditorPage({
   const [saving, setSaving] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
+  const [aiProgress, setAiProgress] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [board, setBoard] = useState<ScopeBoardRecord | null>(null);
   const [aiSummary, setAiSummary] = useState<ScopeAiSummary | null>(null);
   const [aiSummaryHistory, setAiSummaryHistory] = useState<ScopeAiHistoryEntry[]>([]);
   const [selectedAiHistoryId, setSelectedAiHistoryId] = useState<string | null>(null);
+  const [aiPanelOpenSignal, setAiPanelOpenSignal] = useState(0);
   const [form, setForm] = useState<ScopeBoardForm>(defaultForm);
   const [savedForm, setSavedForm] = useState<ScopeBoardForm>(defaultForm);
   const printRootRef = useRef<HTMLDivElement>(null);
+  const aiReportRef = useRef<HTMLDivElement>(null);
 
   const dirty = useMemo(() => JSON.stringify(form) !== JSON.stringify(savedForm), [form, savedForm]);
   const unsavedGuard = useUnsavedChangesGuard({ when: dirty && canManage });
@@ -624,29 +631,51 @@ function ScopeBoardEditorPage({
   const analyzeScope = useCallback(async () => {
     if (boardId === null || Number.isNaN(boardId)) return;
     setAnalyzing(true);
+    setAiProgress("Запускаем AI...");
     setError(null);
-    const controller = new AbortController();
-    const timeoutId = window.setTimeout(() => controller.abort(), 120_000);
-    toast.info("AI анализирует snapshot — обычно 30–60 секунд", { title: "AI-анализ" });
+    window.setTimeout(() => {
+      aiReportRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 0);
     try {
-      const result = await cmsScopeApi.analyze(boardId, { signal: controller.signal });
-      setBoard(result.board);
-      setAiSummary(result.ai_summary);
-      setAiSummaryHistory(result.board.ai_summary_history ?? []);
-      setSelectedAiHistoryId(null);
-      toast.success("AI-анализ готов");
+      const started = await cmsScopeApi.startAnalyze(boardId);
+      const applyResult = (result: ScopeAiAnalyzeResult) => {
+        setBoard(result.board);
+        setAiSummary(result.ai_summary);
+        setAiSummaryHistory(result.board.ai_summary_history ?? []);
+        setSelectedAiHistoryId(null);
+        setAiPanelOpenSignal((value) => value + 1);
+        window.setTimeout(() => {
+          aiReportRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+        }, 80);
+      };
+
+      if (isScopeAnalyzeResult(started)) {
+        applyResult(started);
+        toast.success(started.cached ? "AI-сводка уже актуальна" : "AI-анализ готов");
+        return;
+      }
+
+      const jobId = started.job_id;
+      if (!jobId) {
+        throw new Error("AI job was not started");
+      }
+
+      const result = await pollAiJob<ScopeAiAnalyzeResult>(
+        () => cmsScopeApi.getAnalyzeJob(boardId, jobId),
+        {
+          intervalMs: 1200,
+          onProgress: (job) => setAiProgress(job.message ?? "AI готовит сводку..."),
+        }
+      );
+      applyResult(result);
+      toast.success(result.cached ? "AI-сводка уже актуальна" : "AI-анализ готов");
     } catch (err) {
-      const message =
-        err instanceof DOMException && err.name === "AbortError"
-          ? "AI-анализ занял слишком много времени — попробуйте ещё раз"
-          : err instanceof Error
-            ? err.message
-            : "AI-анализ не выполнен";
+      const message = err instanceof Error ? err.message : "AI-анализ не выполнен";
       setError(message);
       toast.error(message, { title: "Ошибка" });
     } finally {
-      window.clearTimeout(timeoutId);
       setAnalyzing(false);
+      setAiProgress(null);
     }
   }, [boardId, toast]);
 
@@ -918,16 +947,20 @@ function ScopeBoardEditorPage({
               />
               <ScopeAssigneeCharts metrics={metrics} />
               <ScopePlanInsights metrics={metrics} />
-              {(aiSummary || aiSummaryHistory.length > 0) ? (
-                <ScopeAiPanel
-                  summary={aiSummary}
-                  history={aiSummaryHistory}
-                  selectedHistoryId={selectedAiHistoryId}
-                  onSelectHistory={setSelectedAiHistoryId}
-                  metrics={metrics}
-                  openQuestionsCount={resolveOpenQuestions(snapshot).length}
-                />
-              ) : null}
+              <div ref={aiReportRef} className="scroll-mt-24 space-y-3">
+                {analyzing && aiProgress ? <AiGenerationProgress message={aiProgress} /> : null}
+                {(aiSummary || aiSummaryHistory.length > 0) ? (
+                  <ScopeAiPanel
+                    summary={aiSummary}
+                    history={aiSummaryHistory}
+                    selectedHistoryId={selectedAiHistoryId}
+                    onSelectHistory={setSelectedAiHistoryId}
+                    metrics={metrics}
+                    openQuestionsCount={resolveOpenQuestions(snapshot).length}
+                    autoOpenSignal={aiPanelOpenSignal}
+                  />
+                ) : null}
+              </div>
               <ScopeReportSection
                 snapshot={snapshot}
                 canManage={canManage}
@@ -1193,4 +1226,8 @@ function IssueLink({ issue }: { issue: ScopeBoardIssue }) {
     );
   }
   return <span className="font-semibold text-ink">{issue.key}</span>;
+}
+
+function isScopeAnalyzeResult(response: ScopeAnalyzeStartResponse): response is ScopeAiAnalyzeResult {
+  return "ai_summary" in response && "board" in response;
 }

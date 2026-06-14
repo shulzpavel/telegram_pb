@@ -28,7 +28,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Literal, Optional
 
 import redis.asyncio as aioredis
-from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
 
 from app.domain.retro import (
@@ -954,6 +954,7 @@ async def cms_retro_finalize(
 async def cms_retro_analyze(
     retro_id: int,
     request: Request,
+    async_mode: bool = Query(False, alias="async"),
     actor: CmsPrincipal = Depends(require_permission(PERM_RETRO_ANALYZE)),
 ) -> dict:
     store = _get_cms_store(request)
@@ -979,7 +980,26 @@ async def cms_retro_analyze(
         error_detail="Слишком много AI-запросов, попробуйте позже",
     )
 
+    if retro.ai_summary:
+        await _audit(request, "cms.retro.analyze", actor.username, "ok", {"retro_id": retro_id, "cached": True})
+        return {"ai_summary": retro.ai_summary, "cached": True}
+
+    from services.voting_service.ai_job_runners import run_retro_ai_job
+    from services.voting_service.ai_jobs import get_job, get_or_create_job, job_public_view, spawn_ai_job
     from services.voting_service.retro_ai_llm import LlmRetroError, generate_retro_analysis
+
+    if async_mode:
+        redis = await _get_redis(request)
+        job_id, is_new = await get_or_create_job(
+            redis,
+            kind="retro",
+            resource_key=f"retro:{retro_id}",
+            actor=actor.username,
+        )
+        if is_new:
+            spawn_ai_job(run_retro_ai_job(request.app, job_id=job_id, retro_id=retro_id, actor_username=actor.username))
+        job_record = await get_job(redis, job_id)
+        return job_public_view(job_record or {"job_id": job_id, "status": "queued", "phase": "queued", "message": "В очереди"})
 
     http_session = getattr(request.app.state, "http_session", None)
     if http_session is None:
@@ -998,6 +1018,26 @@ async def cms_retro_analyze(
         pass
     await _audit(request, "cms.retro.analyze", actor.username, "ok", {"retro_id": retro_id})
     return {"ai_summary": summary}
+
+
+@retro_router.get("/cms/retros/{retro_id}/analyze/jobs/{job_id}")
+async def cms_retro_analyze_job_status(
+    retro_id: int,
+    job_id: str,
+    request: Request,
+    actor: CmsPrincipal = Depends(require_permission(PERM_RETRO_ANALYZE)),
+) -> dict:
+    await _require_retro_access(request, retro_id, actor)
+
+    from services.voting_service.ai_jobs import get_job, job_public_view
+
+    redis = await _get_redis(request)
+    job = await get_job(redis, job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="AI job not found")
+    if job.get("kind") != "retro" or job.get("resource_key") != f"retro:{retro_id}":
+        raise HTTPException(status_code=404, detail="AI job not found")
+    return job_public_view(job)
 
 
 def _set_ai(retro: Retrospective, summary: dict) -> None:

@@ -76,7 +76,7 @@ function AiSparkleBadge({ label }: { label: string }) {
       aria-label={label}
       className={cn(
         "ai-sparkle",
-        "absolute -right-2 -top-2 z-20 inline-flex h-5 w-5 items-center justify-center",
+        "absolute right-2 top-2 z-20 inline-flex h-5 w-5 items-center justify-center",
         "rounded-full shadow-card",
         "pointer-events-none select-none",
       )}

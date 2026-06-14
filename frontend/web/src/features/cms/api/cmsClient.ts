@@ -15,6 +15,26 @@ import type {
 } from "./cmsTypes";
 import type { RetroAiSummary, RetroLiveState } from "../retro/retroLogic";
 import type { ScopeAiSummary, ScopeAiHistoryEntry } from "../scope/scopeAiTypes";
+import type { AiJobResponse } from "../../../shared/lib/pollAiJob";
+
+export type ScopeAiAnalyzeResult = {
+  ai_summary: ScopeAiSummary;
+  board: ScopeBoardRecord;
+  cached?: boolean;
+};
+
+export type ScopeAnalyzeStartResponse =
+  | ScopeAiAnalyzeResult
+  | AiJobResponse<ScopeAiAnalyzeResult>;
+
+export type RetroAiAnalyzeResult = {
+  ai_summary: RetroAiSummary;
+  cached?: boolean;
+};
+
+export type RetroAnalyzeStartResponse =
+  | RetroAiAnalyzeResult
+  | AiJobResponse<RetroAiAnalyzeResult>;
 
 const CMS_AUTH_HINT_KEY = "planning_poker_cms_auth";
 
@@ -839,6 +859,14 @@ export const cmsScopeApi = {
       method: "POST",
       ...init,
     }),
+  startAnalyze: (boardId: number) =>
+    cmsFetch<ScopeAnalyzeStartResponse>(`/scope-boards/${boardId}/analyze?async=1`, {
+      method: "POST",
+    }),
+  getAnalyzeJob: (boardId: number, jobId: string) =>
+    cmsFetch<AiJobResponse<ScopeAiAnalyzeResult>>(
+      `/scope-boards/${boardId}/analyze/jobs/${encodeURIComponent(jobId)}`
+    ),
   delete: (boardId: number) =>
     cmsFetch<{ ok: boolean; id: number }>(`/scope-boards/${boardId}`, {
       method: "DELETE",
@@ -929,6 +957,12 @@ export const cmsRetroApi = {
     cmsFetch<RetroLiveState>(`/retros/${retroId}/finalize`, { method: "POST" }),
   analyze: (retroId: number) =>
     cmsFetch<{ ai_summary: RetroAiSummary }>(`/retros/${retroId}/analyze`, { method: "POST" }),
+  startAnalyze: (retroId: number) =>
+    cmsFetch<RetroAnalyzeStartResponse>(`/retros/${retroId}/analyze?async=1`, { method: "POST" }),
+  getAnalyzeJob: (retroId: number, jobId: string) =>
+    cmsFetch<AiJobResponse<RetroAiAnalyzeResult>>(
+      `/retros/${retroId}/analyze/jobs/${encodeURIComponent(jobId)}`
+    ),
 };
 
 export const cmsTasksApi = {

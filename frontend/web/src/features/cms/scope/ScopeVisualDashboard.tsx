@@ -104,7 +104,7 @@ export function ScopeVisualDashboard({
             <MetricChip
               label="Выполнено"
               value={formatScopeSp(reportSummary?.doneSp ?? 0)}
-              meta="SP в «Готово»"
+              meta="полный SP задач в «Готово»"
               tone="neutral"
             />
             <MetricChip

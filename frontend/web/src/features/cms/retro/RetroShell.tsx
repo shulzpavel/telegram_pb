@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, Navigate, Route, Routes, useNavigate, useParams } from "react-router-dom";
 import {
+  AiGenerationProgress,
   AiSparkleButton,
   Alert,
   Badge,
@@ -24,10 +25,13 @@ import {
 } from "../components/CmsPrimitives";
 import {
   cmsRetroApi,
+  type RetroAiAnalyzeResult,
+  type RetroAnalyzeStartResponse,
   type RetroConfig,
   type RetroRecord,
   type RetroSectionConfig,
 } from "../api/cmsClient";
+import { pollAiJob } from "../../../shared/lib/pollAiJob";
 import { useUnsavedChangesGuard } from "../hooks/useUnsavedChangesGuard";
 import { GroupingSelectionBar } from "./GroupingSelectionBar";
 import { RetroAiView } from "./RetroAiView";
@@ -630,6 +634,7 @@ function RetroCockpit({
   const { state, error, applyState } = useRetro(token, { participant: false });
   const [busy, setBusy] = useState(false);
   const [ai, setAi] = useState<RetroAiSummary | null>(initialAi);
+  const [aiProgress, setAiProgress] = useState<string | null>(null);
   const [now, setNow] = useState(Date.now());
   const [selectedCardIds, setSelectedCardIds] = useState<Set<string>>(new Set());
   const [groupTitle, setGroupTitle] = useState("");
@@ -657,14 +662,34 @@ function RetroCockpit({
 
   async function analyze() {
     setBusy(true);
+    setAiProgress("Запускаем AI...");
     try {
-      const res = await cmsRetroApi.analyze(retroId);
-      setAi(res.ai_summary);
-      toast.success("AI-анализ готов");
+      const started = await cmsRetroApi.startAnalyze(retroId);
+      if (isRetroAnalyzeResult(started)) {
+        setAi(started.ai_summary);
+        toast.success(started.cached ? "AI-анализ уже актуален" : "AI-анализ готов");
+        return;
+      }
+
+      const jobId = started.job_id;
+      if (!jobId) {
+        throw new Error("AI job was not started");
+      }
+
+      const result = await pollAiJob<RetroAiAnalyzeResult>(
+        () => cmsRetroApi.getAnalyzeJob(retroId, jobId),
+        {
+          intervalMs: 1200,
+          onProgress: (job) => setAiProgress(job.message ?? "AI готовит анализ..."),
+        }
+      );
+      setAi(result.ai_summary);
+      toast.success(result.cached ? "AI-анализ уже актуален" : "AI-анализ готов");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "AI-анализ не выполнен", { title: "Ошибка" });
     } finally {
       setBusy(false);
+      setAiProgress(null);
     }
   }
 
@@ -824,6 +849,7 @@ function RetroCockpit({
           {state.cards.length === 0 ? (
             <p className="text-sm text-ink3">Нет карточек для анализа.</p>
           ) : null}
+          {busy && aiProgress ? <AiGenerationProgress message={aiProgress} /> : null}
           {effectiveAi ? <RetroAiView summary={effectiveAi} /> : null}
         </Surface>
       ) : null}
@@ -1024,4 +1050,8 @@ function ActionItemsPanel({
       </div>
     </Surface>
   );
+}
+
+function isRetroAnalyzeResult(response: RetroAnalyzeStartResponse): response is RetroAiAnalyzeResult {
+  return "ai_summary" in response;
 }

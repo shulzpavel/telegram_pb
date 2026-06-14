@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Badge, cn } from "../../../design-system";
 import { normalizeAiHistory } from "./scopeAiHistory";
 import { ScopeAiView, formatAiTime, HEALTH_LABELS, HEALTH_TONE } from "./ScopeAiView";
@@ -12,6 +12,7 @@ export function ScopeAiPanel({
   onSelectHistory,
   metrics,
   openQuestionsCount = 0,
+  autoOpenSignal = 0,
 }: {
   summary: ScopeAiSummary | null;
   history: ScopeAiHistoryEntry[];
@@ -19,7 +20,9 @@ export function ScopeAiPanel({
   onSelectHistory: (id: string | null) => void;
   metrics?: ScopeBoardMetrics | null;
   openQuestionsCount?: number;
+  autoOpenSignal?: number;
 }) {
+  const [open, setOpen] = useState(false);
   const entries = useMemo(() => normalizeAiHistory(summary, history), [summary, history]);
 
   const activeEntry = useMemo(() => {
@@ -36,8 +39,18 @@ export function ScopeAiPanel({
   const generatedLabel = formatAiTime(activeEntry.generated_at);
   const snapshotLabel = formatAiTime(activeEntry.snapshot_refreshed_at);
 
+  useEffect(() => {
+    if (autoOpenSignal > 0) {
+      setOpen(true);
+    }
+  }, [autoOpenSignal]);
+
   return (
-    <details className="group rounded-lg border border-line bg-surface">
+    <details
+      className="group rounded-lg border border-line bg-surface"
+      open={open}
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+    >
       <summary className="cursor-pointer list-none px-4 py-3 marker:content-none sm:px-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex flex-wrap items-center gap-2">

@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Button, Surface } from "../../../design-system";
+import { Badge, Button, Surface } from "../../../design-system";
 import type {
   ScopeBoardMetrics,
   ScopeDeveloperBreakdown,
@@ -50,6 +50,7 @@ export function ScopeAssigneeCharts({ metrics }: { metrics: ScopeBoardMetrics })
   }
 
   const roleMeta = ROLE_META[role];
+  const roleSummary = summarizeRoleWorkload(metrics, role);
 
   return (
     <Surface className="p-4 sm:p-5">
@@ -57,10 +58,20 @@ export function ScopeAssigneeCharts({ metrics }: { metrics: ScopeBoardMetrics })
         <div>
           <h2 className="text-sm font-semibold text-ink">Нагрузка по ролям</h2>
           <p className="mt-1 text-xs text-ink3">
-            Подтверждено: GitLab API или Jira MR/commit. Оценка: changelog/комментарии. Без источника — «Не
-            атрибутировано» с причиной (нет связи с GitLab, конфликт ролей, нет QA-перехода).
+            Это ролевой срез, а не сумма capacity: одна Jira-задача может одновременно попасть во Front, Back и QA.
+            SP роли = полный SP задачи, если роль участвовала; роли между собой не складываются.
           </p>
         </div>
+        <div className="grid gap-2 text-xs sm:grid-cols-4">
+          <SummaryChip label="Scope всего" value={`${formatScopeSp(roleSummary.scopeSp)} SP`} meta={taskCountLabel(roleSummary.scopeCount)} />
+          <SummaryChip label={roleMeta.label} value={`${formatScopeSp(roleSummary.roleSp)} SP`} meta={taskCountLabel(roleSummary.roleCount)} tone="accent" />
+          <SummaryChip label="Без роли" value={taskCountLabel(roleSummary.unattributedCount)} meta="требует атрибуции" tone={roleSummary.unattributedCount > 0 ? "warning" : "neutral"} />
+          <SummaryChip label="Сравнение" value="не сумма" meta="роли пересекаются" tone="warning" />
+        </div>
+        <p className="rounded-lg border border-amber/25 bg-amber/[0.07] px-3 py-2 text-xs leading-snug text-ink2">
+          «Выполнено» наверху показывает полный SP всех задач в статусе «Готово». Здесь показан только выбранный ролевой срез,
+          поэтому {roleMeta.label} {formatScopeSp(roleSummary.roleSp)} SP не обязан равняться scope {formatScopeSp(roleSummary.scopeSp)} SP.
+        </p>
         <div className="inline-flex rounded-md border border-line bg-surface p-0.5">
           {(Object.keys(ROLE_META) as RoleKey[]).map((key) => (
             <Button
@@ -79,14 +90,14 @@ export function ScopeAssigneeCharts({ metrics }: { metrics: ScopeBoardMetrics })
       </div>
       <div className="grid gap-6 lg:grid-cols-2">
         <RoleDonutCard
-          title="Плановые задачи"
+          title={`Плановые задачи роли ${roleMeta.label}`}
           rows={planByRole?.[role] ?? []}
           coverage={metrics.plan_role_coverage?.[role]}
           accent={roleMeta.accent}
           role={role}
         />
         <RoleDonutCard
-          title="Внеплановые задачи"
+          title={`Внеплановые задачи роли ${roleMeta.label}`}
           rows={unplanByRole?.[role] ?? []}
           coverage={metrics.unplan_role_coverage?.[role]}
           accent={roleMeta.accent}
@@ -94,6 +105,52 @@ export function ScopeAssigneeCharts({ metrics }: { metrics: ScopeBoardMetrics })
         />
       </div>
     </Surface>
+  );
+}
+
+export function summarizeRoleWorkload(metrics: ScopeBoardMetrics, role: RoleKey) {
+  const planRows = metrics.plan_by_role?.[role] ?? [];
+  const unplanRows = metrics.unplan_by_role?.[role] ?? [];
+  const planCoverage = metrics.plan_role_coverage?.[role];
+  const unplanCoverage = metrics.unplan_role_coverage?.[role];
+  return {
+    scopeSp: Math.max(0, metrics.plan_sp) + Math.max(0, metrics.unplan_sp),
+    scopeCount: metrics.plan_count + metrics.unplan_count,
+    roleSp: sumRoleSp(planRows) + sumRoleSp(unplanRows),
+    roleCount: sumRoleCount(planRows) + sumRoleCount(unplanRows),
+    unattributedCount: (planCoverage?.unattributed ?? 0) + (unplanCoverage?.unattributed ?? 0),
+  };
+}
+
+function sumRoleSp(rows: ScopeDeveloperBreakdown[]): number {
+  return rows.reduce((sum, row) => sum + Math.max(0, row.story_points), 0);
+}
+
+function sumRoleCount(rows: ScopeDeveloperBreakdown[]): number {
+  return rows.reduce((sum, row) => sum + Math.max(0, row.count), 0);
+}
+
+function SummaryChip({
+  label,
+  value,
+  meta,
+  tone = "neutral",
+}: {
+  label: string;
+  value: string;
+  meta: string;
+  tone?: "neutral" | "accent" | "warning";
+}) {
+  const valueClass = tone === "accent" ? "text-blue" : tone === "warning" ? "text-amber" : "text-ink";
+  return (
+    <div className="rounded-lg border border-line bg-bg px-3 py-2">
+      <div className="mb-1 flex items-center justify-between gap-2">
+        <p className="text-[10px] font-semibold uppercase tracking-wide text-ink3">{label}</p>
+        {tone === "warning" ? <Badge tone="warning">важно</Badge> : null}
+      </div>
+      <p className={`text-base font-bold ${valueClass}`}>{value}</p>
+      <p className="mt-0.5 text-[11px] text-ink3">{meta}</p>
+    </div>
   );
 }
 
