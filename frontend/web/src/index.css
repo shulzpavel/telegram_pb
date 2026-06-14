@@ -20,7 +20,7 @@
     --c-blue2:      0 119 237;
     --c-green:     48 209  88;
     --c-red:      255  59  48;
-    --c-amber:    255 159  10;
+    --c-amber:    180  83   9;
     --c-purple:   191  90 242;
 
     --shadow-card:  0 1px 3px rgba(0, 0, 0, .06), 0 4px 16px rgba(0, 0, 0, .06);
@@ -519,4 +519,73 @@
    the loaded Inter font; CLS budget stays small. */
 @supports (font-display: swap) {
   body { font-display: swap; }
+}
+
+@media print {
+  @page {
+    margin: 10mm;
+    size: A4;
+  }
+
+  body.scope-print-mode {
+    background: #fff !important;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+
+  body.scope-print-mode > main > header {
+    display: none !important;
+  }
+
+  body.scope-print-mode > main > .mx-auto {
+    max-width: none !important;
+    padding: 0 !important;
+  }
+
+  body.scope-print-mode .scope-board-shell > *:not(.scope-report-print-root) {
+    display: none !important;
+  }
+
+  body.scope-print-mode .scope-no-print,
+  body.scope-print-mode .scope-print-hide {
+    display: none !important;
+  }
+
+  body.scope-print-mode .scope-print-cover {
+    display: block !important;
+    margin-bottom: 1.25rem;
+    padding-bottom: 0.75rem;
+    border-bottom: 1px solid rgb(var(--c-line));
+  }
+
+  body.scope-print-mode .scope-report-print-root {
+    display: block !important;
+  }
+
+  body.scope-print-mode .scope-report-print-root details {
+    break-inside: avoid-page;
+  }
+
+  body.scope-print-mode .scope-report-print-root details > summary {
+    list-style: none;
+  }
+
+  body.scope-print-mode .scope-report-print-root details > summary::-webkit-details-marker {
+    display: none;
+  }
+
+  body.scope-print-mode .scope-report-print-root button,
+  body.scope-print-mode .scope-report-print-root input,
+  body.scope-print-mode .scope-report-print-root textarea,
+  body.scope-print-mode .scope-report-print-root select {
+    display: none !important;
+  }
+
+  body.scope-print-mode .scope-ai-history-aside {
+    display: none !important;
+  }
+
+  body.scope-print-mode .scope-ai-panel-grid {
+    display: block !important;
+  }
 }

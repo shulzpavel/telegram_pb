@@ -8,6 +8,7 @@ export type TabKey =
   | "events"
   | "access"
   | "planner"
+  | "scope"
   | "retro";
 
 export type ThemeMode = "dark" | "light" | "system";

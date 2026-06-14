@@ -182,6 +182,13 @@ CMS_PAGE_DEFINITIONS: list[dict[str, Any]] = [
         "sort_order": 20,
     },
     {
+        "key": "scope",
+        "label": "Отчеты",
+        "path": "/cms/scope",
+        "permission_key": PERM_PLANNER_VIEW,
+        "sort_order": 35,
+    },
+    {
         "key": "retro",
         "label": "Retrospectives",
         "path": "/cms/retro",

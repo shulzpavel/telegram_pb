@@ -83,6 +83,15 @@ export const cmsTabs: CmsTab[] = [
     group: "operations",
   },
   {
+    key: "scope",
+    label: "Отчеты",
+    description: "Месячные отчёты по командам: capacity, статус задач, открытые вопросы и AI-сводка для бизнеса.",
+    permission: CMS_PERMISSIONS.planner,
+    path: "/cms/scope",
+    routePath: "scope",
+    group: "operations",
+  },
+  {
     key: "retro",
     label: "Ретроспективы",
     description: "Живое ретро: настраиваем секции, команда подключается по ссылке, в конце — AI-анализ итогов.",

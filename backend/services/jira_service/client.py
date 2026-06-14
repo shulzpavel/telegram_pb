@@ -1,5 +1,6 @@
 """Jira service client - wraps JiraHttpClient with caching."""
 
+import asyncio
 import os
 from collections import OrderedDict
 from typing import Any, Dict, List, Mapping, Optional
@@ -23,6 +24,7 @@ class JiraServiceClient:
         self._cache: OrderedDict[str, tuple[Any, datetime]] = OrderedDict()
         self._cache_ttl = timedelta(minutes=5)
         self._cache_max_items = max(1, int(os.getenv("JIRA_CACHE_MAX_ITEMS", "1000")))
+        self._inflight: dict[str, asyncio.Task[Any]] = {}
 
     def _get_cache_key(self, operation: str, *args) -> str:
         """Generate cache key."""
@@ -77,6 +79,47 @@ class JiraServiceClient:
 
         return result
 
+    async def parse_jira_scope_issues(
+        self,
+        text: str,
+        max_results: int = 500,
+        *,
+        force_refresh: bool = False,
+        milestone_status_targets: Optional[list[str]] = None,
+        enrich_changelog: bool = True,
+    ) -> Optional[List[Dict[str, Any]]]:
+        """Parse Jira scope-dashboard issues with caching and in-flight deduplication."""
+        targets_key = ",".join(milestone_status_targets or [])
+        enrich_key = "1" if enrich_changelog else "0"
+        cache_key = self._get_cache_key("parse_scope", text, max_results, targets_key, enrich_key)
+
+        if not force_refresh:
+            cached = self._get_cached(cache_key)
+            if cached is not None:
+                return cached
+
+        inflight = self._inflight.get(cache_key)
+        if inflight is not None:
+            return await inflight
+
+        async def _run() -> Optional[List[Dict[str, Any]]]:
+            result = await self._client.parse_jira_scope_issues(
+                text,
+                max_results=max_results,
+                milestone_status_targets=milestone_status_targets,
+                enrich_changelog=enrich_changelog,
+            )
+            if result is not None:
+                self._set_cached(cache_key, result)
+            return result
+
+        task = asyncio.create_task(_run())
+        self._inflight[cache_key] = task
+        try:
+            return await task
+        finally:
+            self._inflight.pop(cache_key, None)
+
     async def update_story_points(self, issue_key: str, story_points: int) -> bool:
         """Update story points (no caching)."""
         # Invalidate cache for this issue
@@ -92,6 +135,11 @@ class JiraServiceClient:
             if issue_key in key:
                 del self._cache[key]
         return await self._client.update_story_points_fields(issue_key, fields)
+
+    async def add_issue_comment(self, issue_key: str, text: str) -> Optional[Dict[str, Any]]:
+        """Append a Jira comment and clear cached issue/search projections."""
+        self._cache.clear()
+        return await self._client.add_issue_comment(issue_key, text)
 
     def get_issue_url(self, issue_key: str) -> str:
         """Get issue URL."""

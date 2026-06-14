@@ -1,0 +1,313 @@
+import { useMemo, useState } from "react";
+import { Button, Surface } from "../../../design-system";
+import type {
+  ScopeBoardMetrics,
+  ScopeDeveloperBreakdown,
+  ScopeRoleBreakdownMap,
+  ScopeRoleCoverageMap,
+} from "../api/cmsClient";
+import { formatScopeSp } from "./scopeBoardHelpers";
+import { RoleContributorsLines } from "./scopeRoleContributors";
+import {
+  buildDeveloperDonutSegments,
+  developerDonutCenter,
+  donutArcs,
+  type DonutSegment,
+} from "./scopeBoardVisuals";
+
+type ChartMode = "sp" | "tasks";
+type RoleKey = "front" | "back" | "qa";
+
+const ROLE_META: Record<
+  RoleKey,
+  { label: string; accent: "info" | "warning" | "neutral"; description: string }
+> = {
+  front: {
+    label: "Front",
+    accent: "neutral",
+    description: "Front по GitLab API (MR/commit), затем Jira-комментарии igaming; оценка — developer из changelog.",
+  },
+  back: {
+    label: "Back",
+    accent: "info",
+    description: "Back по GitLab API (MR/commit), затем Jira-комментарии igaming; оценка — developer из changelog.",
+  },
+  qa: {
+    label: "QA",
+    accent: "warning",
+    description: "Assignee при переходе в test-статус; при отсутствии — комментарии с признаками тестирования.",
+  },
+};
+
+export function ScopeAssigneeCharts({ metrics }: { metrics: ScopeBoardMetrics }) {
+  const [role, setRole] = useState<RoleKey>("front");
+  const planByRole = metrics.plan_by_role;
+  const unplanByRole = metrics.unplan_by_role;
+  const hasData = hasRoleBreakdown(planByRole) || hasRoleBreakdown(unplanByRole);
+
+  if (!hasData) {
+    return null;
+  }
+
+  const roleMeta = ROLE_META[role];
+
+  return (
+    <Surface className="p-4 sm:p-5">
+      <div className="mb-4 space-y-3">
+        <div>
+          <h2 className="text-sm font-semibold text-ink">Нагрузка по ролям</h2>
+          <p className="mt-1 text-xs text-ink3">
+            Подтверждено: GitLab API или Jira MR/commit. Оценка: changelog/комментарии. Без источника — «Не
+            атрибутировано» с причиной (нет связи с GitLab, конфликт ролей, нет QA-перехода).
+          </p>
+        </div>
+        <div className="inline-flex rounded-md border border-line bg-surface p-0.5">
+          {(Object.keys(ROLE_META) as RoleKey[]).map((key) => (
+            <Button
+              key={key}
+              type="button"
+              size="sm"
+              variant={role === key ? "secondary" : "ghost"}
+              className="min-h-7 px-2.5 text-xs"
+              onClick={() => setRole(key)}
+            >
+              {ROLE_META[key].label}
+            </Button>
+          ))}
+        </div>
+        <p className="text-xs text-ink3">{roleMeta.description}</p>
+      </div>
+      <div className="grid gap-6 lg:grid-cols-2">
+        <RoleDonutCard
+          title="Плановые задачи"
+          rows={planByRole?.[role] ?? []}
+          coverage={metrics.plan_role_coverage?.[role]}
+          accent={roleMeta.accent}
+          role={role}
+        />
+        <RoleDonutCard
+          title="Внеплановые задачи"
+          rows={unplanByRole?.[role] ?? []}
+          coverage={metrics.unplan_role_coverage?.[role]}
+          accent={roleMeta.accent}
+          role={role}
+        />
+      </div>
+    </Surface>
+  );
+}
+
+function formatCoverageLabel(coverage?: ScopeRoleCoverageMap[RoleKey], role?: RoleKey): string | null {
+  if (!coverage || coverage.total <= 0) return null;
+  const parts = [`${coverage.attributed} из ${coverage.total} с атрибуцией`];
+  const tiers: string[] = [];
+  if (role && role !== "qa" && coverage.confirmed_gitlab != null && coverage.confirmed_gitlab > 0) {
+    tiers.push(`${coverage.confirmed_gitlab} GitLab`);
+  }
+  if (role === "qa" && coverage.confirmed_jira_qa != null && coverage.confirmed_jira_qa > 0) {
+    tiers.push(`${coverage.confirmed_jira_qa} Jira QA`);
+  }
+  if (coverage.confirmed != null && coverage.confirmed > 0 && role === "qa") {
+    tiers.push(`${coverage.confirmed} подтв.`);
+  }
+  if (coverage.estimated != null && coverage.estimated > 0) {
+    tiers.push(`${coverage.estimated} оценка`);
+  }
+  if (coverage.unresolved_no_gitlab_link != null && coverage.unresolved_no_gitlab_link > 0) {
+    tiers.push(`${coverage.unresolved_no_gitlab_link} без GitLab`);
+  }
+  if (coverage.unresolved_ambiguous_role != null && coverage.unresolved_ambiguous_role > 0) {
+    tiers.push(`${coverage.unresolved_ambiguous_role} конфликт ролей`);
+  }
+  if (coverage.unresolved_no_qa_transition != null && coverage.unresolved_no_qa_transition > 0) {
+    tiers.push(`${coverage.unresolved_no_qa_transition} без QA`);
+  }
+  if (coverage.unattributed != null && coverage.unattributed > 0 && tiers.length === 0) {
+    tiers.push(`${coverage.unattributed} без атрибуции`);
+  }
+  if (tiers.length > 0) {
+    parts.push(`(${tiers.join(" · ")})`);
+  }
+  return parts.join(" ");
+}
+
+function RoleDonutCard({
+  title,
+  rows,
+  coverage,
+  accent,
+  role,
+}: {
+  title: string;
+  rows: ScopeDeveloperBreakdown[];
+  coverage?: ScopeRoleCoverageMap[RoleKey];
+  accent: "info" | "warning" | "neutral";
+  role: RoleKey;
+}) {
+  const [mode, setMode] = useState<ChartMode>("sp");
+  const segments = useMemo(() => buildDeveloperDonutSegments(rows, mode), [rows, mode]);
+  const arcs = useMemo(() => donutArcs(segments), [segments]);
+  const center = useMemo(() => developerDonutCenter(rows, mode), [rows, mode]);
+  const accentClass = accent === "info" ? "text-blue" : accent === "warning" ? "text-amber" : "text-ink";
+  const coverageLabel = formatCoverageLabel(coverage, role);
+
+  return (
+    <div className="rounded-lg border border-line bg-bg p-4">
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h3 className={`text-sm font-semibold ${accentClass}`}>{title}</h3>
+          <p className="mt-0.5 text-xs text-ink3">{rows.length} исполнителей</p>
+          {coverageLabel ? <p className="mt-0.5 text-xs text-ink3">{coverageLabel}</p> : null}
+        </div>
+        <div className="inline-flex rounded-md border border-line bg-surface p-0.5">
+          <ModeButton active={mode === "sp"} onClick={() => setMode("sp")}>
+            SP
+          </ModeButton>
+          <ModeButton active={mode === "tasks"} onClick={() => setMode("tasks")}>
+            Задачи
+          </ModeButton>
+        </div>
+      </div>
+
+      {rows.length === 0 ? (
+        <p className="rounded-lg border border-dashed border-line px-3 py-6 text-center text-sm text-ink3">
+          Нет задач с атрибуцией для этой роли.
+        </p>
+      ) : (
+        <div className="grid gap-4 sm:grid-cols-[minmax(0,140px)_minmax(0,1fr)] sm:items-start">
+          <div className="mx-auto flex flex-col items-center gap-2">
+            <div className="relative h-36 w-36">
+              <svg viewBox="0 0 100 100" className="h-full w-full -rotate-90">
+                <circle cx="50" cy="50" r="38" fill="none" stroke="currentColor" strokeWidth="10" className="text-line2" />
+                {arcs.map((arc) => (
+                  <circle
+                    key={arc.key}
+                    cx="50"
+                    cy="50"
+                    r="38"
+                    fill="none"
+                    stroke={arc.color}
+                    strokeWidth="10"
+                    strokeDasharray={arc.dasharray}
+                    strokeDashoffset={arc.dashoffset}
+                    strokeLinecap="butt"
+                  />
+                ))}
+              </svg>
+              <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center text-center">
+                <p className="text-xl font-bold text-ink">{center.value}</p>
+                <p className="text-[10px] uppercase tracking-wide text-ink3">{center.label}</p>
+              </div>
+            </div>
+          </div>
+          <RoleLegend rows={rows} segments={segments} mode={mode} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ModeButton({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: string;
+}) {
+  return (
+    <Button
+      type="button"
+      size="sm"
+      variant={active ? "secondary" : "ghost"}
+      className="min-h-7 px-2.5 text-xs"
+      onClick={onClick}
+    >
+      {children}
+    </Button>
+  );
+}
+
+function RoleLegend({
+  rows,
+  segments,
+  mode,
+}: {
+  rows: ScopeDeveloperBreakdown[];
+  segments: DonutSegment[];
+  mode: ChartMode;
+}) {
+  const total =
+    mode === "sp"
+      ? rows.reduce((sum, row) => sum + Math.max(0, row.story_points), 0)
+      : rows.reduce((sum, row) => sum + row.count, 0);
+
+  return (
+    <ul className="space-y-2">
+      {rows.map((row) => {
+        const segment = segments.find((item) => item.key === row.developer);
+        const sliceValue = mode === "sp" ? Math.max(0, row.story_points) : row.count;
+        const percent = total > 0 ? Math.round((sliceValue / total) * 100) : 0;
+        return (
+          <li key={row.developer} className="rounded-md border border-line/70 bg-surface">
+            <details>
+              <summary className="flex cursor-pointer list-none items-start gap-2 px-2.5 py-2 marker:content-none">
+                <span
+                  className="mt-1 h-2.5 w-2.5 shrink-0 rounded-full"
+                  style={{ backgroundColor: segment?.color ?? "#94a3b8" }}
+                />
+                <div className="min-w-0 flex-1 text-xs">
+                  <div className="flex items-start justify-between gap-2">
+                    <span className="min-w-0 break-words font-medium text-ink2 [overflow-wrap:anywhere]">{row.developer}</span>
+                    <span className="shrink-0 tabular-nums text-ink3">{percent}%</span>
+                  </div>
+                  <p className="mt-0.5 text-ink3">
+                    {formatScopeSp(row.story_points)} SP · {row.count} задач
+                  </p>
+                </div>
+              </summary>
+              <ul className="space-y-1.5 border-t border-line px-2.5 py-2">
+                {row.issues.map((task) => (
+                  <li key={task.key} className="rounded border border-line/70 bg-bg px-2 py-1.5 text-xs">
+                    <div className="flex flex-wrap items-center gap-2">
+                      {task.url ? (
+                        <a href={task.url} target="_blank" rel="noreferrer" className="font-medium text-accent hover:underline">
+                          {task.key}
+                        </a>
+                      ) : (
+                        <span className="font-medium text-ink">{task.key}</span>
+                      )}
+                      <span className="text-ink3">{formatScopeSp(task.story_points ?? null)} SP</span>
+                    </div>
+                    <p className="mt-1 line-clamp-2 text-ink2">{task.summary}</p>
+                    <div className="mt-1.5">
+                      <RoleContributorsLines issue={task} />
+                    </div>
+                    {task.subtasks?.length ? (
+                      <p className="mt-1 text-ink3">Подзадачи: {task.subtasks.join(", ")}</p>
+                    ) : null}
+                    {task.role_unresolved && Object.keys(task.role_unresolved).length > 0 ? (
+                      <p className="mt-1 text-ink3">
+                        Без атрибуции:{" "}
+                        {Object.entries(task.role_unresolved)
+                          .map(([roleKey, reason]) => `${roleKey}: ${reason}`)
+                          .join("; ")}
+                      </p>
+                    ) : null}
+                    {task.assignee ? <p className="mt-1 text-ink3">Текущий assignee: {task.assignee}</p> : null}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+export function hasRoleBreakdown(map: ScopeRoleBreakdownMap | undefined): boolean {
+  if (!map) return false;
+  return (["front", "back", "qa"] as RoleKey[]).some((role) => (map[role]?.length ?? 0) > 0);
+}

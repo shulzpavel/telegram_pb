@@ -22,3 +22,22 @@ def test_truncate_text_adds_ellipsis() -> None:
     clipped = truncate_text(text, 20)
     assert clipped.endswith("…")
     assert len(clipped) <= 20
+
+
+def test_adf_to_plain_text_inline_card() -> None:
+    adf = {
+        "type": "doc",
+        "content": [
+            {
+                "type": "paragraph",
+                "content": [
+                    {"type": "text", "text": "blocked by "},
+                    {
+                        "type": "inlineCard",
+                        "attrs": {"url": "https://example.atlassian.net/browse/FLEX-2640"},
+                    },
+                ],
+            }
+        ],
+    }
+    assert "FLEX-2640" in adf_to_plain_text(adf)

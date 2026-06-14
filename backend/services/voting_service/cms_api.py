@@ -10,12 +10,14 @@ existing imports keep working.
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
 import logging
 import os
 import secrets
-from datetime import datetime
-from typing import Optional
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from typing import Any, Literal, Optional
 
 import redis.asyncio as aioredis
 from fastapi import APIRouter, Cookie, Depends, Header, HTTPException, Query, Request, Response
@@ -23,6 +25,24 @@ from pydantic import BaseModel, Field
 
 from app.domain.session import Session
 from app.domain.task import Task
+from app.domain.scope_board import (
+    apply_priority_queue_comment,
+    apply_priority_queue_reorder,
+    build_scope_snapshot,
+    compute_scope_metrics,
+    compute_scope_metrics_from_sections,
+    compute_scope_report,
+    compute_scope_report_from_sections,
+    is_scope_creep,
+    merge_priority_queue,
+    merge_scope_issues,
+    normalize_scope_issue,
+    normalize_scope_sections,
+    pause_supplement_jql,
+    priority_queue_label,
+    priority_queue_milestone_targets,
+    sync_legacy_jql_from_sections,
+)
 from app.usecases.close_session import CloseSessionUseCase
 from app.usecases.manage_tasks import (
     AddManualTaskUseCase,
@@ -260,6 +280,59 @@ class SprintPlanCreateRequest(BaseModel):
 class SprintPlanUpdateRequest(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     payload: SprintPlanPayload
+
+
+class ScopeSectionConfigRequest(BaseModel):
+    id: Optional[str] = Field(default=None, max_length=64)
+    name: str = Field(min_length=1, max_length=120)
+    jql: str = Field(min_length=1, max_length=4000)
+    kind: Literal["planned", "unplanned"] = "planned"
+    order: int = Field(ge=0, le=99)
+
+
+class ScopeBoardCreateRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    month: str = Field(min_length=7, max_length=7, pattern=r"^\d{4}-\d{2}$")
+    capacity_sp: float = Field(ge=0, le=99999)
+    scope_sections: list[ScopeSectionConfigRequest] = Field(min_length=1, max_length=20)
+    plan_jql: str = Field(default="", max_length=4000)
+    unplan_jql: str = Field(default="", max_length=4000)
+    todo_jql: str = Field(default="", max_length=4000)
+    test_jql: str = Field(default="", max_length=4000)
+    team_id: Optional[int] = None
+
+
+class ScopeBoardUpdateRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    month: str = Field(min_length=7, max_length=7, pattern=r"^\d{4}-\d{2}$")
+    capacity_sp: float = Field(ge=0, le=99999)
+    scope_sections: list[ScopeSectionConfigRequest] = Field(min_length=1, max_length=20)
+    plan_jql: str = Field(default="", max_length=4000)
+    unplan_jql: str = Field(default="", max_length=4000)
+    todo_jql: str = Field(default="", max_length=4000)
+    test_jql: str = Field(default="", max_length=4000)
+
+
+class ScopeIssueCommentRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=4000)
+
+
+class ScopeManualQuestionRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=1000)
+
+
+class ScopeTopItemRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=500)
+
+
+class ScopeResolveQuestionRequest(BaseModel):
+    comment: str = Field(min_length=1, max_length=4000)
+
+
+class ScopeQueueReorderRequest(BaseModel):
+    order: list[str] = Field(min_length=1, max_length=500)
+    comment: str = Field(min_length=1, max_length=4000)
+    moved_key: str = Field(min_length=1, max_length=64)
 
 
 async def _session_ref(
@@ -1326,3 +1399,1027 @@ async def cms_delete_sprint_plan(
         {"plan_id": plan_id},
     )
     return {"ok": True, "id": plan_id}
+
+
+SCOPE_JQL_MAX_RESULTS = max(1, int(os.getenv("SCOPE_JQL_MAX_RESULTS", "500")))
+
+
+@dataclass
+class _ScopeJqlFetchResult:
+    jql: str
+    issues: list[dict[str, Any]]
+    failed: bool = False
+    truncated: bool = False
+
+
+def _count_snapshot_issues(snapshot: dict[str, Any] | None) -> int:
+    if not snapshot:
+        return 0
+    total = 0
+    for section in snapshot.get("sections") or []:
+        total += len(section.get("issues") or [])
+    for bucket in ("plan_issues", "unplan_issues"):
+        total += len(snapshot.get(bucket) or [])
+    for queue_name in ("todo", "test"):
+        queue = (snapshot.get("priority_queues") or {}).get(queue_name) or {}
+        total += len(queue.get("issues") or [])
+    return total
+
+
+async def _fetch_scope_issues(
+    jql: str,
+    client: Any,
+    *,
+    force_refresh: bool = False,
+    milestone_status_targets: list[str] | None = None,
+    enrich_changelog: bool = False,
+) -> _ScopeJqlFetchResult:
+    cleaned = (jql or "").strip()
+    if not cleaned:
+        return _ScopeJqlFetchResult(jql="", issues=[])
+    try:
+        raw_issues = await client.parse_jira_scope_issues(
+            cleaned,
+            max_results=SCOPE_JQL_MAX_RESULTS,
+            force_refresh=force_refresh,
+            milestone_status_targets=milestone_status_targets,
+            enrich_changelog=enrich_changelog,
+        )
+    except Exception as exc:
+        logger.warning("scope jql fetch failed jql=%s error=%s", cleaned, exc)
+        return _ScopeJqlFetchResult(jql=cleaned, issues=[], failed=True)
+    if raw_issues is None:
+        return _ScopeJqlFetchResult(jql=cleaned, issues=[], failed=True)
+    issues = [normalize_scope_issue(issue) for issue in raw_issues]
+    return _ScopeJqlFetchResult(
+        jql=cleaned,
+        issues=issues,
+        truncated=len(issues) >= SCOPE_JQL_MAX_RESULTS,
+    )
+
+
+async def _fetch_scope_sections(
+    sections: list[dict[str, Any]],
+    client: Any,
+    *,
+    force_refresh: bool = False,
+) -> tuple[list[dict[str, Any]], list[_ScopeJqlFetchResult]]:
+    fetched_sections: list[dict[str, Any]] = []
+    outcomes: list[_ScopeJqlFetchResult] = []
+    for section in sections:
+        jql = str(section.get("jql") or "").strip()
+        if not jql:
+            fetched_sections.append({**section, "issues": []})
+            continue
+        base_outcome, pause_outcome = await asyncio.gather(
+            _fetch_scope_issues(
+                jql,
+                client,
+                force_refresh=force_refresh,
+                enrich_changelog=True,
+            ),
+            _fetch_scope_issues(
+                pause_supplement_jql(jql),
+                client,
+                force_refresh=force_refresh,
+                enrich_changelog=True,
+            ),
+        )
+        outcomes.extend([base_outcome, pause_outcome])
+        fetched_sections.append(
+            {**section, "issues": merge_scope_issues(base_outcome.issues, pause_outcome.issues)}
+        )
+    return fetched_sections, outcomes
+
+
+def _scope_sections_from_request(body: ScopeBoardCreateRequest | ScopeBoardUpdateRequest) -> list[dict[str, Any]]:
+    if body.scope_sections:
+        return normalize_scope_sections([section.model_dump() for section in body.scope_sections])
+    return normalize_scope_sections(None, plan_jql=body.plan_jql, unplan_jql=body.unplan_jql)
+
+
+def _scope_fetch_warnings(outcomes: list[_ScopeJqlFetchResult]) -> list[dict[str, Any]]:
+    return [
+        {"jql": outcome.jql, "truncated": True, "count": len(outcome.issues)}
+        for outcome in outcomes
+        if outcome.jql and outcome.truncated
+    ]
+
+
+def _scope_sections_from_board(board: dict[str, Any]) -> list[dict[str, Any]]:
+    return normalize_scope_sections(
+        board.get("scope_sections"),
+        plan_jql=str(board.get("plan_jql") or ""),
+        unplan_jql=str(board.get("unplan_jql") or ""),
+    )
+
+
+async def _post_jira_issue_comment(issue_key: str, text: str) -> dict[str, Any]:
+    from app.adapters.jira_service_client import JiraServiceHttpClient
+
+    client = JiraServiceHttpClient()
+    try:
+        return await client.add_issue_comment(issue_key, text)
+    finally:
+        await client.close()
+
+
+def _scope_snapshot_has_issue(snapshot: dict[str, Any], issue_key: str) -> bool:
+    target = issue_key.upper()
+    for section in snapshot.get("sections") or []:
+        for issue in section.get("issues") or []:
+            if str(issue.get("key") or "").upper() == target:
+                return True
+    for section in ("plan_issues", "unplan_issues"):
+        for issue in snapshot.get(section) or []:
+            if str(issue.get("key") or "").upper() == target:
+                return True
+    return False
+
+
+def _scope_snapshot_has_queue_issue(snapshot: dict[str, Any], issue_key: str, queue_kind: str) -> bool:
+    queues = snapshot.get("priority_queues") or {}
+    queue = queues.get(queue_kind) or {}
+    target = issue_key.upper()
+    for issue in queue.get("issues") or []:
+        if str(issue.get("key") or "").upper() == target:
+            return True
+    return False
+
+
+def _scope_snapshot_with_comment(
+    snapshot: dict[str, Any],
+    *,
+    issue_key: str,
+    text: str,
+    actor_name: str,
+    commented_at: str,
+) -> dict[str, Any]:
+    updated = copy.deepcopy(snapshot)
+    target = issue_key.upper()
+    for section_name in ("sections",):
+        for section in updated.get(section_name) or []:
+            for issue in section.get("issues") or []:
+                if str(issue.get("key") or "").upper() != target:
+                    continue
+                issue["last_comment"] = text
+                issue["last_comment_author"] = actor_name
+                issue["last_comment_at"] = commented_at
+    for section in ("plan_issues", "unplan_issues"):
+        for issue in updated.get(section) or []:
+            if str(issue.get("key") or "").upper() != target:
+                continue
+            issue["last_comment"] = text
+            issue["last_comment_author"] = actor_name
+            issue["last_comment_at"] = commented_at
+    sections = updated.get("sections") or []
+    if sections:
+        updated["report"] = compute_scope_report_from_sections(sections)
+    else:
+        updated["report"] = compute_scope_report(
+            updated.get("plan_issues") or [],
+            updated.get("unplan_issues") or [],
+        )
+    return updated
+
+
+def _grooming_jira_comment(queue_label: str, comment: str, *, moved_from: Optional[int] = None, moved_to: Optional[int] = None) -> str:
+    prefix = f"[Scope grooming — {queue_label}]"
+    if moved_from is not None and moved_to is not None:
+        return f"{prefix} Позиция {moved_from + 1} → {moved_to + 1}: {comment}"
+    return f"{prefix} {comment}"
+
+
+def _scope_question_id(value: str) -> str:
+    return value.strip()
+
+
+def _scope_snapshot_with_manual_question(
+    snapshot: dict[str, Any],
+    *,
+    text: str,
+    actor_name: str,
+    created_at: str,
+) -> dict[str, Any]:
+    updated = copy.deepcopy(snapshot or {})
+    manual = list(updated.get("manual_questions") or [])
+    manual.append(
+        {
+            "id": f"manual-{secrets.token_hex(6)}",
+            "summary": text,
+            "created_by": actor_name,
+            "created_at": created_at,
+        }
+    )
+    updated["manual_questions"] = manual
+    return updated
+
+
+def _scope_snapshot_with_top_item(
+    snapshot: dict[str, Any],
+    *,
+    text: str,
+    actor_name: str,
+    created_at: str,
+) -> dict[str, Any]:
+    updated = copy.deepcopy(snapshot or {})
+    top_items = list(updated.get("top_items") or [])
+    if len(top_items) >= 10:
+        raise HTTPException(status_code=400, detail="Можно добавить не более 10 пунктов")
+    top_items.append(
+        {
+            "id": f"top-{secrets.token_hex(6)}",
+            "text": text,
+            "created_by": actor_name,
+            "created_at": created_at,
+        }
+    )
+    updated["top_items"] = top_items
+    return updated
+
+
+def _scope_snapshot_without_top_item(snapshot: dict[str, Any], *, item_id: str) -> dict[str, Any]:
+    updated = copy.deepcopy(snapshot or {})
+    target = item_id.strip()
+    top_items = [
+        item
+        for item in (updated.get("top_items") or [])
+        if str(item.get("id") or "") != target
+    ]
+    if len(top_items) == len(updated.get("top_items") or []):
+        raise HTTPException(status_code=404, detail="Top item not found in scope board snapshot")
+    updated["top_items"] = top_items
+    return updated
+
+
+def _scope_snapshot_with_resolved_question(
+    snapshot: dict[str, Any],
+    *,
+    question_id: str,
+    comment: str,
+    actor_name: str,
+    resolved_at: str,
+) -> dict[str, Any]:
+    updated = copy.deepcopy(snapshot or {})
+    target = _scope_question_id(question_id)
+    manual = []
+    resolved_source: Optional[dict[str, Any]] = None
+
+    for question in updated.get("manual_questions") or []:
+        if str(question.get("id") or "") == target:
+            resolved_source = {**question, "kind": "manual"}
+            continue
+        manual.append(question)
+
+    if resolved_source is None:
+        for snapshot_section in updated.get("sections") or []:
+            for issue in snapshot_section.get("issues") or []:
+                if str(issue.get("key") or "").upper() != target.upper():
+                    continue
+                issue["last_comment"] = comment
+                issue["last_comment_author"] = actor_name
+                issue["last_comment_at"] = resolved_at
+                resolved_source = {
+                    "id": issue.get("key"),
+                    "key": issue.get("key"),
+                    "summary": issue.get("summary"),
+                    "url": issue.get("url"),
+                    "status": issue.get("status"),
+                    "priority": issue.get("priority"),
+                    "assignee": issue.get("assignee"),
+                    "bucket": snapshot_section.get("id"),
+                    "section_id": snapshot_section.get("id"),
+                    "section_name": snapshot_section.get("name"),
+                    "section_kind": snapshot_section.get("kind"),
+                    "kind": "jira",
+                }
+                break
+            if resolved_source is not None:
+                break
+
+    if resolved_source is None:
+        for section in ("plan_issues", "unplan_issues"):
+            for issue in updated.get(section) or []:
+                if str(issue.get("key") or "").upper() != target.upper():
+                    continue
+                issue["last_comment"] = comment
+                issue["last_comment_author"] = actor_name
+                issue["last_comment_at"] = resolved_at
+                resolved_source = {
+                    "id": issue.get("key"),
+                    "key": issue.get("key"),
+                    "summary": issue.get("summary"),
+                    "url": issue.get("url"),
+                    "status": issue.get("status"),
+                    "priority": issue.get("priority"),
+                    "assignee": issue.get("assignee"),
+                    "bucket": "plan" if section == "plan_issues" else "unplan",
+                    "kind": "jira",
+                }
+
+    if resolved_source is None:
+        raise HTTPException(status_code=404, detail="Question not found in scope board snapshot")
+
+    updated["manual_questions"] = manual
+    resolved = list(updated.get("resolved_questions") or [])
+    resolved.append(
+        {
+            **resolved_source,
+            "id": target,
+            "comment": comment,
+            "resolved_by": actor_name,
+            "resolved_at": resolved_at,
+        }
+    )
+    updated["resolved_questions"] = resolved[-100:]
+    sections = updated.get("sections") or []
+    if sections:
+        updated["report"] = compute_scope_report_from_sections(sections)
+    else:
+        updated["report"] = compute_scope_report(
+            updated.get("plan_issues") or [],
+            updated.get("unplan_issues") or [],
+        )
+    return updated
+
+
+# ---------------------------------------------------------------------------
+# Monthly scope boards (plan / unplan buffer dashboard).
+# ---------------------------------------------------------------------------
+
+
+@cms_router.get("/cms/scope-boards")
+async def cms_list_scope_boards(
+    request: Request,
+    team_id: Optional[int] = None,
+    sort: Optional[str] = Query(default=None, pattern="^(team_then_updated)?$"),
+    actor: CmsPrincipal = Depends(require_permission(PERM_PLANNER_VIEW)),
+) -> dict:
+    if team_id is not None and not actor.is_superuser:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    scope = team_scope(actor)
+    items = await _get_cms_store(request).list_scope_boards(
+        team_id=team_id,
+        sort_team=sort == "team_then_updated" and actor.is_superuser,
+        **scope,
+    )
+    return {"items": items}
+
+
+@cms_router.post("/cms/scope-boards")
+async def cms_create_scope_board(
+    body: ScopeBoardCreateRequest,
+    request: Request,
+    actor: CmsPrincipal = Depends(require_permission(PERM_PLANNER_VIEW)),
+) -> dict:
+    resolved_team_id = resolve_create_team_id(actor, body.team_id)
+    if resolved_team_id is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Выберите команду — отчёт без команды видят все админы",
+        )
+    scope_sections = _scope_sections_from_request(body)
+    plan_jql, unplan_jql = sync_legacy_jql_from_sections(scope_sections)
+    board = await _get_cms_store(request).create_scope_board(
+        name=body.name,
+        month=body.month,
+        capacity_sp=body.capacity_sp,
+        plan_jql=plan_jql,
+        unplan_jql=unplan_jql,
+        todo_jql=body.todo_jql,
+        test_jql=body.test_jql,
+        scope_sections=scope_sections,
+        created_by=actor.id,
+        team_id=resolved_team_id,
+    )
+    await _audit(
+        request,
+        "cms.scope_board.create",
+        actor.username,
+        "ok",
+        {"board_id": board["id"], "name": board["name"]},
+    )
+    return board
+
+
+@cms_router.get("/cms/scope-boards/{board_id}")
+async def cms_get_scope_board(
+    board_id: int,
+    request: Request,
+    actor: CmsPrincipal = Depends(require_permission(PERM_PLANNER_VIEW)),
+) -> dict:
+    board = await _get_cms_store(request).get_scope_board(board_id)
+    if not board:
+        raise HTTPException(status_code=404, detail="Scope board not found")
+    assert_record_access(actor, board)
+    return board
+
+
+@cms_router.patch("/cms/scope-boards/{board_id}")
+async def cms_update_scope_board(
+    board_id: int,
+    body: ScopeBoardUpdateRequest,
+    request: Request,
+    actor: CmsPrincipal = Depends(require_permission(PERM_PLANNER_VIEW)),
+) -> dict:
+    existing = await _get_cms_store(request).get_scope_board(board_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Scope board not found")
+    assert_record_access(actor, existing)
+    scope_sections = _scope_sections_from_request(body)
+    plan_jql, unplan_jql = sync_legacy_jql_from_sections(scope_sections)
+    board = await _get_cms_store(request).update_scope_board(
+        board_id,
+        name=body.name,
+        month=body.month,
+        capacity_sp=body.capacity_sp,
+        plan_jql=plan_jql,
+        unplan_jql=unplan_jql,
+        todo_jql=body.todo_jql,
+        test_jql=body.test_jql,
+        scope_sections=scope_sections,
+    )
+    if not board:
+        raise HTTPException(status_code=404, detail="Scope board not found")
+    await _audit(
+        request,
+        "cms.scope_board.update",
+        actor.username,
+        "ok",
+        {"board_id": board_id},
+    )
+    return board
+
+
+@cms_router.post("/cms/scope-boards/{board_id}/refresh")
+async def cms_refresh_scope_board(
+    board_id: int,
+    request: Request,
+    actor: CmsPrincipal = Depends(require_permission(PERM_PLANNER_VIEW)),
+) -> dict:
+    existing = await _get_cms_store(request).get_scope_board(board_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Scope board not found")
+    assert_record_access(actor, existing)
+
+    await enforce_rate_limit(
+        await _get_redis(request),
+        key=f"rl:scope_refresh:actor:{actor.username}",
+        limit=int(os.getenv("SCOPE_REFRESH_RATE_MAX", "30")),
+        window_seconds=int(os.getenv("SCOPE_REFRESH_RATE_WINDOW_SECONDS", "3600")),
+        error_detail="Слишком много обновлений из Jira — попробуйте позже",
+    )
+    await enforce_rate_limit(
+        await _get_redis(request),
+        key=f"rl:scope_refresh:board:{board_id}",
+        limit=int(os.getenv("SCOPE_REFRESH_BOARD_RATE_MAX", "12")),
+        window_seconds=int(os.getenv("SCOPE_REFRESH_BOARD_RATE_WINDOW_SECONDS", "3600")),
+        error_detail="Этот отчёт уже часто обновляли — подождите немного",
+    )
+
+    from app.adapters.jira_service_client import JiraServiceHttpClient
+
+    previous_snapshot = existing.get("snapshot") or {}
+    previous_issue_count = _count_snapshot_issues(previous_snapshot)
+    scope_sections = _scope_sections_from_board(existing)
+    refreshed_at = datetime.now(timezone.utc).isoformat()
+    fetch_outcomes: list[_ScopeJqlFetchResult] = []
+
+    client = JiraServiceHttpClient()
+    try:
+        fetched_sections, section_outcomes = await _fetch_scope_sections(
+            scope_sections,
+            client,
+            force_refresh=True,
+        )
+        fetch_outcomes.extend(section_outcomes)
+
+        todo_outcome = _ScopeJqlFetchResult(jql="", issues=[])
+        test_outcome = _ScopeJqlFetchResult(jql="", issues=[])
+        queue_tasks: list[Any] = []
+        if (existing.get("todo_jql") or "").strip():
+            queue_tasks.append(
+                _fetch_scope_issues(
+                    existing.get("todo_jql") or "",
+                    client,
+                    force_refresh=True,
+                    milestone_status_targets=priority_queue_milestone_targets("todo"),
+                    enrich_changelog=True,
+                )
+            )
+        if (existing.get("test_jql") or "").strip():
+            queue_tasks.append(
+                _fetch_scope_issues(
+                    existing.get("test_jql") or "",
+                    client,
+                    force_refresh=True,
+                    milestone_status_targets=priority_queue_milestone_targets("test"),
+                    enrich_changelog=True,
+                )
+            )
+        if queue_tasks:
+            queue_results = await asyncio.gather(*queue_tasks)
+            index = 0
+            if (existing.get("todo_jql") or "").strip():
+                todo_outcome = queue_results[index]
+                fetch_outcomes.append(todo_outcome)
+                index += 1
+            if (existing.get("test_jql") or "").strip():
+                test_outcome = queue_results[index]
+                fetch_outcomes.append(test_outcome)
+    finally:
+        await client.close()
+
+    configured_outcomes = [outcome for outcome in fetch_outcomes if outcome.jql]
+    if configured_outcomes and all(outcome.failed for outcome in configured_outcomes):
+        raise HTTPException(
+            status_code=503,
+            detail="Jira недоступна — snapshot не изменён",
+        )
+    if previous_issue_count > 0 and any(outcome.failed for outcome in configured_outcomes):
+        raise HTTPException(
+            status_code=503,
+            detail="Часть JQL не загрузилась из Jira — snapshot не изменён",
+        )
+
+    todo_issues = todo_outcome.issues
+    test_issues = test_outcome.issues
+
+    for section in fetched_sections:
+        for issue in section.get("issues") or []:
+            issue["scope_creep"] = is_scope_creep(str(issue.get("created") or "") or None, existing["month"])
+    metrics = compute_scope_metrics_from_sections(
+        existing["capacity_sp"],
+        fetched_sections,
+        existing["month"],
+    )
+    snapshot = build_scope_snapshot(
+        sections=fetched_sections,
+        metrics=metrics,
+        refreshed_at=refreshed_at,
+        previous_snapshot=previous_snapshot,
+    )
+    snapshot["manual_questions"] = previous_snapshot.get("manual_questions") or []
+    snapshot["resolved_questions"] = previous_snapshot.get("resolved_questions") or []
+    snapshot["top_items"] = previous_snapshot.get("top_items") or []
+    snapshot["jira_fetch_warnings"] = _scope_fetch_warnings(fetch_outcomes)
+    prev_queues = previous_snapshot.get("priority_queues") or {}
+    snapshot["priority_queues"] = {
+        "todo": merge_priority_queue(
+            todo_issues,
+            prev_queues.get("todo"),
+            queue_label=priority_queue_label("todo"),
+            refreshed_at=refreshed_at,
+        ),
+        "test": merge_priority_queue(
+            test_issues,
+            prev_queues.get("test"),
+            queue_label=priority_queue_label("test"),
+            refreshed_at=refreshed_at,
+        ),
+    }
+    board = await _get_cms_store(request).save_scope_board_snapshot(board_id, snapshot)
+    if not board:
+        raise HTTPException(status_code=404, detail="Scope board not found")
+    await _audit(
+        request,
+        "cms.scope_board.refresh",
+        actor.username,
+        "ok",
+        {"board_id": board_id, "intake_status": metrics["intake_status"]},
+    )
+    return board
+
+
+@cms_router.post("/cms/scope-boards/{board_id}/issues/{issue_key}/comment")
+async def cms_add_scope_issue_comment(
+    board_id: int,
+    issue_key: str,
+    body: ScopeIssueCommentRequest,
+    request: Request,
+    actor: CmsPrincipal = Depends(require_permission(PERM_PLANNER_VIEW)),
+) -> dict:
+    existing = await _get_cms_store(request).get_scope_board(board_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Scope board not found")
+    assert_record_access(actor, existing)
+
+    snapshot = existing.get("snapshot") or {}
+    if not _scope_snapshot_has_issue(snapshot, issue_key):
+        raise HTTPException(status_code=404, detail="Issue not found in scope board snapshot")
+
+    cleaned_text = body.text.strip()
+    if not cleaned_text:
+        raise HTTPException(status_code=400, detail="Comment text is required")
+
+    commented_at = datetime.now(timezone.utc).isoformat()
+    actor_name = actor.display_name or actor.username
+    next_snapshot = _scope_snapshot_with_comment(
+        snapshot,
+        issue_key=issue_key,
+        text=cleaned_text,
+        actor_name=actor_name,
+        commented_at=commented_at,
+    )
+    board = await _get_cms_store(request).save_scope_board_snapshot(board_id, next_snapshot)
+    if not board:
+        raise HTTPException(status_code=404, detail="Scope board not found")
+    try:
+        await _post_jira_issue_comment(issue_key, cleaned_text)
+    except Exception as exc:
+        logger.warning("scope issue comment saved locally but Jira failed key=%s error=%s", issue_key, exc)
+        raise HTTPException(
+            status_code=502,
+            detail="Snapshot сохранён, но комментарий в Jira не отправлен",
+        ) from exc
+    await _audit(
+        request,
+        "cms.scope_board.issue_comment",
+        actor.username,
+        "ok",
+        {"board_id": board_id, "issue_key": issue_key},
+    )
+    return board
+
+
+@cms_router.post("/cms/scope-boards/{board_id}/questions")
+async def cms_add_scope_manual_question(
+    board_id: int,
+    body: ScopeManualQuestionRequest,
+    request: Request,
+    actor: CmsPrincipal = Depends(require_permission(PERM_PLANNER_VIEW)),
+) -> dict:
+    existing = await _get_cms_store(request).get_scope_board(board_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Scope board not found")
+    assert_record_access(actor, existing)
+
+    snapshot = existing.get("snapshot") or {
+        "plan_issues": [],
+        "unplan_issues": [],
+        "metrics": {},
+        "refreshed_at": datetime.now(timezone.utc).isoformat(),
+    }
+    actor_name = actor.display_name or actor.username
+    next_snapshot = _scope_snapshot_with_manual_question(
+        snapshot,
+        text=body.text.strip(),
+        actor_name=actor_name,
+        created_at=datetime.now(timezone.utc).isoformat(),
+    )
+    board = await _get_cms_store(request).save_scope_board_snapshot(board_id, next_snapshot)
+    if not board:
+        raise HTTPException(status_code=404, detail="Scope board not found")
+    await _audit(
+        request,
+        "cms.scope_board.question_create",
+        actor.username,
+        "ok",
+        {"board_id": board_id},
+    )
+    return board
+
+
+@cms_router.post("/cms/scope-boards/{board_id}/top-items")
+async def cms_add_scope_top_item(
+    board_id: int,
+    body: ScopeTopItemRequest,
+    request: Request,
+    actor: CmsPrincipal = Depends(require_permission(PERM_PLANNER_VIEW)),
+) -> dict:
+    existing = await _get_cms_store(request).get_scope_board(board_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Scope board not found")
+    assert_record_access(actor, existing)
+
+    snapshot = existing.get("snapshot") or {
+        "plan_issues": [],
+        "unplan_issues": [],
+        "metrics": {},
+        "refreshed_at": datetime.now(timezone.utc).isoformat(),
+    }
+    actor_name = actor.display_name or actor.username
+    next_snapshot = _scope_snapshot_with_top_item(
+        snapshot,
+        text=body.text.strip(),
+        actor_name=actor_name,
+        created_at=datetime.now(timezone.utc).isoformat(),
+    )
+    board = await _get_cms_store(request).save_scope_board_snapshot(board_id, next_snapshot)
+    if not board:
+        raise HTTPException(status_code=404, detail="Scope board not found")
+    await _audit(
+        request,
+        "cms.scope_board.top_item_create",
+        actor.username,
+        "ok",
+        {"board_id": board_id},
+    )
+    return board
+
+
+@cms_router.delete("/cms/scope-boards/{board_id}/top-items/{item_id}")
+async def cms_delete_scope_top_item(
+    board_id: int,
+    item_id: str,
+    request: Request,
+    actor: CmsPrincipal = Depends(require_permission(PERM_PLANNER_VIEW)),
+) -> dict:
+    existing = await _get_cms_store(request).get_scope_board(board_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Scope board not found")
+    assert_record_access(actor, existing)
+
+    snapshot = existing.get("snapshot") or {}
+    next_snapshot = _scope_snapshot_without_top_item(snapshot, item_id=item_id)
+    board = await _get_cms_store(request).save_scope_board_snapshot(board_id, next_snapshot)
+    if not board:
+        raise HTTPException(status_code=404, detail="Scope board not found")
+    await _audit(
+        request,
+        "cms.scope_board.top_item_delete",
+        actor.username,
+        "ok",
+        {"board_id": board_id, "item_id": item_id},
+    )
+    return board
+
+
+@cms_router.post("/cms/scope-boards/{board_id}/questions/{question_id}/resolve")
+async def cms_resolve_scope_question(
+    board_id: int,
+    question_id: str,
+    body: ScopeResolveQuestionRequest,
+    request: Request,
+    actor: CmsPrincipal = Depends(require_permission(PERM_PLANNER_VIEW)),
+) -> dict:
+    existing = await _get_cms_store(request).get_scope_board(board_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Scope board not found")
+    assert_record_access(actor, existing)
+
+    snapshot = existing.get("snapshot") or {}
+    cleaned_comment = body.comment.strip()
+    if not cleaned_comment:
+        raise HTTPException(status_code=400, detail="Comment text is required")
+
+    if _scope_snapshot_has_issue(snapshot, question_id):
+        await _post_jira_issue_comment(question_id, cleaned_comment)
+
+    actor_name = actor.display_name or actor.username
+    next_snapshot = _scope_snapshot_with_resolved_question(
+        snapshot,
+        question_id=question_id,
+        comment=cleaned_comment,
+        actor_name=actor_name,
+        resolved_at=datetime.now(timezone.utc).isoformat(),
+    )
+    board = await _get_cms_store(request).save_scope_board_snapshot(board_id, next_snapshot)
+    if not board:
+        raise HTTPException(status_code=404, detail="Scope board not found")
+    await _audit(
+        request,
+        "cms.scope_board.question_resolve",
+        actor.username,
+        "ok",
+        {"board_id": board_id, "question_id": question_id},
+    )
+    return board
+
+
+def _parse_priority_queue_kind(raw: str) -> str:
+    kind = raw.strip().lower()
+    if kind not in {"todo", "test"}:
+        raise HTTPException(status_code=400, detail="Queue must be todo or test")
+    return kind
+
+
+@cms_router.post("/cms/scope-boards/{board_id}/queues/{queue_kind}/reorder")
+async def cms_reorder_scope_priority_queue(
+    board_id: int,
+    queue_kind: str,
+    body: ScopeQueueReorderRequest,
+    request: Request,
+    actor: CmsPrincipal = Depends(require_permission(PERM_PLANNER_VIEW)),
+) -> dict:
+    kind = _parse_priority_queue_kind(queue_kind)
+    existing = await _get_cms_store(request).get_scope_board(board_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Scope board not found")
+    assert_record_access(actor, existing)
+
+    snapshot = existing.get("snapshot") or {}
+    queues = dict(snapshot.get("priority_queues") or {})
+    current_queue = queues.get(kind) or {"order": [], "issues": [], "history": []}
+    cleaned_comment = body.comment.strip()
+    if not cleaned_comment:
+        raise HTTPException(status_code=400, detail="Comment text is required")
+
+    actor_name = actor.display_name or actor.username
+    changed_at = datetime.now(timezone.utc).isoformat()
+    queue_label = priority_queue_label(kind)  # type: ignore[arg-type]
+    try:
+        next_queue = apply_priority_queue_reorder(
+            current_queue,
+            order=body.order,
+            comment=cleaned_comment,
+            actor_name=actor_name,
+            changed_at=changed_at,
+            queue_label=queue_label,
+            moved_key=body.moved_key,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    moved_key = None
+    moved_from = None
+    moved_to = None
+    for entry in next_queue.get("history") or []:
+        if entry.get("type") == "reorder" and entry.get("at") == changed_at:
+            moved_key = entry.get("issue_key")
+            moved_from = entry.get("from_index")
+            moved_to = entry.get("to_index")
+            break
+    if moved_key:
+        jira_comment = _grooming_jira_comment(
+            queue_label,
+            cleaned_comment,
+            moved_from=moved_from if isinstance(moved_from, int) else None,
+            moved_to=moved_to if isinstance(moved_to, int) else None,
+        )
+    else:
+        jira_comment = None
+
+    next_snapshot = copy.deepcopy(snapshot)
+    next_queues = dict(next_snapshot.get("priority_queues") or {})
+    next_queues[kind] = next_queue
+    next_snapshot["priority_queues"] = next_queues
+    board = await _get_cms_store(request).save_scope_board_snapshot(board_id, next_snapshot)
+    if not board:
+        raise HTTPException(status_code=404, detail="Scope board not found")
+    if moved_key and jira_comment:
+        try:
+            await _post_jira_issue_comment(str(moved_key), jira_comment)
+        except Exception as exc:
+            logger.warning(
+                "scope queue reorder saved locally but Jira failed key=%s error=%s",
+                moved_key,
+                exc,
+            )
+            raise HTTPException(
+                status_code=502,
+                detail="Порядок сохранён, но комментарий в Jira не отправлен",
+            ) from exc
+    await _audit(
+        request,
+        "cms.scope_board.queue_reorder",
+        actor.username,
+        "ok",
+        {"board_id": board_id, "queue": kind, "issue_key": moved_key},
+    )
+    return board
+
+
+@cms_router.post("/cms/scope-boards/{board_id}/queues/{queue_kind}/issues/{issue_key}/comment")
+async def cms_add_scope_queue_issue_comment(
+    board_id: int,
+    queue_kind: str,
+    issue_key: str,
+    body: ScopeIssueCommentRequest,
+    request: Request,
+    actor: CmsPrincipal = Depends(require_permission(PERM_PLANNER_VIEW)),
+) -> dict:
+    kind = _parse_priority_queue_kind(queue_kind)
+    existing = await _get_cms_store(request).get_scope_board(board_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Scope board not found")
+    assert_record_access(actor, existing)
+
+    snapshot = existing.get("snapshot") or {}
+    if not _scope_snapshot_has_queue_issue(snapshot, issue_key, kind):
+        raise HTTPException(status_code=404, detail="Issue not found in queue")
+
+    cleaned_text = body.text.strip()
+    if not cleaned_text:
+        raise HTTPException(status_code=400, detail="Comment text is required")
+
+    queue_label = priority_queue_label(kind)  # type: ignore[arg-type]
+    actor_name = actor.display_name or actor.username
+    changed_at = datetime.now(timezone.utc).isoformat()
+    queues = dict(snapshot.get("priority_queues") or {})
+    current_queue = queues.get(kind) or {"order": [], "issues": [], "history": []}
+    try:
+        next_queue = apply_priority_queue_comment(
+            current_queue,
+            issue_key=issue_key,
+            comment=cleaned_text,
+            actor_name=actor_name,
+            changed_at=changed_at,
+            queue_label=queue_label,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    next_snapshot = copy.deepcopy(snapshot)
+    next_queues = dict(next_snapshot.get("priority_queues") or {})
+    next_queues[kind] = next_queue
+    next_snapshot["priority_queues"] = next_queues
+    board = await _get_cms_store(request).save_scope_board_snapshot(board_id, next_snapshot)
+    if not board:
+        raise HTTPException(status_code=404, detail="Scope board not found")
+    try:
+        await _post_jira_issue_comment(issue_key, _grooming_jira_comment(queue_label, cleaned_text))
+    except Exception as exc:
+        logger.warning("scope queue comment saved locally but Jira failed key=%s error=%s", issue_key, exc)
+        raise HTTPException(
+            status_code=502,
+            detail="Комментарий сохранён в отчёте, но не отправлен в Jira",
+        ) from exc
+    await _audit(
+        request,
+        "cms.scope_board.queue_comment",
+        actor.username,
+        "ok",
+        {"board_id": board_id, "queue": kind, "issue_key": issue_key},
+    )
+    return board
+
+
+@cms_router.post("/cms/scope-boards/{board_id}/analyze")
+async def cms_analyze_scope_board(
+    board_id: int,
+    request: Request,
+    actor: CmsPrincipal = Depends(require_permission(PERM_PLANNER_VIEW)),
+) -> dict:
+    store = _get_cms_store(request)
+    board = await store.get_scope_board(board_id)
+    if not board:
+        raise HTTPException(status_code=404, detail="Scope board not found")
+    assert_record_access(actor, board)
+    snapshot = board.get("snapshot")
+    if not snapshot:
+        raise HTTPException(status_code=400, detail="Нет snapshot — сначала обновите board из Jira")
+
+    await enforce_rate_limit(
+        await _get_redis(request),
+        key=f"rl:scope_ai:actor:{actor.username}",
+        limit=int(os.getenv("SCOPE_AI_RATE_MAX", "20")),
+        window_seconds=int(os.getenv("SCOPE_AI_RATE_WINDOW_SECONDS", "3600")),
+        error_detail="Слишком много AI-запросов, попробуйте позже",
+    )
+
+    from services.voting_service.scope_ai_llm import LlmScopeError, generate_scope_analysis
+
+    http_session = getattr(request.app.state, "http_session", None)
+    if http_session is None:
+        raise HTTPException(status_code=503, detail="AI is not configured")
+    try:
+        summary = await generate_scope_analysis(http_session, board)
+    except LlmScopeError as exc:
+        await _audit(
+            request,
+            "cms.scope_board.analyze",
+            actor.username,
+            "error",
+            {"board_id": board_id, "error": exc.message},
+        )
+        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+
+    updated = await store.save_scope_board_ai_summary(
+        board_id,
+        summary,
+        snapshot_refreshed_at=snapshot.get("refreshed_at") if isinstance(snapshot, dict) else None,
+    )
+    if not updated:
+        raise HTTPException(status_code=404, detail="Scope board not found")
+    await _audit(
+        request,
+        "cms.scope_board.analyze",
+        actor.username,
+        "ok",
+        {"board_id": board_id, "health": summary.get("health")},
+    )
+    return {"ai_summary": summary, "board": updated}
+
+
+@cms_router.delete("/cms/scope-boards/{board_id}")
+async def cms_delete_scope_board(
+    board_id: int,
+    request: Request,
+    actor: CmsPrincipal = Depends(require_permission(PERM_PLANNER_VIEW)),
+) -> dict:
+    existing = await _get_cms_store(request).get_scope_board(board_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Scope board not found")
+    assert_record_access(actor, existing)
+    deleted = await _get_cms_store(request).delete_scope_board(board_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Scope board not found")
+    await _audit(
+        request,
+        "cms.scope_board.delete",
+        actor.username,
+        "ok",
+        {"board_id": board_id},
+    )
+    return {"ok": True, "id": board_id}

@@ -19,6 +19,13 @@ def adf_to_plain_text(node: Any) -> str:
     node_type = node.get("type")
     if node_type == "text":
         return str(node.get("text") or "")
+    if node_type == "inlineCard":
+        url = str((node.get("attrs") or {}).get("url") or "").strip()
+        if url:
+            return url.rstrip("/").split("/")[-1]
+        return ""
+    if node_type == "mention":
+        return str((node.get("attrs") or {}).get("text") or "")
 
     children = node.get("content") or []
     inner = "".join(adf_to_plain_text(child) for child in children)

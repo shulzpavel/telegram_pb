@@ -30,6 +30,7 @@ describe("CMS navigation", () => {
       "overview",
       "planner",
       "sessions",
+      "scope",
       "retro",
       "users",
       "tokens",
@@ -95,7 +96,7 @@ describe("CMS navigation", () => {
       ],
     });
 
-    expect(visibleCmsTabs(admin).map((tab) => tab.key)).toEqual(["users", "sessions", "planner", "retro"]);
+    expect(visibleCmsTabs(admin).map((tab) => tab.key)).toEqual(["users", "sessions", "planner", "scope", "retro"]);
   });
 
   it("falls back to static order when pages are not present in auth payload", () => {
@@ -115,7 +116,7 @@ describe("CMS navigation", () => {
   });
 
   it("keeps the canonical tab count stable", () => {
-    expect(cmsTabs).toHaveLength(8);
+    expect(cmsTabs).toHaveLength(9);
   });
 });
 
@@ -134,6 +135,7 @@ describe("groupVisibleTabs", () => {
     expect(grouped.find((g) => g.group.key === "operations")?.items.map((t) => t.key)).toEqual([
       "planner",
       "sessions",
+      "scope",
       "retro",
       "users",
       "tokens",

@@ -12,12 +12,60 @@ import aiohttp
 
 from app.ports.jira_client import JiraClient
 from app.utils.jira_html import html_to_plain_text, sanitize_jira_html
+from app.utils.jira_changelog import (
+    epic_linked_at,
+    infer_developer_from_changelog,
+    infer_qa_from_changelog,
+    is_dev_status,
+    status_entered_at,
+    status_entered_at_for_targets,
+    status_matches_any_target,
+    _test_status_keywords,
+)
+from app.utils.jira_role_contributors import (
+    build_subtask_workload_items,
+    infer_role_contributors_from_comments,
+    merge_role_contributors,
+    role_contributors_list,
+)
+from app.utils.gitlab_role_evidence import (
+    build_gitlab_api_contributors,
+    build_gitlab_api_workload_items,
+    unresolved_reason_for_role,
+)
+from app.adapters.gitlab_http import GitLabHttpClient, gitlab_configured
 from app.utils.jira_text import adf_to_plain_text, truncate_text
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_MAX_CONTEXT_CHARS = 16000
 _URL_RE = re.compile(r"https?://[^\s<>'\")]+", re.IGNORECASE)
+
+
+def _plan_change_reason_field_id() -> str:
+    return os.getenv("JIRA_PLAN_CHANGE_REASON_FIELD", "customfield_13047").strip()
+
+
+def _plan_status_field_id() -> str:
+    return os.getenv("JIRA_PLAN_STATUS_FIELD", "customfield_13045").strip()
+
+
+def _jira_custom_field_values(raw: Any) -> list[str]:
+    if raw is None:
+        return []
+    if isinstance(raw, str):
+        cleaned = raw.strip()
+        return [cleaned] if cleaned else []
+    if isinstance(raw, dict):
+        label = str(raw.get("value") or raw.get("name") or "").strip()
+        return [label] if label else []
+    if isinstance(raw, list):
+        values: list[str] = []
+        for item in raw:
+            values.extend(_jira_custom_field_values(item))
+        return values
+    cleaned = str(raw).strip()
+    return [cleaned] if cleaned else []
 
 
 def _normalise_base_url(value: str) -> str:
@@ -283,6 +331,609 @@ class JiraHttpClient(JiraClient):
 
         return None
 
+    _SCOPE_SEARCH_FIELDS = [
+        "summary",
+        "status",
+        "issuetype",
+        "labels",
+        "created",
+        "updated",
+        "priority",
+        "assignee",
+        "reporter",
+        "components",
+        "fixVersions",
+        "versions",
+        "duedate",
+        "resolution",
+        "resolutiondate",
+        "statuscategorychangedate",
+        "parent",
+        "customfield_10013",  # Epic Link
+        "customfield_10018",  # Sprint
+        "customfield_10001",  # Team
+        "customfield_10584",  # Severity
+        "customfield_11905",  # Team labels
+        "customfield_13012",  # Domain
+        "customfield_10020",  # Request Type
+        "customfield_10100",  # Checklist Progress %
+        "customfield_10030",  # Story point estimate
+        "customfield_11242",  # Story points (alt)
+        "customfield_11407",  # Story Points_ plan
+        "customfield_11408",  # Story Points_ fact
+        "customfield_12978",  # Story Points dev
+        "customfield_12979",  # Story Points test
+        "comment",
+    ]
+
+    _SCOPE_STORY_POINT_FIELDS = [
+        "customfield_10030",
+        "customfield_11242",
+        "customfield_11407",
+        "customfield_12978",
+        "customfield_12979",
+    ]
+
+    def _scope_search_field_ids(self) -> list[str]:
+        from config import JIRA_SP_BACK_FIELD, JIRA_SP_FRONT_FIELD, JIRA_SP_QA_FIELD
+
+        fields = [*self._SCOPE_SEARCH_FIELDS, self.story_points_field, "key"]
+        for field_id in (_plan_status_field_id(), _plan_change_reason_field_id(), "customfield_13401"):
+            if field_id and field_id not in fields:
+                fields.append(field_id)
+        for field_id in (JIRA_SP_FRONT_FIELD, JIRA_SP_BACK_FIELD, JIRA_SP_QA_FIELD):
+            if field_id and field_id not in fields:
+                fields.append(field_id)
+        return fields
+
+    async def search_scope_issues(self, jql: str, max_results: int = 500) -> Optional[Dict[str, Any]]:
+        """Search issues with fields needed for the monthly scope dashboard."""
+        max_results = max(1, min(max_results, 1000))
+        page_size = min(100, max_results)
+        fields = self._scope_search_field_ids()
+        issues: List[Dict[str, Any]] = []
+        start_at = 0
+
+        while len(issues) < max_results:
+            payload = {
+                "jql": jql,
+                "startAt": start_at,
+                "maxResults": min(page_size, max_results - len(issues)),
+                "fields": fields,
+            }
+            result = await self._make_request("POST", "search", payload, api_versions=["3"])
+            page = result.get("issues", []) if result else []
+            if not page:
+                break
+            issues.extend(page)
+            total = result.get("total") if result else None
+            start_at += len(page)
+            if len(page) < payload["maxResults"] or (isinstance(total, int) and start_at >= total):
+                break
+
+        if issues:
+            page = issues[:max_results]
+            return {
+                "issues": page,
+                "maxResults": max_results,
+                "truncated": len(page) >= max_results,
+            }
+
+        legacy_issues: List[Dict[str, Any]] = []
+        next_page_token: Optional[str] = None
+        while len(legacy_issues) < max_results:
+            legacy_payload: Dict[str, Any] = {
+                "jql": jql,
+                "maxResults": min(page_size, max_results - len(legacy_issues)),
+                "fields": fields,
+            }
+            if next_page_token:
+                legacy_payload["nextPageToken"] = next_page_token
+            legacy_result = await self._make_request("POST", "search/jql", legacy_payload, api_versions=["3"])
+            page = legacy_result.get("issues", []) if legacy_result else []
+            if not page:
+                break
+            legacy_issues.extend(page)
+            next_page_token = legacy_result.get("nextPageToken") if legacy_result else None
+            if not next_page_token or len(page) < legacy_payload["maxResults"]:
+                break
+
+        if legacy_issues:
+            hydrated = await self._hydrate_legacy_issue_rows(legacy_issues, max_results)
+            if hydrated:
+                return {
+                    "issues": hydrated,
+                    "maxResults": max_results,
+                    "truncated": len(hydrated) >= max_results,
+                }
+        return {"issues": [], "maxResults": max_results, "truncated": False}
+
+    async def _hydrate_legacy_issue_rows(
+        self,
+        issues: List[Dict[str, Any]],
+        max_results: int,
+    ) -> List[Dict[str, Any]]:
+        """Legacy search/jql may return rows with id but no key — hydrate before parsing."""
+        if not issues:
+            return []
+        if issues[0].get("key"):
+            return issues[:max_results]
+        detailed: List[Dict[str, Any]] = []
+        for issue in issues[:max_results]:
+            issue_id = issue.get("id")
+            if not issue_id:
+                continue
+            detail = await self._make_request("GET", f"issue/{issue_id}", api_versions=["3", "2"])
+            if detail:
+                detailed.append(detail)
+        return detailed
+
+    def _scope_issue_from_raw(self, issue: Dict[str, Any]) -> Dict[str, Any]:
+        issue_key = issue.get("key")
+        if not issue_key:
+            return {}
+        fields = issue.get("fields", {})
+        summary = fields.get("summary", issue_key)
+        raw_story_points = fields.get(self.story_points_field)
+        story_points_source = self.story_points_field if isinstance(raw_story_points, (int, float)) else None
+        if not isinstance(raw_story_points, (int, float)):
+            for field_id in self._SCOPE_STORY_POINT_FIELDS:
+                value = fields.get(field_id)
+                if isinstance(value, (int, float)):
+                    raw_story_points = value
+                    story_points_source = field_id
+                    break
+        story_points = raw_story_points if isinstance(raw_story_points, (int, float)) else None
+
+        status_field = fields.get("status") or {}
+        status_category_field = status_field.get("statusCategory") or {}
+        issue_type_field = fields.get("issuetype") or {}
+        parent_field = fields.get("parent") or {}
+        priority_field = fields.get("priority") or {}
+        assignee_field = fields.get("assignee") or {}
+        reporter_field = fields.get("reporter") or {}
+        team_field = fields.get("customfield_10001") or {}
+        plan_status_field = fields.get(_plan_status_field_id()) or {}
+        plan_change_reasons = _jira_custom_field_values(fields.get(_plan_change_reason_field_id()))
+        final_priority_field = fields.get("customfield_13401") or {}
+        severity_field = fields.get("customfield_10584") or {}
+        domain_field = fields.get("customfield_13012") or {}
+        request_type_field = fields.get("customfield_10020") or {}
+        resolution_field = fields.get("resolution") or {}
+
+        def _names(values: Any) -> List[str]:
+            if not isinstance(values, list):
+                return []
+            result: List[str] = []
+            for item in values:
+                if isinstance(item, dict):
+                    name = item.get("name") or item.get("value")
+                    if name:
+                        result.append(str(name))
+                elif item:
+                    result.append(str(item))
+            return result
+
+        sprint_names = _names(fields.get("customfield_10018"))
+        comment_field = fields.get("comment")
+        last_comment = self._extract_last_comment(comment_field)
+        comments = comment_field.get("comments") if isinstance(comment_field, dict) else []
+        role_from_comments = infer_role_contributors_from_comments(comments if isinstance(comments, list) else [])
+
+        from config import JIRA_SP_BACK_FIELD, JIRA_SP_FRONT_FIELD, JIRA_SP_QA_FIELD
+
+        return {
+            "key": issue_key,
+            "summary": summary,
+            "url": self.get_issue_url(issue_key),
+            "story_points": story_points,
+            "story_points_source": story_points_source,
+            "story_points_plan": fields.get("customfield_11407"),
+            "story_points_fact": fields.get("customfield_11408"),
+            "story_points_dev": fields.get("customfield_12978"),
+            "story_points_test": fields.get("customfield_12979"),
+            "story_points_front": fields.get(JIRA_SP_FRONT_FIELD) if JIRA_SP_FRONT_FIELD else None,
+            "story_points_back": fields.get(JIRA_SP_BACK_FIELD) if JIRA_SP_BACK_FIELD else None,
+            "story_points_qa": fields.get(JIRA_SP_QA_FIELD) if JIRA_SP_QA_FIELD else None,
+            "story_point_estimate": fields.get("customfield_10030"),
+            "status": {
+                "name": status_field.get("name") or "",
+                "category": status_category_field.get("key") or status_category_field.get("name") or "",
+            },
+            "issue_type": {"name": issue_type_field.get("name") or ""},
+            "labels": [str(label) for label in (fields.get("labels") or []) if label],
+            "created": fields.get("created"),
+            "updated": fields.get("updated"),
+            "status_changed_at": fields.get("statuscategorychangedate"),
+            "due_date": fields.get("duedate"),
+            "resolution": resolution_field.get("name") or "",
+            "resolution_date": fields.get("resolutiondate"),
+            "parent_key": parent_field.get("key") or "",
+            "epic_key": fields.get("customfield_10013") or "",
+            "priority": priority_field.get("name") or "",
+            "assignee": assignee_field.get("displayName") or "",
+            "reporter": reporter_field.get("displayName") or "",
+            "components": _names(fields.get("components")),
+            "fix_versions": _names(fields.get("fixVersions")),
+            "versions": _names(fields.get("versions")),
+            "sprints": sprint_names,
+            "sprint": sprint_names[-1] if sprint_names else "",
+            "team": team_field.get("name") or team_field.get("value") or team_field.get("title") or "",
+            "team_labels": [str(label) for label in (fields.get("customfield_11905") or []) if label],
+            "plan_status": plan_status_field.get("value") or plan_status_field.get("name") or "",
+            "plan_change_reason": ", ".join(plan_change_reasons),
+            "plan_change_reasons": plan_change_reasons,
+            "final_priority": final_priority_field.get("value") or "",
+            "severity": severity_field.get("value") or "",
+            "domain": domain_field.get("value") or "",
+            "request_type": request_type_field.get("requestType", {}).get("name")
+            if isinstance(request_type_field.get("requestType"), dict)
+            else "",
+            "checklist_progress": fields.get("customfield_10100"),
+            "role_contributors_from_comments": role_from_comments,
+            "_comments": comments if isinstance(comments, list) else [],
+            **last_comment,
+        }
+
+    def _extract_last_comment(self, comment_field: Any) -> Dict[str, Any]:
+        if not isinstance(comment_field, dict):
+            return {}
+        comments = comment_field.get("comments")
+        if not isinstance(comments, list) or not comments:
+            return {}
+        last = max(comments, key=lambda item: str(item.get("created") or ""))
+        body = last.get("body")
+        text = truncate_text(adf_to_plain_text(body), 1200) if body else ""
+        author = last.get("author") or {}
+        return {
+            "last_comment": text,
+            "last_comment_author": str(author.get("displayName") or ""),
+            "last_comment_at": last.get("created"),
+        }
+
+    def _scope_subtask_from_raw(self, issue: Dict[str, Any]) -> Dict[str, Any]:
+        issue_key = issue.get("key")
+        if not issue_key:
+            return {}
+        fields = issue.get("fields", {})
+        comment_field = fields.get("comment")
+        comments = comment_field.get("comments") if isinstance(comment_field, dict) else []
+        return {
+            "key": issue_key,
+            "summary": str(fields.get("summary") or issue_key),
+            "labels": [str(label) for label in (fields.get("labels") or []) if label],
+            "comments": comments if isinstance(comments, list) else [],
+        }
+
+    async def _fetch_subtasks_by_parent(self, parent_keys: list[str]) -> dict[str, list[dict[str, Any]]]:
+        grouped: dict[str, list[dict[str, Any]]] = {}
+        keys = [str(key).strip() for key in parent_keys if str(key).strip()]
+        if not keys:
+            return grouped
+
+        chunk_size = max(1, int(os.getenv("SCOPE_JIRA_SUBTASK_BATCH_SIZE", "40")))
+        for start in range(0, len(keys), chunk_size):
+            batch = keys[start : start + chunk_size]
+            jql = f"parent in ({','.join(batch)})"
+            response = await self.search_scope_issues(jql, max_results=500)
+            for issue in response.get("issues", []) if response else []:
+                parsed = self._scope_subtask_from_raw(issue)
+                if not parsed:
+                    continue
+                parent = (issue.get("fields") or {}).get("parent") or {}
+                parent_key = str(parent.get("key") or "").strip()
+                if not parent_key:
+                    continue
+                grouped.setdefault(parent_key, []).append(parsed)
+        return grouped
+
+    def _merge_gitlab_and_comment_workload_items(
+        self,
+        api_items: list[dict[str, str]],
+        comment_items: list[dict[str, str]],
+    ) -> list[dict[str, str]]:
+        merged = list(api_items)
+        seen = {(str(item.get("role") or ""), str(item.get("subtask_key") or "")) for item in api_items}
+        for item in comment_items:
+            key = (str(item.get("role") or ""), str(item.get("subtask_key") or ""))
+            if key in seen:
+                continue
+            merged.append(item)
+            seen.add(key)
+        return merged
+
+    async def _enrich_scope_issues_gitlab(self, issues: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        if not issues or not gitlab_configured():
+            return issues
+
+        keys: list[str] = []
+        for issue in issues:
+            issue_key = str(issue.get("key") or "").strip()
+            if issue_key:
+                keys.append(issue_key)
+            for subtask in issue.get("_subtasks") or []:
+                if isinstance(subtask, dict):
+                    subtask_key = str(subtask.get("key") or "").strip()
+                    if subtask_key:
+                        keys.append(subtask_key)
+
+        client = GitLabHttpClient()
+        try:
+            evidence_by_key = await client.fetch_evidence_by_keys(keys)
+        finally:
+            await client.close()
+
+        if not evidence_by_key:
+            return issues
+
+        for issue in issues:
+            issue_key = str(issue.get("key") or "").strip().upper()
+            issue["_gitlab_raw"] = evidence_by_key.get(issue_key) or {"merge_requests": [], "commits": []}
+            for subtask in issue.get("_subtasks") or []:
+                if not isinstance(subtask, dict):
+                    continue
+                subtask_key = str(subtask.get("key") or "").strip().upper()
+                subtask["_gitlab_raw"] = evidence_by_key.get(subtask_key) or {"merge_requests": [], "commits": []}
+        return issues
+
+    def _apply_scope_status_fallback(self, issue: dict[str, Any]) -> dict[str, Any]:
+        """Use Jira statuscategorychangedate when changelog enrichment is skipped."""
+        enriched = {**issue}
+        if not enriched.get("status_entered_at"):
+            changed_at = str(enriched.get("status_changed_at") or "").strip()
+            if changed_at:
+                enriched["status_entered_at"] = changed_at
+        return self._finalize_scope_issue_roles(enriched)
+
+    def _finalize_scope_issue_roles(
+        self,
+        issue: dict[str, Any],
+        *,
+        histories: Optional[list[dict[str, Any]]] = None,
+    ) -> dict[str, Any]:
+        enriched = {**issue}
+        status_field = enriched.get("status")
+        if isinstance(status_field, dict):
+            status_name = str(status_field.get("name") or "")
+        else:
+            status_name = str(status_field or "")
+        assignee = str(enriched.get("assignee") or "")
+
+        if not enriched.get("developer"):
+            developer, developer_source = infer_developer_from_changelog(
+                histories or [],
+                current_status=status_name,
+                current_assignee=assignee,
+            )
+            enriched["developer"] = developer
+            enriched["developer_source"] = developer_source
+
+        qa_name = ""
+        qa_source = ""
+        if histories:
+            qa_name, qa_source = infer_qa_from_changelog(
+                histories,
+                current_status=status_name,
+                current_assignee=assignee,
+            )
+        elif assignee and is_dev_status(status_name, _test_status_keywords()):
+            qa_name = assignee
+            qa_source = "current"
+
+        subtasks = enriched.get("_subtasks") if isinstance(enriched.get("_subtasks"), list) else []
+        parent_gitlab_items = build_gitlab_api_workload_items(
+            enriched.get("_gitlab_raw") if isinstance(enriched.get("_gitlab_raw"), dict) else {},
+            jira_key=str(enriched.get("key") or ""),
+        )
+        subtask_gitlab_items: list[dict[str, str]] = []
+        for subtask in subtasks:
+            if not isinstance(subtask, dict):
+                continue
+            subtask_gitlab_items.extend(
+                build_gitlab_api_workload_items(
+                    subtask.get("_gitlab_raw") if isinstance(subtask.get("_gitlab_raw"), dict) else {},
+                    jira_key=str(enriched.get("key") or ""),
+                    subtask_key=str(subtask.get("key") or ""),
+                    subtask_summary=str(subtask.get("summary") or ""),
+                )
+            )
+
+        comment_workload_items = build_subtask_workload_items(subtasks)
+        api_workload_items = parent_gitlab_items + subtask_gitlab_items
+        workload_items_input = self._merge_gitlab_and_comment_workload_items(api_workload_items, comment_workload_items)
+        from_gitlab_api = build_gitlab_api_contributors(parent_gitlab_items)
+
+        merged, workload_items = merge_role_contributors(
+            from_comments=enriched.get("role_contributors_from_comments")
+            if isinstance(enriched.get("role_contributors_from_comments"), dict)
+            else {},
+            from_gitlab_api=from_gitlab_api,
+            subtask_workload_items=workload_items_input,
+            labels=enriched.get("labels") if isinstance(enriched.get("labels"), list) else [],
+            developer=str(enriched.get("developer") or ""),
+            developer_source=str(enriched.get("developer_source") or ""),
+            issue_comments=enriched.get("_comments") if isinstance(enriched.get("_comments"), list) else [],
+            qa_from_changelog=qa_name,
+            qa_source=qa_source,
+        )
+        enriched["role_contributors"] = merged
+        enriched["role_contributors_list"] = role_contributors_list(merged)
+        enriched["role_workload_items"] = workload_items
+
+        comment_roles = set((enriched.get("role_contributors_from_comments") or {}).keys())
+        role_evidence: list[dict[str, str]] = list(api_workload_items)
+        for role in ("front", "back", "qa"):
+            payload = merged.get(role) if isinstance(merged.get(role), dict) else {}
+            reason = unresolved_reason_for_role(
+                role=role,
+                labels=enriched.get("labels") if isinstance(enriched.get("labels"), list) else [],
+                gitlab_items=api_workload_items,
+                comment_gitlab_roles=comment_roles,
+                has_trusted_name=bool(str(payload.get("name") or "").strip()),
+            )
+            if reason:
+                role_evidence.append(
+                    {
+                        "role": role,
+                        "jira_key": str(enriched.get("key") or ""),
+                        "unresolved_reason": reason,
+                        "confidence": "unresolved",
+                    }
+                )
+        enriched["role_evidence"] = role_evidence
+
+        enriched.pop("_subtasks", None)
+        enriched.pop("_comments", None)
+        enriched.pop("_gitlab_raw", None)
+        enriched.pop("role_contributors_from_comments", None)
+        return enriched
+
+    async def parse_jira_scope_issues(
+        self,
+        text: str,
+        max_results: int = 500,
+        *,
+        milestone_status_targets: Optional[list[str]] = None,
+        enrich_changelog: bool = True,
+    ) -> Optional[List[Dict[str, Any]]]:
+        """Return scope-dashboard issues by JQL with status/type/created metadata."""
+        if not text or not text.strip():
+            return None
+        jql = text.strip()
+        try:
+            response = await self.search_scope_issues(jql, max_results=max_results)
+            if not response or "issues" not in response:
+                return None
+            issues = [
+                parsed
+                for issue in response.get("issues", [])
+                if (parsed := self._scope_issue_from_raw(issue))
+            ]
+            if issues:
+                subtasks_by_parent = await self._fetch_subtasks_by_parent([str(issue.get("key") or "") for issue in issues])
+                for issue in issues:
+                    issue["_subtasks"] = subtasks_by_parent.get(str(issue.get("key") or ""), [])
+                issues = await self._enrich_scope_issues_gitlab(issues)
+                if enrich_changelog:
+                    issues = await self.enrich_scope_issues_milestones(
+                        issues,
+                        milestone_status_targets=milestone_status_targets,
+                    )
+                else:
+                    issues = [self._apply_scope_status_fallback(issue) for issue in issues]
+            return issues
+        except Exception as error:
+            logger.warning("Error processing scope Jira request: %s", error)
+            return None
+
+    async def _fetch_issue_changelog_histories(self, issue_key: str) -> list[dict[str, Any]]:
+        histories: list[dict[str, Any]] = []
+        start_at = 0
+        page_size = 100
+        while True:
+            data = await self._make_request(
+                "GET",
+                f"issue/{issue_key}/changelog?startAt={start_at}&maxResults={page_size}",
+                api_versions=["3"],
+            )
+            if not data:
+                break
+            page = [item for item in (data.get("values") or []) if isinstance(item, dict)]
+            histories.extend(page)
+            total = int(data.get("total") or len(histories))
+            start_at += len(page)
+            if start_at >= total or not page:
+                break
+        return histories
+
+    async def _enrich_scope_issue_milestones(
+        self,
+        issue: dict[str, Any],
+        *,
+        milestone_status_targets: Optional[list[str]] = None,
+    ) -> dict[str, Any]:
+        issue_key = str(issue.get("key") or "")
+        if not issue_key:
+            return issue
+
+        status_field = issue.get("status")
+        if isinstance(status_field, dict):
+            status_name = str(status_field.get("name") or "")
+        else:
+            status_name = str(status_field or "")
+
+        epic_key = str(issue.get("epic_key") or "")
+        histories = await self._fetch_issue_changelog_histories(issue_key)
+
+        enriched = {**issue}
+        targets = [str(name) for name in (milestone_status_targets or []) if str(name).strip()]
+        entered_at: Optional[str] = None
+        if histories:
+            if targets:
+                entered_at = status_entered_at_for_targets(histories, targets, mode="last")
+                if not entered_at and status_name:
+                    entered_at = status_entered_at_for_targets(histories, [status_name], mode="last")
+            elif status_name:
+                entered_at = status_entered_at(histories, status_name)
+            if not entered_at and status_name:
+                entered_at = status_entered_at(histories, status_name)
+        if not entered_at:
+            changed_at = str(issue.get("status_changed_at") or "").strip()
+            if changed_at and status_name:
+                in_targets = status_matches_any_target(status_name, targets) if targets else True
+                if in_targets:
+                    entered_at = changed_at
+        if entered_at:
+            enriched["status_entered_at"] = entered_at
+        if histories:
+            linked_at = epic_linked_at(histories, epic_key) if epic_key else None
+            if linked_at:
+                enriched["epic_linked_at"] = linked_at
+        return self._finalize_scope_issue_roles(enriched, histories=histories if histories else None)
+
+    async def enrich_scope_issues_milestones(
+        self,
+        issues: list[dict[str, Any]],
+        *,
+        milestone_status_targets: Optional[list[str]] = None,
+        batch_size: Optional[int] = None,
+        max_issues: Optional[int] = None,
+    ) -> list[dict[str, Any]]:
+        if not issues:
+            return issues
+
+        chunk_size = max(1, batch_size or int(os.getenv("SCOPE_JIRA_CHANGELOG_BATCH_SIZE", "6")))
+        enrich_limit = max(0, max_issues or int(os.getenv("SCOPE_JIRA_CHANGELOG_MAX_ISSUES", "40")))
+        to_enrich = issues[:enrich_limit] if enrich_limit else []
+        tail = issues[enrich_limit:] if enrich_limit else []
+
+        enriched: list[dict[str, Any]] = []
+        for start in range(0, len(to_enrich), chunk_size):
+            batch = to_enrich[start : start + chunk_size]
+            batch_results = await asyncio.gather(
+                *(
+                    self._enrich_scope_issue_milestones(
+                        issue,
+                        milestone_status_targets=milestone_status_targets,
+                    )
+                    for issue in batch
+                ),
+                return_exceptions=True,
+            )
+            for issue, result in zip(batch, batch_results):
+                if isinstance(result, Exception):
+                    logger.warning(
+                        "Failed to enrich scope milestones for %s: %s",
+                        issue.get("key"),
+                        result,
+                    )
+                    enriched.append(self._apply_scope_status_fallback(issue))
+                else:
+                    enriched.append(result)
+        if tail:
+            enriched.extend(self._apply_scope_status_fallback(issue) for issue in tail)
+        return enriched
+
     def get_issue_url(self, issue_key: str) -> str:
         """Get URL for issue."""
         return f"{self.base_url}/browse/{issue_key}"
@@ -303,6 +954,25 @@ class JiraHttpClient(JiraClient):
             result = await self._make_request("PUT", f"issue/{issue_key}", payload, api_versions=["3", "2"])
             results[field_id] = result is not None
         return results
+
+    async def add_issue_comment(self, issue_key: str, text: str) -> Optional[Dict[str, Any]]:
+        """Append a plain-text comment to a Jira issue."""
+        cleaned = truncate_text(text, 4000)
+        if not issue_key or not cleaned:
+            return None
+        payload = {"body": self._comment_text_to_adf(cleaned)}
+        return await self._make_request("POST", f"issue/{issue_key}/comment", payload, api_versions=["3"])
+
+    def _comment_text_to_adf(self, text: str) -> Dict[str, Any]:
+        paragraphs = []
+        for line in text.splitlines() or [text]:
+            paragraphs.append(
+                {
+                    "type": "paragraph",
+                    "content": [{"type": "text", "text": line}] if line else [],
+                }
+            )
+        return {"type": "doc", "version": 1, "content": paragraphs}
 
     async def parse_jira_request(self, text: str, max_results: int = 500) -> Optional[List[Dict[str, Any]]]:
         """Return list of tasks by JQL."""

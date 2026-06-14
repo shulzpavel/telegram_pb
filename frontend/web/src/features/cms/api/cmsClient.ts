@@ -14,6 +14,7 @@ import type {
   ThemeMode,
 } from "./cmsTypes";
 import type { RetroAiSummary, RetroLiveState } from "../retro/retroLogic";
+import type { ScopeAiSummary, ScopeAiHistoryEntry } from "../scope/scopeAiTypes";
 
 const CMS_AUTH_HINT_KEY = "planning_poker_cms_auth";
 
@@ -348,6 +349,459 @@ export const cmsPlannerApi = {
     }),
   delete: (planId: number) =>
     cmsFetch<{ ok: boolean; id: number }>(`/sprint-plans/${planId}`, {
+      method: "DELETE",
+    }),
+};
+
+export type ScopeIntakeStatus = "ok" | "warning" | "stop";
+
+export type ScopeSectionKind = "planned" | "unplanned";
+
+export interface ScopeBoardIssue {
+  key: string;
+  summary: string;
+  url: string;
+  story_points: number | null;
+  story_points_source?: string | null;
+  story_points_plan?: number | null;
+  story_points_fact?: number | null;
+  story_points_dev?: number | null;
+  story_points_test?: number | null;
+  story_point_estimate?: number | null;
+  estimated: boolean;
+  status: string;
+  status_category: string;
+  issue_type: string;
+  labels: string[];
+  created?: string | null;
+  updated?: string | null;
+  status_changed_at?: string | null;
+  status_entered_at?: string | null;
+  epic_linked_at?: string | null;
+  due_date?: string | null;
+  resolution?: string;
+  resolution_date?: string | null;
+  parent_key?: string | null;
+  epic_key?: string | null;
+  priority?: string;
+  assignee?: string;
+  developer?: string;
+  developer_source?: string;
+  role_contributors?: Record<string, { name?: string; source?: string }>;
+  role_contributors_list?: ScopeRoleContributor[];
+  front?: string;
+  back?: string;
+  qa?: string;
+  reporter?: string;
+  components?: string[];
+  fix_versions?: string[];
+  versions?: string[];
+  sprints?: string[];
+  sprint?: string;
+  team?: string;
+  team_labels?: string[];
+  plan_status?: string;
+  plan_change_reason?: string;
+  plan_change_reasons?: string[];
+  final_priority?: string;
+  severity?: string;
+  domain?: string;
+  request_type?: string;
+  checklist_progress?: number | null;
+  last_comment?: string;
+  last_comment_author?: string;
+  last_comment_at?: string | null;
+  grooming_comment?: string;
+  grooming_comment_by?: string;
+  grooming_comment_at?: string | null;
+  scope_creep?: boolean;
+  bucket?: string;
+  section_id?: string;
+  section_name?: string;
+  section_kind?: ScopeSectionKind;
+}
+
+export interface ScopeManualQuestion {
+  id: string;
+  summary: string;
+  created_by?: string;
+  created_at?: string;
+  kind?: "manual";
+}
+
+export interface ScopeTopItem {
+  id: string;
+  text: string;
+  created_by?: string;
+  created_at?: string;
+}
+
+export interface ScopeResolvedQuestion {
+  id: string;
+  key?: string;
+  summary: string;
+  url?: string;
+  status?: string;
+  priority?: string;
+  assignee?: string;
+  bucket?: string;
+  section_id?: string;
+  section_name?: string;
+  section_kind?: ScopeSectionKind;
+  kind?: "jira" | "manual";
+  comment: string;
+  resolved_by?: string;
+  resolved_at?: string;
+}
+
+export type ScopeReportBucket = "in_work" | "in_test" | "done" | "open_questions";
+
+export interface ScopeEpicReportSection {
+  in_work: ScopeBoardIssue[];
+  in_test: ScopeBoardIssue[];
+  done: ScopeBoardIssue[];
+  counts: {
+    in_work: number;
+    in_test: number;
+    done: number;
+    total: number;
+  };
+}
+
+export interface ScopeSectionConfig {
+  id: string;
+  name: string;
+  jql: string;
+  kind: ScopeSectionKind;
+  order: number;
+}
+
+export interface ScopeSnapshotSection {
+  id: string;
+  name: string;
+  kind: ScopeSectionKind;
+  order: number;
+  issues: ScopeBoardIssue[];
+}
+
+export interface ScopeSectionMetrics {
+  id: string;
+  name: string;
+  kind: ScopeSectionKind;
+  order: number;
+  story_points: number;
+  count: number;
+  by_status: Record<string, number>;
+}
+
+export interface ScopeReportSectionBlock extends ScopeEpicReportSection {
+  id: string;
+  name: string;
+  kind: ScopeSectionKind;
+  order: number;
+}
+
+export interface ScopeBoardReport {
+  sections?: ScopeReportSectionBlock[];
+  plan: ScopeEpicReportSection;
+  unplan: ScopeEpicReportSection;
+  open_questions: ScopeBoardIssue[];
+  counts: Record<ScopeReportBucket, number>;
+}
+
+export interface ScopeAssigneeBreakdown {
+  assignee: string;
+  story_points: number;
+  count: number;
+}
+
+export interface ScopeDeveloperTaskSummary {
+  key: string;
+  summary: string;
+  url: string;
+  story_points?: number | null;
+  status?: string;
+  assignee?: string;
+  developer_source?: string;
+  front?: string;
+  back?: string;
+  qa?: string;
+  role_contributors_list?: ScopeRoleContributor[];
+  subtasks?: string[];
+  role_unresolved?: Record<string, string>;
+}
+
+export interface ScopeRoleContributor {
+  role: string;
+  name: string;
+  source?: string;
+}
+
+export interface ScopeRoleBreakdownMap {
+  front: ScopeDeveloperBreakdown[];
+  back: ScopeDeveloperBreakdown[];
+  qa: ScopeDeveloperBreakdown[];
+}
+
+export interface ScopeRoleCoverageDetail {
+  attributed: number;
+  total: number;
+  confirmed?: number;
+  estimated?: number;
+  unattributed?: number;
+  confirmed_gitlab?: number;
+  confirmed_jira_qa?: number;
+  unresolved_no_gitlab_link?: number;
+  unresolved_ambiguous_role?: number;
+  unresolved_no_qa_transition?: number;
+}
+
+export interface ScopeRoleCoverageMap {
+  front: ScopeRoleCoverageDetail;
+  back: ScopeRoleCoverageDetail;
+  qa: ScopeRoleCoverageDetail;
+}
+
+export interface ScopeDeveloperBreakdown {
+  developer: string;
+  story_points: number;
+  count: number;
+  issues: ScopeDeveloperTaskSummary[];
+}
+
+export interface ScopeBoardMetrics {
+  capacity_sp: number;
+  plan_sp: number;
+  unplan_sp: number;
+  buffer_sp: number;
+  overfill_sp: number;
+  intake_status: ScopeIntakeStatus;
+  plan_count: number;
+  unplan_count: number;
+  unestimated_count: number;
+  unestimated_tasks: ScopeBoardIssue[];
+  scope_creep_count: number;
+  plan_by_status: Record<string, number>;
+  unplan_by_status: Record<string, number>;
+  plan_by_assignee?: ScopeAssigneeBreakdown[];
+  unplan_by_assignee?: ScopeAssigneeBreakdown[];
+  plan_by_developer?: ScopeDeveloperBreakdown[];
+  unplan_by_developer?: ScopeDeveloperBreakdown[];
+  plan_by_role?: ScopeRoleBreakdownMap;
+  unplan_by_role?: ScopeRoleBreakdownMap;
+  plan_role_coverage?: ScopeRoleCoverageMap;
+  unplan_role_coverage?: ScopeRoleCoverageMap;
+  plan_status_counts?: Record<string, number>;
+  plan_change_reason_counts?: Record<string, number>;
+  sections?: ScopeSectionMetrics[];
+  section_count?: number;
+  month: string;
+  month_start: string;
+}
+
+export interface ScopeRefreshEvent {
+  type: string;
+  message: string;
+  at?: string | null;
+  key?: string;
+  bucket?: string;
+  story_points?: number | null;
+  summary?: string;
+  buffer_from?: number;
+  buffer_to?: number;
+  from_sp?: number | null;
+  to_sp?: number | null;
+}
+
+export interface ScopeRefreshDelta {
+  plan_sp: number;
+  unplan_sp: number;
+  buffer_sp: number;
+  plan_count: number;
+  unplan_count: number;
+  from: {
+    plan_sp: number;
+    unplan_sp: number;
+    buffer_sp: number;
+    plan_count: number;
+    unplan_count: number;
+  };
+  to: {
+    plan_sp: number;
+    unplan_sp: number;
+    buffer_sp: number;
+    plan_count: number;
+    unplan_count: number;
+  };
+}
+
+export interface ScopeRefreshLogEntry {
+  at: string;
+  delta: ScopeRefreshDelta | null;
+  events: ScopeRefreshEvent[];
+  metrics_summary: {
+    plan_sp: number;
+    unplan_sp: number;
+    buffer_sp: number;
+    plan_count: number;
+    unplan_count: number;
+    intake_status: ScopeIntakeStatus;
+  };
+}
+
+export type ScopePriorityQueueKind = "todo" | "test";
+
+export interface ScopePriorityQueueHistoryEntry {
+  type: "reorder" | "comment" | "refresh" | "appeared";
+  at: string;
+  by: string;
+  comment?: string;
+  issue_key?: string;
+  status_name?: string;
+  from_index?: number;
+  to_index?: number;
+  order?: string[];
+  added?: string[];
+  removed?: string[];
+  message: string;
+}
+
+export interface ScopePriorityQueue {
+  order: string[];
+  issues: ScopeBoardIssue[];
+  history: ScopePriorityQueueHistoryEntry[];
+  filter_seen_at?: Record<string, string>;
+}
+
+export interface ScopePriorityQueues {
+  todo: ScopePriorityQueue;
+  test: ScopePriorityQueue;
+}
+
+export interface ScopeBoardSnapshot {
+  sections?: ScopeSnapshotSection[];
+  plan_issues: ScopeBoardIssue[];
+  unplan_issues: ScopeBoardIssue[];
+  metrics: ScopeBoardMetrics;
+  report?: ScopeBoardReport;
+  manual_questions?: ScopeManualQuestion[];
+  top_items?: ScopeTopItem[];
+  resolved_questions?: ScopeResolvedQuestion[];
+  priority_queues?: ScopePriorityQueues;
+  refreshed_at: string;
+  delta?: ScopeRefreshDelta | null;
+  events?: ScopeRefreshEvent[];
+  refresh_log?: ScopeRefreshLogEntry[];
+  jira_fetch_warnings?: ScopeJiraFetchWarning[];
+}
+
+export interface ScopeJiraFetchWarning {
+  jql: string;
+  truncated: boolean;
+  count: number;
+}
+
+export interface ScopeBoardRecord {
+  id: number;
+  name: string;
+  month: string;
+  capacity_sp: number;
+  plan_jql: string;
+  unplan_jql: string;
+  scope_sections: ScopeSectionConfig[] | null;
+  todo_jql: string;
+  test_jql: string;
+  snapshot: ScopeBoardSnapshot | null;
+  ai_summary: ScopeAiSummary | null;
+  ai_summary_history?: ScopeAiHistoryEntry[];
+  team_id: number | null;
+  team: { id: number; slug?: string; name?: string } | null;
+  created_by: number | null;
+  created_by_username: string | null;
+  created_by_display_name: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export const cmsScopeApi = {
+  list: (params: CmsListTeamParams = {}) => {
+    const query = buildQuery(params as Record<string, ParamValue>, null);
+    return cmsFetch<{ items: ScopeBoardRecord[] }>(`/scope-boards?${query}`);
+  },
+  get: (boardId: number) => cmsFetch<ScopeBoardRecord>(`/scope-boards/${boardId}`),
+  create: (body: {
+    name: string;
+    month: string;
+    capacity_sp: number;
+    scope_sections: ScopeSectionConfig[];
+    todo_jql?: string;
+    test_jql?: string;
+    team_id?: number | null;
+  }) =>
+    cmsFetch<ScopeBoardRecord>("/scope-boards", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  update: (
+    boardId: number,
+    body: {
+      name: string;
+      month: string;
+      capacity_sp: number;
+      scope_sections: ScopeSectionConfig[];
+      todo_jql?: string;
+      test_jql?: string;
+    }
+  ) =>
+    cmsFetch<ScopeBoardRecord>(`/scope-boards/${boardId}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    }),
+  refresh: (boardId: number) =>
+    cmsFetch<ScopeBoardRecord>(`/scope-boards/${boardId}/refresh`, {
+      method: "POST",
+    }),
+  addIssueComment: (boardId: number, issueKey: string, text: string) =>
+    cmsFetch<ScopeBoardRecord>(`/scope-boards/${boardId}/issues/${encodeURIComponent(issueKey)}/comment`, {
+      method: "POST",
+      body: JSON.stringify({ text }),
+    }),
+  addQuestion: (boardId: number, text: string) =>
+    cmsFetch<ScopeBoardRecord>(`/scope-boards/${boardId}/questions`, {
+      method: "POST",
+      body: JSON.stringify({ text }),
+    }),
+  resolveQuestion: (boardId: number, questionId: string, comment: string) =>
+    cmsFetch<ScopeBoardRecord>(`/scope-boards/${boardId}/questions/${encodeURIComponent(questionId)}/resolve`, {
+      method: "POST",
+      body: JSON.stringify({ comment }),
+    }),
+  addTopItem: (boardId: number, text: string) =>
+    cmsFetch<ScopeBoardRecord>(`/scope-boards/${boardId}/top-items`, {
+      method: "POST",
+      body: JSON.stringify({ text }),
+    }),
+  deleteTopItem: (boardId: number, itemId: string) =>
+    cmsFetch<ScopeBoardRecord>(`/scope-boards/${boardId}/top-items/${encodeURIComponent(itemId)}`, {
+      method: "DELETE",
+    }),
+  reorderQueue: (boardId: number, queue: ScopePriorityQueueKind, order: string[], comment: string, movedKey: string) =>
+    cmsFetch<ScopeBoardRecord>(`/scope-boards/${boardId}/queues/${queue}/reorder`, {
+      method: "POST",
+      body: JSON.stringify({ order, comment, moved_key: movedKey }),
+    }),
+  addQueueIssueComment: (boardId: number, queue: ScopePriorityQueueKind, issueKey: string, text: string) =>
+    cmsFetch<ScopeBoardRecord>(`/scope-boards/${boardId}/queues/${queue}/issues/${encodeURIComponent(issueKey)}/comment`, {
+      method: "POST",
+      body: JSON.stringify({ text }),
+    }),
+  analyze: (boardId: number, init?: { signal?: AbortSignal }) =>
+    cmsFetch<{ ai_summary: ScopeAiSummary; board: ScopeBoardRecord }>(`/scope-boards/${boardId}/analyze`, {
+      method: "POST",
+      ...init,
+    }),
+  delete: (boardId: number) =>
+    cmsFetch<{ ok: boolean; id: number }>(`/scope-boards/${boardId}`, {
       method: "DELETE",
     }),
 };

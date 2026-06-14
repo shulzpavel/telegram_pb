@@ -16,6 +16,7 @@ const AccessShell = lazy(() => import("../access/AccessShell"));
 const AuditEventsPage = lazy(() => import("../events/AuditEventsPage"));
 const OverviewPage = lazy(() => import("../overview/OverviewPage"));
 const PlannerShell = lazy(() => import("../planner/PlannerShell"));
+const ScopeBoardShell = lazy(() => import("../scope/ScopeBoardShell"));
 const RetroShell = lazy(() => import("../retro/RetroShell"));
 const SessionsPage = lazy(() => import("../sessions/SessionsPage"));
 const TokensPage = lazy(() => import("../tokens/TokensPage"));
@@ -69,6 +70,7 @@ export default function CmsShell({
   const canManageSessions = hasPermission(principal, CMS_PERMISSIONS.appSessionsManage);
   const canManageRetro = hasPermission(principal, CMS_PERMISSIONS.retroManage);
   const canAnalyzeRetro = hasPermission(principal, CMS_PERMISSIONS.retroAnalyze);
+  const canManageScope = hasPermission(principal, CMS_PERMISSIONS.planner);
 
   const activeTab = useMemo<CmsTab | null>(() => {
     const match = visibleTabs.find((item) => {
@@ -268,6 +270,9 @@ export default function CmsShell({
               ) : null}
               {hasPermission(principal, CMS_PERMISSIONS.planner) ? (
                 <Route path="planner/*" element={<PlannerShell principal={principal} canManage />} />
+              ) : null}
+              {hasPermission(principal, CMS_PERMISSIONS.planner) ? (
+                <Route path="scope/*" element={<ScopeBoardShell principal={principal} canManage={canManageScope} />} />
               ) : null}
               {hasPermission(principal, CMS_PERMISSIONS.retro) ? (
                 <Route

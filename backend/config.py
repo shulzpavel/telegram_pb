@@ -28,6 +28,17 @@ JIRA_SP_TEST_FIELD = os.getenv("JIRA_SP_TEST_FIELD", "").strip()
 JIRA_SP_FRONT_FIELD = os.getenv("JIRA_SP_FRONT_FIELD", "").strip()
 JIRA_SP_BACK_FIELD = os.getenv("JIRA_SP_BACK_FIELD", "").strip()
 JIRA_SP_QA_FIELD = os.getenv("JIRA_SP_QA_FIELD", "").strip()
+JIRA_PLAN_STATUS_FIELD = os.getenv("JIRA_PLAN_STATUS_FIELD", "customfield_13045").strip()
+JIRA_PLAN_CHANGE_REASON_FIELD = os.getenv("JIRA_PLAN_CHANGE_REASON_FIELD", "customfield_13047").strip()
+JIRA_DEV_STATUS_KEYWORDS = os.getenv(
+    "JIRA_DEV_STATUS_KEYWORDS",
+    "dev,development,in progress,разработ,в работе,к выполнению,ready for dev",
+).strip()
 
 # Web UI base URL (e.g. https://poker.example.com); leave empty to disable web links
 WEB_UI_URL = os.getenv("WEB_UI_URL", "")
+
+# GitLab API (scope role attribution)
+GITLAB_BASE_URL = os.getenv("GITLAB_BASE_URL", os.getenv("GITLAB_URL", "")).strip().rstrip("/")
+GITLAB_TOKEN = os.getenv("GITLAB_TOKEN", os.getenv("GITLAB_PRIVATE_TOKEN", "")).strip()
+GITLAB_GROUP_ID = os.getenv("GITLAB_GROUP_ID", "").strip()

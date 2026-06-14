@@ -28,7 +28,7 @@ def _env_present(name: str) -> bool:
 
 
 def _demo_fallback_enabled() -> bool:
-    return os.getenv("JIRA_DEMO_FALLBACK", "true").strip().lower() in {"1", "true", "yes", "on"}
+    return os.getenv("JIRA_DEMO_FALLBACK", "false").strip().lower() in {"1", "true", "yes", "on"}
 
 
 @router.get("/ready")

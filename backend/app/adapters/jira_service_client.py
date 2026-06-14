@@ -134,6 +134,14 @@ class JiraServiceHttpClient(JiraClient):
             return {field_id: False for field_id in fields}
         return {str(field_id): bool(ok) for field_id, ok in results.items()}
 
+    async def add_issue_comment(self, issue_key: str, text: str) -> dict[str, Any]:
+        """Append a comment through Jira Service."""
+        url = f"{self.base_url}/api/v1/issue/{issue_key}/comment"
+        try:
+            return await self._post_json(url, {"text": text})
+        except Exception as e:
+            raise RuntimeError(f"Failed to add Jira comment via Jira Service: {e}") from e
+
     async def parse_jira_request(self, text: str, max_results: int = 500) -> Optional[List[Dict[str, Any]]]:
         """Parse Jira request via Jira Service."""
         url = f"{self.base_url}/api/v1/parse"
@@ -152,3 +160,86 @@ class JiraServiceHttpClient(JiraClient):
             ]
         except Exception as e:
             raise RuntimeError(f"Failed to parse Jira request via Jira Service: {e}") from e
+
+    async def parse_jira_scope_issues(
+        self,
+        text: str,
+        max_results: int = 500,
+        *,
+        force_refresh: bool = False,
+        milestone_status_targets: Optional[list[str]] = None,
+        enrich_changelog: bool = True,
+    ) -> Optional[List[Dict[str, Any]]]:
+        """Fetch scope-dashboard issues via Jira Service."""
+        url = f"{self.base_url}/api/v1/search/scope"
+        payload: dict[str, Any] = {
+            "jql": text,
+            "max_results": max_results,
+            "force_refresh": force_refresh,
+            "enrich_changelog": enrich_changelog,
+        }
+        if milestone_status_targets:
+            payload["milestone_status_targets"] = milestone_status_targets
+        try:
+            data = await self._post_json(url, payload)
+            issues = data.get("issues", [])
+            return [
+                {
+                    "key": issue["key"],
+                    "summary": issue["summary"],
+                    "url": issue["url"],
+                    "story_points": issue.get("story_points"),
+                    "story_points_source": issue.get("story_points_source"),
+                    "story_points_plan": issue.get("story_points_plan"),
+                    "story_points_fact": issue.get("story_points_fact"),
+                    "story_points_dev": issue.get("story_points_dev"),
+                    "story_points_test": issue.get("story_points_test"),
+                    "story_point_estimate": issue.get("story_point_estimate"),
+                    "status": issue.get("status") or {},
+                    "issue_type": {"name": issue.get("issue_type") or ""},
+                    "labels": issue.get("labels") or [],
+                    "created": issue.get("created"),
+                    "updated": issue.get("updated"),
+                    "status_changed_at": issue.get("status_changed_at"),
+                    "status_entered_at": issue.get("status_entered_at"),
+                    "epic_linked_at": issue.get("epic_linked_at"),
+                    "due_date": issue.get("due_date"),
+                    "resolution": issue.get("resolution"),
+                    "resolution_date": issue.get("resolution_date"),
+                    "parent_key": issue.get("parent_key"),
+                    "epic_key": issue.get("epic_key"),
+                    "priority": issue.get("priority"),
+                    "assignee": issue.get("assignee"),
+                    "developer": issue.get("developer"),
+                    "developer_source": issue.get("developer_source"),
+                    "role_contributors": issue.get("role_contributors") or {},
+                    "role_contributors_list": issue.get("role_contributors_list") or [],
+                    "role_workload_items": issue.get("role_workload_items") or [],
+                    "role_evidence": issue.get("role_evidence") or [],
+                    "story_points_front": issue.get("story_points_front"),
+                    "story_points_back": issue.get("story_points_back"),
+                    "story_points_qa": issue.get("story_points_qa"),
+                    "reporter": issue.get("reporter"),
+                    "components": issue.get("components") or [],
+                    "fix_versions": issue.get("fix_versions") or [],
+                    "versions": issue.get("versions") or [],
+                    "sprints": issue.get("sprints") or [],
+                    "sprint": issue.get("sprint"),
+                    "team": issue.get("team"),
+                    "team_labels": issue.get("team_labels") or [],
+                    "plan_status": issue.get("plan_status"),
+                    "plan_change_reason": issue.get("plan_change_reason"),
+                    "plan_change_reasons": issue.get("plan_change_reasons") or [],
+                    "final_priority": issue.get("final_priority"),
+                    "severity": issue.get("severity"),
+                    "domain": issue.get("domain"),
+                    "request_type": issue.get("request_type"),
+                    "checklist_progress": issue.get("checklist_progress"),
+                    "last_comment": issue.get("last_comment"),
+                    "last_comment_author": issue.get("last_comment_author"),
+                    "last_comment_at": issue.get("last_comment_at"),
+                }
+                for issue in issues
+            ]
+        except Exception as e:
+            raise RuntimeError(f"Failed to fetch scope issues via Jira Service: {e}") from e

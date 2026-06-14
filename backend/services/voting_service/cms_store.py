@@ -12,6 +12,7 @@ import hashlib
 import json
 import logging
 import re
+import uuid
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any, Optional
@@ -157,6 +158,31 @@ def _decode_jsonb(raw: Any) -> Any:
     if isinstance(raw, str):
         return json.loads(raw)
     return raw
+
+
+def _scope_board_row(row: asyncpg.Record) -> dict[str, Any]:
+    created_at = row["created_at"]
+    updated_at = row["updated_at"]
+    data = {
+        "id": int(row["id"]),
+        "name": row["name"],
+        "month": row["month"],
+        "capacity_sp": float(row["capacity_sp"]),
+        "plan_jql": row["plan_jql"],
+        "unplan_jql": row["unplan_jql"],
+        "todo_jql": row["todo_jql"],
+        "test_jql": row["test_jql"],
+        "scope_sections": _decode_jsonb(row["scope_sections"]) if "scope_sections" in row.keys() and row["scope_sections"] is not None else None,
+        "snapshot": _decode_jsonb(row["snapshot"]) if row["snapshot"] is not None else None,
+        "ai_summary": _decode_jsonb(row["ai_summary"]) if "ai_summary" in row.keys() and row["ai_summary"] is not None else None,
+        "ai_summary_history": _decode_jsonb(row["ai_summary_history"]) if "ai_summary_history" in row.keys() and row["ai_summary_history"] is not None else [],
+        "created_by": int(row["created_by"]) if row["created_by"] is not None else None,
+        "created_by_username": row["created_by_username"] if "created_by_username" in row.keys() else None,
+        "created_by_display_name": row["created_by_display_name"] if "created_by_display_name" in row.keys() else None,
+        "created_at": created_at.isoformat() if isinstance(created_at, datetime) else created_at,
+        "updated_at": updated_at.isoformat() if isinstance(updated_at, datetime) else updated_at,
+    }
+    return _attach_team_fields(data, row)
 
 
 def _team_ref_from_row(row: asyncpg.Record) -> Optional[dict[str, Any]]:
@@ -644,6 +670,37 @@ class PostgresCmsStore:
             ALTER TABLE cms_retros
                 ADD COLUMN IF NOT EXISTS team_id BIGINT REFERENCES cms_teams(id) ON DELETE SET NULL;
 
+            CREATE TABLE IF NOT EXISTS cms_scope_boards (
+                id BIGSERIAL PRIMARY KEY,
+                name TEXT NOT NULL,
+                month TEXT NOT NULL,
+                capacity_sp NUMERIC(10, 2) NOT NULL DEFAULT 0,
+                plan_jql TEXT NOT NULL DEFAULT '',
+                unplan_jql TEXT NOT NULL DEFAULT '',
+                todo_jql TEXT NOT NULL DEFAULT '',
+                test_jql TEXT NOT NULL DEFAULT '',
+                scope_sections JSONB,
+                snapshot JSONB,
+                team_id BIGINT REFERENCES cms_teams(id) ON DELETE SET NULL,
+                created_by BIGINT REFERENCES cms_admin_accounts(id) ON DELETE SET NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+            ALTER TABLE cms_scope_boards
+                ADD COLUMN IF NOT EXISTS team_id BIGINT REFERENCES cms_teams(id) ON DELETE SET NULL;
+            ALTER TABLE cms_scope_boards
+                ADD COLUMN IF NOT EXISTS todo_jql TEXT NOT NULL DEFAULT '';
+            ALTER TABLE cms_scope_boards
+                ADD COLUMN IF NOT EXISTS test_jql TEXT NOT NULL DEFAULT '';
+            ALTER TABLE cms_scope_boards
+                ADD COLUMN IF NOT EXISTS scope_sections JSONB;
+            ALTER TABLE cms_scope_boards
+                ADD COLUMN IF NOT EXISTS ai_summary JSONB;
+            ALTER TABLE cms_scope_boards
+                ADD COLUMN IF NOT EXISTS ai_summary_history JSONB NOT NULL DEFAULT '[]'::jsonb;
+            CREATE INDEX IF NOT EXISTS idx_cms_scope_boards_updated
+                ON cms_scope_boards(updated_at DESC, id DESC);
+
             CREATE INDEX IF NOT EXISTS idx_cms_sessions_team_updated
                 ON cms_sessions(team_id, updated_at DESC, id DESC)
                 WHERE deleted_at IS NULL;
@@ -651,6 +708,8 @@ class PostgresCmsStore:
                 ON cms_sprint_plans(team_id, updated_at DESC, id DESC);
             CREATE INDEX IF NOT EXISTS idx_cms_retros_team_updated
                 ON cms_retros(team_id, updated_at DESC, id DESC);
+            CREATE INDEX IF NOT EXISTS idx_cms_scope_boards_team_updated
+                ON cms_scope_boards(team_id, updated_at DESC, id DESC);
             """
         )
 
@@ -1878,6 +1937,208 @@ class PostgresCmsStore:
             row = await conn.fetchrow(
                 "DELETE FROM cms_sprint_plans WHERE id = $1 RETURNING id",
                 plan_id,
+            )
+        return row is not None
+
+    # -- monthly scope boards --------------------------------------------
+
+    _SCOPE_BOARD_SELECT = """
+        SELECT b.id, b.name, b.month, b.capacity_sp, b.plan_jql, b.unplan_jql,
+               b.todo_jql, b.test_jql, b.scope_sections, b.snapshot,
+               b.ai_summary, b.ai_summary_history,
+               b.created_by, b.created_at, b.updated_at, b.team_id,
+               t.name AS team_name, t.slug AS team_slug,
+               a.username AS created_by_username,
+               a.display_name AS created_by_display_name
+        FROM cms_scope_boards b
+        LEFT JOIN cms_teams t ON t.id = b.team_id
+        LEFT JOIN cms_admin_accounts a ON a.id = b.created_by
+    """
+
+    async def list_scope_boards(
+        self,
+        *,
+        is_superuser: bool = True,
+        actor_team_ids: Optional[list[int]] = None,
+        team_id: Optional[int] = None,
+        sort_team: bool = False,
+    ) -> list[dict[str, Any]]:
+        actor_team_ids = actor_team_ids or []
+        order_by = (
+            "lower(t.name) ASC NULLS LAST, b.updated_at DESC, b.id DESC"
+            if sort_team
+            else "b.updated_at DESC, b.id DESC"
+        )
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(
+                f"""
+                {self._SCOPE_BOARD_SELECT}
+                WHERE ($1::boolean OR b.team_id IS NULL OR b.team_id = ANY($2::bigint[]))
+                  AND ($3::bigint IS NULL OR b.team_id IS NOT DISTINCT FROM $3)
+                ORDER BY {order_by}
+                """,
+                is_superuser,
+                actor_team_ids,
+                team_id,
+            )
+        return [_scope_board_row(row) for row in rows]
+
+    async def get_scope_board(self, board_id: int) -> Optional[dict[str, Any]]:
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                self._SCOPE_BOARD_SELECT + " WHERE b.id = $1",
+                board_id,
+            )
+        return _scope_board_row(row) if row else None
+
+    async def create_scope_board(
+        self,
+        *,
+        name: str,
+        month: str,
+        capacity_sp: float,
+        plan_jql: str,
+        unplan_jql: str,
+        todo_jql: str = "",
+        test_jql: str = "",
+        scope_sections: Optional[list[dict[str, Any]]] = None,
+        created_by: Optional[int],
+        team_id: Optional[int] = None,
+    ) -> dict[str, Any]:
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                INSERT INTO cms_scope_boards
+                    (name, month, capacity_sp, plan_jql, unplan_jql, todo_jql, test_jql, scope_sections, created_by, team_id)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10)
+                RETURNING id
+                """,
+                name.strip(),
+                month.strip(),
+                capacity_sp,
+                plan_jql.strip(),
+                unplan_jql.strip(),
+                todo_jql.strip(),
+                test_jql.strip(),
+                json.dumps(scope_sections) if scope_sections is not None else None,
+                created_by,
+                team_id,
+            )
+        board = await self.get_scope_board(int(row["id"]))
+        assert board is not None
+        return board
+
+    async def update_scope_board(
+        self,
+        board_id: int,
+        *,
+        name: str,
+        month: str,
+        capacity_sp: float,
+        plan_jql: str,
+        unplan_jql: str,
+        todo_jql: str = "",
+        test_jql: str = "",
+        scope_sections: Optional[list[dict[str, Any]]] = None,
+    ) -> Optional[dict[str, Any]]:
+        async with self.pool.acquire() as conn:
+            updated = await conn.fetchrow(
+                """
+                UPDATE cms_scope_boards
+                SET name = $2,
+                    month = $3,
+                    capacity_sp = $4,
+                    plan_jql = $5,
+                    unplan_jql = $6,
+                    todo_jql = $7,
+                    test_jql = $8,
+                    scope_sections = $9::jsonb,
+                    updated_at = NOW()
+                WHERE id = $1
+                RETURNING id
+                """,
+                board_id,
+                name.strip(),
+                month.strip(),
+                capacity_sp,
+                plan_jql.strip(),
+                unplan_jql.strip(),
+                todo_jql.strip(),
+                test_jql.strip(),
+                json.dumps(scope_sections) if scope_sections is not None else None,
+            )
+        if not updated:
+            return None
+        return await self.get_scope_board(board_id)
+
+    async def save_scope_board_snapshot(
+        self,
+        board_id: int,
+        snapshot: dict[str, Any],
+    ) -> Optional[dict[str, Any]]:
+        async with self.pool.acquire() as conn:
+            updated = await conn.fetchrow(
+                """
+                UPDATE cms_scope_boards
+                SET snapshot = $2::jsonb, updated_at = NOW()
+                WHERE id = $1
+                RETURNING id
+                """,
+                board_id,
+                json.dumps(snapshot),
+            )
+        if not updated:
+            return None
+        return await self.get_scope_board(board_id)
+
+    async def save_scope_board_ai_summary(
+        self,
+        board_id: int,
+        ai_summary: dict[str, Any],
+        *,
+        snapshot_refreshed_at: Optional[str] = None,
+        history_limit: int = 15,
+    ) -> Optional[dict[str, Any]]:
+        entry = {
+            "id": str(uuid.uuid4()),
+            "generated_at": ai_summary.get("generated_at"),
+            "snapshot_refreshed_at": snapshot_refreshed_at,
+            "health": ai_summary.get("health"),
+            "summary": str(ai_summary.get("summary") or "")[:400],
+            "analysis": ai_summary,
+        }
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT ai_summary_history FROM cms_scope_boards WHERE id = $1",
+                board_id,
+            )
+            if not row:
+                return None
+            history_raw = _decode_jsonb(row["ai_summary_history"])
+            history = history_raw if isinstance(history_raw, list) else []
+            history = [entry, *history][: max(1, history_limit)]
+            updated = await conn.fetchrow(
+                """
+                UPDATE cms_scope_boards
+                SET ai_summary = $2::jsonb,
+                    ai_summary_history = $3::jsonb,
+                    updated_at = NOW()
+                WHERE id = $1
+                RETURNING id
+                """,
+                board_id,
+                json.dumps(ai_summary),
+                json.dumps(history),
+            )
+        if not updated:
+            return None
+        return await self.get_scope_board(board_id)
+
+    async def delete_scope_board(self, board_id: int) -> bool:
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "DELETE FROM cms_scope_boards WHERE id = $1 RETURNING id",
+                board_id,
             )
         return row is not None
 
