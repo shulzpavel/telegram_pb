@@ -101,3 +101,13 @@ def test_infer_developer_falls_back_to_current_assignee_without_history():
     )
     assert developer == "Tester Bob"
     assert source == "fallback"
+
+
+def test_qa_assignee_from_current_status_allowed_for_done_and_test():
+    from app.utils.jira_changelog import qa_assignee_from_current_status_allowed
+
+    assert qa_assignee_from_current_status_allowed("Готово") is True
+    assert qa_assignee_from_current_status_allowed("Тестирование") is True
+    assert qa_assignee_from_current_status_allowed("К релизу") is True
+    assert qa_assignee_from_current_status_allowed("В работе") is False
+    assert qa_assignee_from_current_status_allowed("Backlog") is False

@@ -224,7 +224,7 @@ def build_changelog_dev_fallback(
     workload_items: Optional[list[dict[str, str]]] = None,
 ) -> dict[str, dict[str, str]]:
     role = unambiguous_engineering_label(labels)
-    if not role or developer_source != "changelog" or not _norm(developer):
+    if not role or developer_source not in {"changelog", "current"} or not _norm(developer):
         return {}
     if _has_gitlab_role(role=role, from_comments=from_comments, workload_items=workload_items):
         return {}

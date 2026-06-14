@@ -46,3 +46,102 @@ def test_scope_issue_from_raw_parses_plan_fields():
     assert issue["plan_status"] == "Added After Plan"
     assert issue["plan_change_reasons"] == ["Срочный запрос от бизнеса"]
     assert issue["plan_change_reason"] == "Срочный запрос от бизнеса"
+
+
+def test_finalize_scope_issue_roles_uses_assignee_for_done_without_changelog():
+    client = _client()
+    enriched = client._finalize_scope_issue_roles(
+        {
+            "key": "IBO2-1560",
+            "status": "Готово",
+            "assignee": "Максим Строгов",
+            "story_points": 2,
+        },
+        histories=None,
+    )
+    assert enriched["role_contributors"]["qa"] == {
+        "name": "Максим Строгов",
+        "source": "current",
+    }
+
+
+def test_finalize_scope_issue_roles_remaps_qa_fallback_for_done_status():
+    client = _client()
+    enriched = client._finalize_scope_issue_roles(
+        {
+            "key": "IBO2-1560",
+            "status": "Готово",
+            "assignee": "Максим Строгов",
+            "story_points": 2,
+        },
+        histories=[],
+    )
+    assert enriched["role_contributors"]["qa"] == {
+        "name": "Максим Строгов",
+        "source": "current",
+    }
+
+
+def test_finalize_scope_issue_roles_ignores_qa_fallback_for_backlog():
+    client = _client()
+    enriched = client._finalize_scope_issue_roles(
+        {
+            "key": "IBO2-1500",
+            "status": "Backlog",
+            "assignee": "Максим Строгов",
+            "story_points": 2,
+        },
+        histories=[],
+    )
+    assert "qa" not in enriched["role_contributors"]
+
+
+def test_finalize_scope_issue_roles_uses_current_assignee_for_backend_in_work():
+    client = _client()
+    enriched = client._finalize_scope_issue_roles(
+        {
+            "key": "IBO2-1600",
+            "status": "В работе",
+            "assignee": "Backend Dev",
+            "labels": ["backend"],
+            "story_points": 3,
+        },
+        histories=None,
+    )
+    assert enriched["role_contributors"]["back"] == {
+        "name": "Backend Dev",
+        "source": "changelog_dev",
+    }
+
+
+def test_finalize_scope_issue_roles_uses_current_assignee_for_frontend_in_work():
+    client = _client()
+    enriched = client._finalize_scope_issue_roles(
+        {
+            "key": "IBO2-1601",
+            "status": "In Progress",
+            "assignee": "Frontend Dev",
+            "labels": ["frontend"],
+            "story_points": 5,
+        },
+        histories=None,
+    )
+    assert enriched["role_contributors"]["front"] == {
+        "name": "Frontend Dev",
+        "source": "changelog_dev",
+    }
+
+
+def test_finalize_scope_issue_roles_ignores_current_assignee_for_backend_backlog():
+    client = _client()
+    enriched = client._finalize_scope_issue_roles(
+        {
+            "key": "IBO2-1602",
+            "status": "Backlog",
+            "assignee": "Backend Dev",
+            "labels": ["backend"],
+            "story_points": 3,
+        },
+        histories=None,
+    )
+    assert "back" not in enriched["role_contributors"]

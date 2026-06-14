@@ -16,11 +16,10 @@ from app.utils.jira_changelog import (
     epic_linked_at,
     infer_developer_from_changelog,
     infer_qa_from_changelog,
-    is_dev_status,
+    qa_assignee_from_current_status_allowed,
     status_entered_at,
     status_entered_at_for_targets,
     status_matches_any_target,
-    _test_status_keywords,
 )
 from app.utils.jira_role_contributors import (
     build_subtask_workload_items,
@@ -716,7 +715,13 @@ class JiraHttpClient(JiraClient):
                 current_status=status_name,
                 current_assignee=assignee,
             )
-        elif assignee and is_dev_status(status_name, _test_status_keywords()):
+            if qa_name and qa_source == "fallback":
+                if qa_assignee_from_current_status_allowed(status_name):
+                    qa_source = "current"
+                else:
+                    qa_name = ""
+                    qa_source = ""
+        if not qa_name and assignee and qa_assignee_from_current_status_allowed(status_name):
             qa_name = assignee
             qa_source = "current"
 

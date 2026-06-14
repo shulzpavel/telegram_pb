@@ -118,6 +118,26 @@ def test_merge_role_contributors_uses_changelog_dev_without_gitlab():
     assert merged["back"] == {"name": "Back Dev", "source": "changelog_dev"}
 
 
+def test_merge_role_contributors_uses_current_dev_without_gitlab():
+    merged, _items = merge_role_contributors(
+        from_comments={},
+        labels=["frontend"],
+        developer="Front Dev",
+        developer_source="current",
+    )
+    assert merged["front"] == {"name": "Front Dev", "source": "changelog_dev"}
+
+
+def test_merge_role_contributors_ignores_non_dev_fallback_source():
+    merged, _items = merge_role_contributors(
+        from_comments={},
+        labels=["backend"],
+        developer="Back Dev",
+        developer_source="fallback",
+    )
+    assert "back" not in merged
+
+
 def test_merge_role_contributors_uses_testing_comment_for_qa():
     merged, _items = merge_role_contributors(
         from_comments={},

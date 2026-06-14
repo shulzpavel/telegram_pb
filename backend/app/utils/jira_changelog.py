@@ -179,9 +179,30 @@ def infer_developer_from_changelog(
 def _test_status_keywords() -> list[str]:
     raw = os.getenv(
         "JIRA_TEST_STATUS_KEYWORDS",
-        "test,testing,тест,qa,к тест,to test,in test",
+        "test,testing,тест,qa,к тест,to test,in test,тестирование,к релизу",
     )
     return [part.strip() for part in raw.split(",") if part.strip()]
+
+
+_QA_ASSIGNEE_STATUS_NAMES = frozenset(
+    {
+        "тестирование",
+        "к релизу",
+        "готово",
+        "done",
+        "released",
+        "resolved",
+        "closed",
+    }
+)
+
+
+def qa_assignee_from_current_status_allowed(status_name: str) -> bool:
+    """Whether the current assignee can be treated as QA for workload reporting."""
+    normalized = _norm_lower(status_name)
+    if normalized in _QA_ASSIGNEE_STATUS_NAMES:
+        return True
+    return is_dev_status(status_name, _test_status_keywords())
 
 
 def infer_qa_from_changelog(
