@@ -594,7 +594,7 @@ def test_role_metrics_add_unattributed_bucket_for_labeled_front_work():
     }
 
 
-def test_role_metrics_split_parent_sp_by_subtask_gitlab_items():
+def test_role_metrics_count_parent_task_once_for_subtask_gitlab_contributor():
     issue = normalize_scope_issue(
         {
             **_issue("P-1", 4),
@@ -624,10 +624,11 @@ def test_role_metrics_split_parent_sp_by_subtask_gitlab_items():
         "2026-06",
     )
     rows = {row["developer"]: row for row in metrics["plan_by_role"]["back"]}
+    assert list(rows) == ["Минаев Дмитрий Дмитриевич"]
     assert rows["Минаев Дмитрий Дмитриевич"]["count"] == 1
-    assert rows["Минаев Дмитрий Дмитриевич"]["story_points"] == 2.0
-    assert rows["Егор Наумов"]["count"] == 1
-    assert rows["Егор Наумов"]["story_points"] == 2.0
+    assert rows["Минаев Дмитрий Дмитриевич"]["story_points"] == 4.0
+    assert rows["Минаев Дмитрий Дмитриевич"]["issues"][0]["key"] == "P-1"
+    assert "subtasks" not in rows["Минаев Дмитрий Дмитриевич"]["issues"][0]
     assert metrics["plan_role_coverage"]["back"] == {
         "attributed": 1,
         "total": 1,

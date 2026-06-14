@@ -234,25 +234,17 @@ def _attributed_engineering_roles(issue: dict[str, Any]) -> list[str]:
     return [role for role in ("front", "back") if _trusted_role_name(issue, role)]
 
 
-def _role_workload_items(issue: dict[str, Any], role: str) -> list[dict[str, Any]]:
-    rows: list[dict[str, Any]] = []
-    for item in issue.get("role_workload_items") or []:
-        if not isinstance(item, dict):
-            continue
-        if str(item.get("role") or "") != role:
-            continue
-        if _role_source(item) not in _GITLAB_ROLE_SOURCES:
-            continue
-        name = _norm_role_name(item)
-        if name:
-            rows.append(item)
-    return rows
-
-
 def _issue_has_role_attribution(issue: dict[str, Any], role: str) -> bool:
-    if _role_workload_items(issue, role):
-        return True
     return bool(_trusted_role_name(issue, role))
+
+
+def _opposite_engineering_role(role: str) -> str:
+    return "back" if role == "front" else "front" if role == "back" else ""
+
+
+def _issue_has_opposite_engineering_attribution(issue: dict[str, Any], role: str) -> bool:
+    opposite = _opposite_engineering_role(role)
+    return bool(opposite and _issue_has_role_attribution(issue, opposite))
 
 
 def _role_bucket_key(name: str) -> str:
@@ -276,6 +268,8 @@ def _issue_unresolved_reason(issue: dict[str, Any], role: str) -> str:
         if str(item.get("role") or "") == role:
             reason = str(item.get("unresolved_reason") or "").strip()
             if reason:
+                if role in {"front", "back"} and _issue_has_opposite_engineering_attribution(issue, role):
+                    return ""
                 return reason
     return ""
 
@@ -285,8 +279,6 @@ def _role_source_is_gitlab_api(source: str) -> bool:
 
 
 def _role_attribution_tier(issue: dict[str, Any], role: str) -> str:
-    if _role_workload_items(issue, role):
-        return "confirmed"
     name = _trusted_role_name(issue, role)
     if name:
         contributors = issue.get("role_contributors") if isinstance(issue.get("role_contributors"), dict) else {}
@@ -319,28 +311,12 @@ def _parent_role_sp(issue: dict[str, Any], role: str) -> float:
 
 
 def _role_workload_slices(issue: dict[str, Any], role: str) -> list[tuple[str, dict[str, Any]]]:
-    subtask_items = _role_workload_items(issue, role)
-    if subtask_items:
-        parent_sp = _parent_role_sp(issue, role)
-        total = len(subtask_items)
-        share = parent_sp / total if total and parent_sp > 0 else 0.0
-        grouped: dict[str, dict[str, Any]] = {}
-        for item in subtask_items:
-            name = _norm_role_name(item)
-            entry = grouped.setdefault(name, {"count": 0, "story_points": 0.0, "subtasks": []})
-            entry["count"] += 1
-            entry["story_points"] += share
-            subtask_key = str(item.get("subtask_key") or "")
-            if subtask_key:
-                entry["subtasks"].append(subtask_key)
-        return list(grouped.items())
-
     name = _trusted_role_name(issue, role)
     if name:
-        return [(name, {"count": 1, "story_points": _role_sp(issue, role), "subtasks": []})]
+        return [(name, {"count": 1, "story_points": _role_sp(issue, role)})]
 
-    if role in {"front", "back"} and _issue_matches_engineering_role(issue, role):
-        return [(_UNATTRIBUTED_ROLE, {"count": 1, "story_points": _parent_role_sp(issue, role), "subtasks": []})]
+    if role in {"front", "back"} and _role_scope_matches(issue, role):
+        return [(_UNATTRIBUTED_ROLE, {"count": 1, "story_points": _parent_role_sp(issue, role)})]
     return []
 
 
@@ -348,6 +324,8 @@ def _role_scope_matches(issue: dict[str, Any], role: str) -> bool:
     if _issue_has_role_attribution(issue, role):
         return True
     if role in {"front", "back"}:
+        if _issue_has_opposite_engineering_attribution(issue, role):
+            return False
         return _issue_matches_engineering_role(issue, role)
     return False
 
@@ -382,7 +360,7 @@ def _role_sp(issue: dict[str, Any], role: str) -> float:
     return 0.0
 
 
-def _role_task_summary(issue: dict[str, Any], *, role: str = "", subtasks: Optional[list[str]] = None) -> dict[str, Any]:
+def _role_task_summary(issue: dict[str, Any], *, role: str = "") -> dict[str, Any]:
     summary = _developer_task_summary(issue)
     summary["role_contributors_list"] = issue.get("role_contributors_list") or []
     summary["front"] = _trusted_role_name(issue, "front")
@@ -395,8 +373,6 @@ def _role_task_summary(issue: dict[str, Any], *, role: str = "", subtasks: Optio
     }
     if unresolved:
         summary["role_unresolved"] = unresolved
-    if subtasks:
-        summary["subtasks"] = subtasks
     if role:
         role_sp = _role_sp(issue, role)
         summary["story_points"] = role_sp if role_sp > 0 else summary.get("story_points")
@@ -410,7 +386,7 @@ def _role_breakdown(issues: list[dict[str, Any]], role: str, *, max_items: int =
             name = _trusted_role_name(issue, role)
             if not name:
                 continue
-            slices = [(name, {"count": 1, "story_points": _role_sp(issue, role), "subtasks": []})]
+            slices = [(name, {"count": 1, "story_points": _role_sp(issue, role)})]
         else:
             slices = _role_workload_slices(issue, role)
         for name, payload in slices:
@@ -425,7 +401,6 @@ def _role_breakdown(issues: list[dict[str, Any]], role: str, *, max_items: int =
             task_summary = _role_task_summary(
                 issue,
                 role=role,
-                subtasks=payload.get("subtasks") if isinstance(payload.get("subtasks"), list) else None,
             )
             slice_sp = float(payload.get("story_points") or 0)
             if slice_sp > 0:
@@ -488,7 +463,6 @@ def _role_coverage(issues: list[dict[str, Any]]) -> dict[str, dict[str, int]]:
                     confirmed_jira_qa += 1
                 elif role in {"front", "back"} and (
                     _role_source_is_gitlab_api(source)
-                    or any(_role_source_is_gitlab_api(_role_source(item)) for item in (issue.get("role_workload_items") or []) if isinstance(item, dict))
                     or source in _GITLAB_ROLE_SOURCES
                 ):
                     confirmed_gitlab += 1

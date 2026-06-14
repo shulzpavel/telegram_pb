@@ -68,6 +68,7 @@ export function ScopeAiView({
   const roleRisks = summary.role_risks ?? [];
   const roleFocus = summary.role_focus ?? [];
   const intake = metrics ? intakeStatusMeta(metrics.intake_status, metrics) : null;
+  const dataRisks = metrics ? buildDataRisks(metrics) : [];
 
   return (
     <AiIntelligenceSurface className="space-y-5 p-5 sm:p-6" sparkleLabel="AI-сводка для бизнеса">
@@ -127,6 +128,22 @@ export function ScopeAiView({
           </div>
         ) : null}
       </header>
+
+      {dataRisks.length > 0 ? (
+        <section className="rounded-xl border border-amber/30 bg-amber/[0.06] px-4 py-4 sm:px-5">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h4 className="text-xs font-semibold uppercase tracking-wide text-ink3">Риски данных для AI-сводки</h4>
+            <Badge tone="warning">{dataRisks.length}</Badge>
+          </div>
+          <ul className="mt-3 grid gap-2 text-sm text-ink2 sm:grid-cols-2">
+            {dataRisks.map((risk) => (
+              <li key={risk} className="rounded-lg border border-line bg-surface px-3 py-2">
+                {risk}
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
 
       {summary.role_workload_assessment ? (
         <section className="rounded-xl border border-line bg-surface px-4 py-4 sm:px-5">
@@ -279,6 +296,38 @@ export function ScopeAiView({
       </details>
     </AiIntelligenceSurface>
   );
+}
+
+function roleCoverageGap(metrics: ScopeBoardMetrics, field: "unattributed" | "unresolved_no_gitlab_link"): number {
+  const maps = [metrics.plan_role_coverage, metrics.unplan_role_coverage];
+  return maps.reduce((total, map) => {
+    if (!map) return total;
+    return total + (["front", "back", "qa"] as const).reduce(
+      (sum, role) => sum + Math.max(0, map[role]?.[field] ?? 0),
+      0
+    );
+  }, 0);
+}
+
+function buildDataRisks(metrics: ScopeBoardMetrics): string[] {
+  const risks: string[] = [];
+  const roleGaps = roleCoverageGap(metrics, "unattributed");
+  const gitlabGaps = roleCoverageGap(metrics, "unresolved_no_gitlab_link");
+
+  if (metrics.unestimated_count > 0) {
+    risks.push(`${metrics.unestimated_count} задач без SP — capacity и буфер могут быть занижены.`);
+  }
+  if (roleGaps > 0) {
+    risks.push(`${roleGaps} разрывов атрибуции ролей — нагрузка Front/Back/QA неполная.`);
+  }
+  if (metrics.scope_creep_count > 0) {
+    risks.push(`${metrics.scope_creep_count} задач добавлены после плана.`);
+  }
+  if (gitlabGaps > 0) {
+    risks.push(`GitLab evidence не найден для ${gitlabGaps} role-сигналов.`);
+  }
+
+  return risks;
 }
 
 function RoleCoverageKpi({

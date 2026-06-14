@@ -167,17 +167,18 @@ def unresolved_reason_for_role(
     if role not in {"front", "back"}:
         return "unresolved_no_qa_transition" if role == "qa" else ""
 
-    front_items = [item for item in gitlab_items if item.get("role") == "front"]
-    back_items = [item for item in gitlab_items if item.get("role") == "back"]
-    if front_items and back_items:
-        return "unresolved_ambiguous_role"
-    if gitlab_items and role not in {item.get("role") for item in gitlab_items}:
-        return "unresolved_ambiguous_role"
-    if comment_gitlab_roles and role not in comment_gitlab_roles:
-        return "unresolved_ambiguous_role"
-
     label_set = {str(label).strip().lower() for label in (labels or []) if label}
     in_scope = ("frontend" in label_set and role == "front") or ("backend" in label_set and role == "back")
-    if in_scope or gitlab_items or comment_gitlab_roles:
+    gitlab_roles = {item.get("role") for item in gitlab_items}
+    has_same_role_evidence = role in gitlab_roles or role in comment_gitlab_roles
+
+    if in_scope and gitlab_items and not has_same_role_evidence:
+        opposite_role = "back" if role == "front" else "front"
+        if opposite_role in gitlab_roles or opposite_role in comment_gitlab_roles:
+            return ""
+    if in_scope and comment_gitlab_roles and role not in comment_gitlab_roles and len(comment_gitlab_roles) > 1:
+        return "unresolved_ambiguous_role"
+
+    if in_scope or has_same_role_evidence:
         return "unresolved_no_gitlab_link"
     return ""

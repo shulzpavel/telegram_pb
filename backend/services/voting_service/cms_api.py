@@ -325,6 +325,14 @@ class ScopeTopItemRequest(BaseModel):
     text: str = Field(min_length=1, max_length=500)
 
 
+class ScopeTodoItemRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=500)
+
+
+class ScopeTodoItemUpdateRequest(BaseModel):
+    done: bool
+
+
 class ScopeResolveQuestionRequest(BaseModel):
     comment: str = Field(min_length=1, max_length=4000)
 
@@ -1652,6 +1660,76 @@ def _scope_snapshot_without_top_item(snapshot: dict[str, Any], *, item_id: str) 
     return updated
 
 
+def _scope_snapshot_with_todo_item(
+    snapshot: dict[str, Any],
+    *,
+    text: str,
+    actor_name: str,
+    created_at: str,
+) -> dict[str, Any]:
+    updated = copy.deepcopy(snapshot or {})
+    todo_items = list(updated.get("todo_items") or [])
+    if len(todo_items) >= 100:
+        raise HTTPException(status_code=400, detail="Можно добавить не более 100 todo")
+    todo_items.insert(
+        0,
+        {
+            "id": f"todo-{secrets.token_hex(6)}",
+            "text": text,
+            "done": False,
+            "created_by": actor_name,
+            "created_at": created_at,
+        },
+    )
+    updated["todo_items"] = todo_items
+    return updated
+
+
+def _scope_snapshot_with_todo_done(
+    snapshot: dict[str, Any],
+    *,
+    item_id: str,
+    done: bool,
+    actor_name: str,
+    changed_at: str,
+) -> dict[str, Any]:
+    updated = copy.deepcopy(snapshot or {})
+    target = item_id.strip()
+    changed = False
+    todo_items: list[dict[str, Any]] = []
+    for item in updated.get("todo_items") or []:
+        if str(item.get("id") or "") != target:
+            todo_items.append(item)
+            continue
+        next_item = {**item, "done": done}
+        if done:
+            next_item["done_by"] = actor_name
+            next_item["done_at"] = changed_at
+        else:
+            next_item.pop("done_by", None)
+            next_item.pop("done_at", None)
+        todo_items.append(next_item)
+        changed = True
+    if not changed:
+        raise HTTPException(status_code=404, detail="Todo item not found in scope board snapshot")
+    updated["todo_items"] = todo_items
+    return updated
+
+
+def _scope_snapshot_without_todo_item(snapshot: dict[str, Any], *, item_id: str) -> dict[str, Any]:
+    updated = copy.deepcopy(snapshot or {})
+    target = item_id.strip()
+    todo_items = [
+        item
+        for item in (updated.get("todo_items") or [])
+        if str(item.get("id") or "") != target
+    ]
+    if len(todo_items) == len(updated.get("todo_items") or []):
+        raise HTTPException(status_code=404, detail="Todo item not found in scope board snapshot")
+    updated["todo_items"] = todo_items
+    return updated
+
+
 def _scope_snapshot_with_resolved_question(
     snapshot: dict[str, Any],
     *,
@@ -1962,6 +2040,7 @@ async def cms_refresh_scope_board(
     snapshot["manual_questions"] = previous_snapshot.get("manual_questions") or []
     snapshot["resolved_questions"] = previous_snapshot.get("resolved_questions") or []
     snapshot["top_items"] = previous_snapshot.get("top_items") or []
+    snapshot["todo_items"] = previous_snapshot.get("todo_items") or []
     snapshot["jira_fetch_warnings"] = _scope_fetch_warnings(fetch_outcomes)
     prev_queues = previous_snapshot.get("priority_queues") or {}
     snapshot["priority_queues"] = {
@@ -2138,6 +2217,106 @@ async def cms_delete_scope_top_item(
     await _audit(
         request,
         "cms.scope_board.top_item_delete",
+        actor.username,
+        "ok",
+        {"board_id": board_id, "item_id": item_id},
+    )
+    return board
+
+
+@cms_router.post("/cms/scope-boards/{board_id}/todo-items")
+async def cms_add_scope_todo_item(
+    board_id: int,
+    body: ScopeTodoItemRequest,
+    request: Request,
+    actor: CmsPrincipal = Depends(require_permission(PERM_PLANNER_VIEW)),
+) -> dict:
+    existing = await _get_cms_store(request).get_scope_board(board_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Scope board not found")
+    assert_record_access(actor, existing)
+
+    snapshot = existing.get("snapshot") or {
+        "plan_issues": [],
+        "unplan_issues": [],
+        "metrics": {},
+        "refreshed_at": datetime.now(timezone.utc).isoformat(),
+    }
+    actor_name = actor.display_name or actor.username
+    next_snapshot = _scope_snapshot_with_todo_item(
+        snapshot,
+        text=body.text.strip(),
+        actor_name=actor_name,
+        created_at=datetime.now(timezone.utc).isoformat(),
+    )
+    board = await _get_cms_store(request).save_scope_board_snapshot(board_id, next_snapshot)
+    if not board:
+        raise HTTPException(status_code=404, detail="Scope board not found")
+    await _audit(
+        request,
+        "cms.scope_board.todo_create",
+        actor.username,
+        "ok",
+        {"board_id": board_id},
+    )
+    return board
+
+
+@cms_router.patch("/cms/scope-boards/{board_id}/todo-items/{item_id}")
+async def cms_update_scope_todo_item(
+    board_id: int,
+    item_id: str,
+    body: ScopeTodoItemUpdateRequest,
+    request: Request,
+    actor: CmsPrincipal = Depends(require_permission(PERM_PLANNER_VIEW)),
+) -> dict:
+    existing = await _get_cms_store(request).get_scope_board(board_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Scope board not found")
+    assert_record_access(actor, existing)
+
+    snapshot = existing.get("snapshot") or {}
+    actor_name = actor.display_name or actor.username
+    next_snapshot = _scope_snapshot_with_todo_done(
+        snapshot,
+        item_id=item_id,
+        done=body.done,
+        actor_name=actor_name,
+        changed_at=datetime.now(timezone.utc).isoformat(),
+    )
+    board = await _get_cms_store(request).save_scope_board_snapshot(board_id, next_snapshot)
+    if not board:
+        raise HTTPException(status_code=404, detail="Scope board not found")
+    await _audit(
+        request,
+        "cms.scope_board.todo_update",
+        actor.username,
+        "ok",
+        {"board_id": board_id, "item_id": item_id, "done": body.done},
+    )
+    return board
+
+
+@cms_router.delete("/cms/scope-boards/{board_id}/todo-items/{item_id}")
+async def cms_delete_scope_todo_item(
+    board_id: int,
+    item_id: str,
+    request: Request,
+    actor: CmsPrincipal = Depends(require_permission(PERM_PLANNER_VIEW)),
+) -> dict:
+    existing = await _get_cms_store(request).get_scope_board(board_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Scope board not found")
+    assert_record_access(actor, existing)
+
+    snapshot = existing.get("snapshot") or {}
+    next_snapshot = _scope_snapshot_without_todo_item(snapshot, item_id=item_id)
+    board = await _get_cms_store(request).save_scope_board_snapshot(board_id, next_snapshot)
+    if not board:
+        raise HTTPException(status_code=404, detail="Scope board not found")
+    await _audit(
+        request,
+        "cms.scope_board.todo_delete",
         actor.username,
         "ok",
         {"board_id": board_id, "item_id": item_id},

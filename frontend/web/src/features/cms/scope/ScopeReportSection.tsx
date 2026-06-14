@@ -28,11 +28,13 @@ const REPORT_COLUMNS = [
 export function ScopeReportSection({
   snapshot,
   canManage,
+  showTechnicalFields = false,
   onAddQuestion,
   onResolveQuestion,
 }: {
   snapshot: ScopeBoardSnapshot;
   canManage: boolean;
+  showTechnicalFields?: boolean;
   onAddQuestion: (text: string) => Promise<void>;
   onResolveQuestion: (questionId: string, comment: string) => Promise<void>;
 }) {
@@ -55,6 +57,7 @@ export function ScopeReportSection({
             subtitle={section.kind === "planned" ? "Плановый scope" : "Внеплановый scope"}
             accent={section.kind === "planned" ? "blue" : "amber"}
             section={section}
+            showTechnicalFields={showTechnicalFields}
           />
         ))}
       </div>
@@ -77,11 +80,13 @@ function EpicReportBlock({
   subtitle,
   accent,
   section,
+  showTechnicalFields,
 }: {
   title: string;
   subtitle: string;
   accent: "blue" | "amber";
   section: ScopeEpicReportSection | ScopeReportSectionBlock;
+  showTechnicalFields: boolean;
 }) {
   const accentStyles =
     accent === "blue"
@@ -132,6 +137,7 @@ function EpicReportBlock({
             tone={column.tone}
             count={section.counts[column.key]}
             issues={section[column.key]}
+            showTechnicalFields={showTechnicalFields}
           />
         ))}
       </div>
@@ -409,12 +415,14 @@ function ReportColumn({
   tone,
   count,
   issues,
+  showTechnicalFields,
 }: {
   columnKey: "in_work" | "in_test" | "done";
   title: string;
   tone: "info" | "warning" | "success";
   count: number;
   issues: ScopeBoardIssue[];
+  showTechnicalFields: boolean;
 }) {
   const sortedIssues = useMemo(
     () => (columnKey === "done" ? sortDoneIssuesByRecentStatus(issues) : issues),
@@ -446,7 +454,7 @@ function ReportColumn({
                 </div>
                 <p className="mt-1 line-clamp-2 text-xs text-ink2">{issue.summary}</p>
                 <div className="mt-1.5">
-                  <RoleContributorsBadges issue={issue} />
+                  <RoleContributorsBadges issue={issue} showSource={showTechnicalFields} />
                   <PlanFieldBadges issue={issue} />
                 </div>
                 {columnKey === "done" && (issue.status_entered_at || issue.status_changed_at) ? (

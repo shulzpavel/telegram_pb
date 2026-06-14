@@ -126,6 +126,62 @@ def test_build_context_includes_role_workload_coverage():
     assert "FLEX-99" in context
 
 
+def test_build_context_suppresses_stale_opposite_role_gap_for_ai():
+    context = build_scope_analysis_context({
+        "name": "Test",
+        "month": "2026-06",
+        "snapshot": {
+            "metrics": {
+                "plan_role_coverage": {
+                    "front": {
+                        "attributed": 0,
+                        "total": 1,
+                        "unattributed": 1,
+                        "unresolved_ambiguous_role": 1,
+                    },
+                    "back": {"attributed": 1, "total": 1, "confirmed_gitlab": 1},
+                },
+                "plan_by_role": {
+                    "back": [{"developer": "Back Dev", "story_points": 2, "count": 1, "issues": [{"key": "FLEX-1965"}]}],
+                },
+            },
+            "sections": [
+                {
+                    "id": "plan",
+                    "name": "Plan",
+                    "kind": "planned",
+                    "issues": [
+                        {
+                            "key": "FLEX-1965",
+                            "summary": "Ретраи при отправке сообщений в AlanBase",
+                            "story_points": 2,
+                            "status": "Готово",
+                            "labels": ["frontend", "backend"],
+                            "role_contributors": {"back": {"name": "Back Dev", "source": "gitlab_api_mr"}},
+                            "role_workload_items": [
+                                {"role": "back", "name": "Back Dev", "source": "gitlab_api_mr"}
+                            ],
+                            "role_evidence": [
+                                {"role": "back", "name": "Back Dev", "source": "gitlab_api_mr"},
+                                {
+                                    "role": "front",
+                                    "unresolved_reason": "unresolved_ambiguous_role",
+                                    "confidence": "unresolved",
+                                },
+                            ],
+                        }
+                    ],
+                }
+            ],
+        },
+    })
+
+    assert "Правило атрибуции" in context
+    assert "Plan Front: 0/0 с атрибуцией" in context
+    assert "Plan Front: 0/1" not in context
+    assert "конфликт ролей" not in context
+
+
 def test_collect_open_questions_includes_manual_and_excludes_resolved():
     from services.voting_service.scope_ai_llm import _collect_open_questions
 

@@ -215,7 +215,6 @@ async def _call_anthropic(http_session: aiohttp.ClientSession, context: str, *, 
     if not api_key:
         raise LlmRetroError("LLM is not configured", status_code=503)
 
-    prefill = "{"
     user_content = _repair_user_prompt(context, repair_error) if repair_error else _user_prompt(context)
     payload = {
         "model": _anthropic_model(),
@@ -224,7 +223,6 @@ async def _call_anthropic(http_session: aiohttp.ClientSession, context: str, *, 
         "system": _system_prompt(),
         "messages": [
             {"role": "user", "content": user_content},
-            {"role": "assistant", "content": prefill},
         ],
     }
     headers = {
@@ -257,8 +255,6 @@ async def _call_anthropic(http_session: aiohttp.ClientSession, context: str, *, 
     combined = "\n".join(part for part in text_parts if part).strip()
     if not combined:
         raise LlmRetroError("LLM response was empty", status_code=502)
-    if not combined.lstrip().startswith(prefill):
-        combined = f"{prefill}{combined}"
     return combined
 
 

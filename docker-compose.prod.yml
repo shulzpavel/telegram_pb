@@ -49,7 +49,7 @@ services:
     environment:
       - VOTING_SERVICE_PORT=8002
       - REDIS_URL=redis://redis:6379/0
-      - POSTGRES_DSN=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      - POSTGRES_DSN=${POSTGRES_DSN:-postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-planning_poker}}
       - STATE_FILE=/data/state.json
       - CMS_USERNAME=${CMS_USERNAME}
       - CMS_PASSWORD=${CMS_PASSWORD}
@@ -141,13 +141,13 @@ services:
     container_name: voting-postgres
     restart: unless-stopped
     environment:
-      - POSTGRES_DB=${POSTGRES_DB}
-      - POSTGRES_USER=${POSTGRES_USER}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB:-planning_poker}
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-planning_poker}"]
       interval: 10s
       timeout: 5s
       retries: 5

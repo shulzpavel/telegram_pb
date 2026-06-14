@@ -68,7 +68,13 @@ export function roleContributorRows(issue: ScopeBoardIssue): ScopeRoleContributo
   return (rows ?? []).filter((row): row is ScopeRoleContributor => Boolean(row && isTrustedContributor(row)));
 }
 
-export function RoleContributorsBadges({ issue }: { issue: ScopeBoardIssue }) {
+export function RoleContributorsBadges({
+  issue,
+  showSource = false,
+}: {
+  issue: ScopeBoardIssue;
+  showSource?: boolean;
+}) {
   const rows = roleContributorRows(issue);
   if (rows.length === 0) {
     return null;
@@ -79,7 +85,7 @@ export function RoleContributorsBadges({ issue }: { issue: ScopeBoardIssue }) {
       {rows.map((row) => (
         <Badge key={`${row.role}-${row.name}`} tone={row.role === "qa" ? "warning" : row.role === "back" ? "info" : "neutral"}>
           {ROLE_LABELS[row.role] ?? row.role}: {row.name}
-          {sourceLabel(row.source) ? ` (${sourceLabel(row.source)})` : ""}
+          {showSource && sourceLabel(row.source) ? ` (${sourceLabel(row.source)})` : ""}
         </Badge>
       ))}
     </div>
@@ -88,6 +94,7 @@ export function RoleContributorsBadges({ issue }: { issue: ScopeBoardIssue }) {
 
 export function RoleContributorsLines({
   issue,
+  showSource = false,
 }: {
   issue: {
     role_contributors?: ScopeBoardIssue["role_contributors"];
@@ -96,9 +103,15 @@ export function RoleContributorsLines({
     back?: string;
     qa?: string;
   };
+  showSource?: boolean;
 }) {
   const rows = roleContributorRows(issue as ScopeBoardIssue);
-  const byRole = Object.fromEntries(rows.map((row) => [row.role, row.name]));
+  const byRole = Object.fromEntries(
+    rows.map((row) => [
+      row.role,
+      showSource && sourceLabel(row.source) ? `${row.name} (${sourceLabel(row.source)})` : row.name,
+    ])
+  );
   const lines = [
     { label: "Front", value: byRole.front || issue.front },
     { label: "Back", value: byRole.back || issue.back },

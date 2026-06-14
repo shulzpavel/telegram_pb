@@ -389,6 +389,8 @@ export interface ScopeBoardIssue {
   developer_source?: string;
   role_contributors?: Record<string, { name?: string; source?: string }>;
   role_contributors_list?: ScopeRoleContributor[];
+  role_workload_items?: ScopeRoleEvidence[];
+  role_evidence?: ScopeRoleEvidence[];
   front?: string;
   back?: string;
   qa?: string;
@@ -537,6 +539,18 @@ export interface ScopeRoleContributor {
   source?: string;
 }
 
+export interface ScopeRoleEvidence {
+  role: string;
+  name?: string;
+  source?: string;
+  jira_key?: string;
+  source_url?: string;
+  project_path?: string;
+  confidence?: string;
+  unresolved_reason?: string;
+  subtask_key?: string;
+}
+
 export interface ScopeRoleBreakdownMap {
   front: ScopeDeveloperBreakdown[];
   back: ScopeDeveloperBreakdown[];
@@ -678,6 +692,16 @@ export interface ScopePriorityQueues {
   test: ScopePriorityQueue;
 }
 
+export interface ScopeTodoItem {
+  id: string;
+  text: string;
+  done: boolean;
+  created_by?: string;
+  created_at?: string;
+  done_by?: string;
+  done_at?: string;
+}
+
 export interface ScopeBoardSnapshot {
   sections?: ScopeSnapshotSection[];
   plan_issues: ScopeBoardIssue[];
@@ -686,6 +710,7 @@ export interface ScopeBoardSnapshot {
   report?: ScopeBoardReport;
   manual_questions?: ScopeManualQuestion[];
   top_items?: ScopeTopItem[];
+  todo_items?: ScopeTodoItem[];
   resolved_questions?: ScopeResolvedQuestion[];
   priority_queues?: ScopePriorityQueues;
   refreshed_at: string;
@@ -783,6 +808,20 @@ export const cmsScopeApi = {
     }),
   deleteTopItem: (boardId: number, itemId: string) =>
     cmsFetch<ScopeBoardRecord>(`/scope-boards/${boardId}/top-items/${encodeURIComponent(itemId)}`, {
+      method: "DELETE",
+    }),
+  addTodoItem: (boardId: number, text: string) =>
+    cmsFetch<ScopeBoardRecord>(`/scope-boards/${boardId}/todo-items`, {
+      method: "POST",
+      body: JSON.stringify({ text }),
+    }),
+  updateTodoItem: (boardId: number, itemId: string, done: boolean) =>
+    cmsFetch<ScopeBoardRecord>(`/scope-boards/${boardId}/todo-items/${encodeURIComponent(itemId)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ done }),
+    }),
+  deleteTodoItem: (boardId: number, itemId: string) =>
+    cmsFetch<ScopeBoardRecord>(`/scope-boards/${boardId}/todo-items/${encodeURIComponent(itemId)}`, {
       method: "DELETE",
     }),
   reorderQueue: (boardId: number, queue: ScopePriorityQueueKind, order: string[], comment: string, movedKey: string) =>

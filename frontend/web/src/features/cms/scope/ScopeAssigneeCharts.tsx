@@ -131,6 +131,21 @@ function formatCoverageLabel(coverage?: ScopeRoleCoverageMap[RoleKey], role?: Ro
   return parts.join(" ");
 }
 
+function formatRoleSp(value: number | null | undefined): string {
+  if (value === null || value === undefined || Number.isNaN(value)) {
+    return "— SP";
+  }
+  return `${formatScopeSp(value)} SP`;
+}
+
+function taskCountLabel(count: number): string {
+  const mod10 = count % 10;
+  const mod100 = count % 100;
+  if (mod10 === 1 && mod100 !== 11) return `${count} задача`;
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return `${count} задачи`;
+  return `${count} задач`;
+}
+
 function RoleDonutCard({
   title,
   rows,
@@ -263,7 +278,7 @@ function RoleLegend({
                     <span className="shrink-0 tabular-nums text-ink3">{percent}%</span>
                   </div>
                   <p className="mt-0.5 text-ink3">
-                    {formatScopeSp(row.story_points)} SP · {row.count} задач
+                    {formatRoleSp(row.story_points)} · {taskCountLabel(row.count)}
                   </p>
                 </div>
               </summary>
@@ -278,22 +293,21 @@ function RoleLegend({
                       ) : (
                         <span className="font-medium text-ink">{task.key}</span>
                       )}
-                      <span className="text-ink3">{formatScopeSp(task.story_points ?? null)} SP</span>
+                      <span className="text-ink3">{formatRoleSp(task.story_points ?? null)}</span>
                     </div>
                     <p className="mt-1 line-clamp-2 text-ink2">{task.summary}</p>
                     <div className="mt-1.5">
                       <RoleContributorsLines issue={task} />
                     </div>
-                    {task.subtasks?.length ? (
-                      <p className="mt-1 text-ink3">Подзадачи: {task.subtasks.join(", ")}</p>
-                    ) : null}
                     {task.role_unresolved && Object.keys(task.role_unresolved).length > 0 ? (
-                      <p className="mt-1 text-ink3">
-                        Без атрибуции:{" "}
-                        {Object.entries(task.role_unresolved)
-                          .map(([roleKey, reason]) => `${roleKey}: ${reason}`)
-                          .join("; ")}
-                      </p>
+                      <details className="mt-1">
+                        <summary className="cursor-pointer text-ink3">Почему нет атрибуции</summary>
+                        <p className="mt-1 text-ink3">
+                          {Object.entries(task.role_unresolved)
+                            .map(([roleKey, reason]) => `${roleKey}: ${reason}`)
+                            .join("; ")}
+                        </p>
+                      </details>
                     ) : null}
                     {task.assignee ? <p className="mt-1 text-ink3">Текущий assignee: {task.assignee}</p> : null}
                   </li>

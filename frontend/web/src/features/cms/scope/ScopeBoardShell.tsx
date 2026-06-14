@@ -18,6 +18,7 @@ import {
   cmsScopeApi,
   type ScopeBoardIssue,
   type ScopeBoardRecord,
+  type ScopeBoardSnapshot,
   type ScopePriorityQueueKind,
 } from "../api/cmsClient";
 import type { CmsPrincipal } from "../api/cmsTypes";
@@ -40,13 +41,16 @@ import { useCmsTeams } from "../hooks/useCmsTeams";
 import { useUnsavedChangesGuard } from "../hooks/useUnsavedChangesGuard";
 import {
   currentMonthValue,
+  computeScopeReport,
   formatScopeDisplayMonth,
   formatScopeSp,
   intakeStatusMeta,
+  normalizeScopeReport,
   resolveOpenQuestions,
 } from "./scopeBoardHelpers";
 import { ScopeActivityFeed } from "./ScopeActivityFeed";
 import { ScopeAiPanel } from "./ScopeAiPanel";
+import { ScopeFloatingTodo } from "./ScopeFloatingTodo";
 import { ScopeIncrementalFooter } from "./ScopeIncrementalFooter";
 import { ScopePriorityQueuesSection } from "./ScopePriorityQueuesSection";
 import { ScopeReportSection } from "./ScopeReportSection";
@@ -54,7 +58,7 @@ import { ScopeTopItemsSection } from "./ScopeTopItemsSection";
 import { ScopeSectionEditor } from "./ScopeSectionEditor";
 import { ScopeAssigneeCharts } from "./ScopeAssigneeCharts";
 import { ScopePlanInsights, planChangeReasonLabel } from "./scopePlanInsights";
-import { ScopeVisualDashboard } from "./ScopeVisualDashboard";
+import { ScopeVisualDashboard, type ScopeDataQualityDetails, type ScopeReportSummary } from "./ScopeVisualDashboard";
 import {
   defaultScopeSections,
   normalizeScopeSectionOrder,
@@ -125,6 +129,76 @@ function parseCapacity(raw: string): number | null {
   const value = Number(raw.replace(",", "."));
   if (!Number.isFinite(value) || value < 0) return null;
   return value;
+}
+
+function sumIssueSp(issues: ScopeBoardIssue[]): number {
+  return issues.reduce((sum, issue) => {
+    const sp = issue.story_points;
+    return sum + (typeof sp === "number" && sp > 0 ? sp : 0);
+  }, 0);
+}
+
+function hasRoleAttribution(issue: ScopeBoardIssue, role: "front" | "back"): boolean {
+  const contributor = issue.role_contributors?.[role];
+  if (contributor?.name?.trim()) return true;
+  return (issue.role_evidence ?? []).some(
+    (item) => item.role === role && !item.unresolved_reason && (item.name?.trim() || item.source_url?.trim())
+  );
+}
+
+function isStaleOppositeRoleGap(issue: ScopeBoardIssue, role: string): boolean {
+  if (role !== "front" && role !== "back") return false;
+  const oppositeRole = role === "front" ? "back" : "front";
+  return hasRoleAttribution(issue, oppositeRole);
+}
+
+function buildReportSummary(snapshot: ScopeBoardSnapshot): ScopeReportSummary {
+  const report = snapshot.report ? normalizeScopeReport(snapshot.report) : computeScopeReport(snapshot);
+  const sections = report.sections ?? [report.plan, report.unplan];
+  return sections.reduce<ScopeReportSummary>(
+    (summary, section) => ({
+      inWorkSp: summary.inWorkSp + sumIssueSp(section.in_work ?? []),
+      doneSp: summary.doneSp + sumIssueSp(section.done ?? []),
+    }),
+    { inWorkSp: 0, doneSp: 0 }
+  );
+}
+
+function buildDataQualityDetails(snapshot: ScopeBoardSnapshot): ScopeDataQualityDetails {
+  const unestimated = (snapshot.metrics?.unestimated_tasks ?? []).map((issue) => ({
+    key: issue.key,
+    summary: issue.summary,
+    url: issue.url,
+    status: issue.status,
+    section: issue.section_name || issue.bucket,
+    storyPoints: issue.story_points,
+  }));
+  const roleByKey = new Map<string, ScopeDataQualityDetails["roleIssues"][number]>();
+
+  for (const section of resolveSnapshotSections(snapshot)) {
+    for (const issue of section.issues) {
+      const reasons = (issue.role_evidence ?? [])
+        .filter((item) => item.unresolved_reason && !isStaleOppositeRoleGap(issue, item.role))
+        .map((item) => `${item.role}: ${item.unresolved_reason}`);
+      if (reasons.length === 0) continue;
+      const existing = roleByKey.get(issue.key);
+      const mergedReasons = Array.from(new Set([...(existing?.reasons ?? []), ...reasons]));
+      roleByKey.set(issue.key, {
+        key: issue.key,
+        summary: issue.summary,
+        url: issue.url,
+        status: issue.status,
+        section: issue.section_name || section.name,
+        storyPoints: issue.story_points,
+        reasons: mergedReasons,
+      });
+    }
+  }
+
+  return {
+    unestimated,
+    roleIssues: Array.from(roleByKey.values()),
+  };
 }
 
 export default function ScopeBoardShell({ principal, canManage }: ScopeBoardShellProps) {
@@ -616,6 +690,33 @@ function ScopeBoardEditorPage({
     [boardId, toast]
   );
 
+  const addTodoItem = useCallback(
+    async (text: string) => {
+      if (boardId === null || Number.isNaN(boardId)) return;
+      const record = await cmsScopeApi.addTodoItem(boardId, text);
+      setBoard(record);
+    },
+    [boardId]
+  );
+
+  const toggleTodoItem = useCallback(
+    async (itemId: string, done: boolean) => {
+      if (boardId === null || Number.isNaN(boardId)) return;
+      const record = await cmsScopeApi.updateTodoItem(boardId, itemId, done);
+      setBoard(record);
+    },
+    [boardId]
+  );
+
+  const deleteTodoItem = useCallback(
+    async (itemId: string) => {
+      if (boardId === null || Number.isNaN(boardId)) return;
+      const record = await cmsScopeApi.deleteTodoItem(boardId, itemId);
+      setBoard(record);
+    },
+    [boardId]
+  );
+
   const reorderQueue = useCallback(
     async (queue: ScopePriorityQueueKind, order: string[], comment: string, movedKey: string) => {
       if (boardId === null || Number.isNaN(boardId)) return;
@@ -676,6 +777,8 @@ function ScopeBoardEditorPage({
 
   const metrics = board?.snapshot?.metrics ?? null;
   const snapshot = board?.snapshot ?? null;
+  const reportSummary = useMemo(() => (snapshot ? buildReportSummary(snapshot) : null), [snapshot]);
+  const dataQualityDetails = useMemo(() => (snapshot ? buildDataQualityDetails(snapshot) : null), [snapshot]);
   const snapshotRefreshedLabel = snapshot?.refreshed_at
     ? new Date(snapshot.refreshed_at).toLocaleString("ru-RU", { dateStyle: "short", timeStyle: "short" })
     : null;
@@ -736,6 +839,16 @@ function ScopeBoardEditorPage({
 
       {error ? <InlineError text={error} /> : null}
       {loading ? <Skeleton height="h-64" /> : null}
+      {mode === "edit" && snapshot && boardId !== null && !Number.isNaN(boardId) ? (
+        <ScopeFloatingTodo
+          key={boardId}
+          boardId={boardId}
+          items={snapshot.todo_items ?? []}
+          onAdd={addTodoItem}
+          onToggle={toggleTodoItem}
+          onDelete={deleteTodoItem}
+        />
+      ) : null}
 
       {!loading ? (
         <>
@@ -798,7 +911,11 @@ function ScopeBoardEditorPage({
                 onAddItem={addTopItem}
                 onRemoveItem={removeTopItem}
               />
-              <ScopeVisualDashboard metrics={metrics} />
+              <ScopeVisualDashboard
+                metrics={metrics}
+                reportSummary={reportSummary ?? undefined}
+                dataQualityDetails={dataQualityDetails ?? undefined}
+              />
               <ScopeAssigneeCharts metrics={metrics} />
               <ScopePlanInsights metrics={metrics} />
               {(aiSummary || aiSummaryHistory.length > 0) ? (
@@ -814,6 +931,7 @@ function ScopeBoardEditorPage({
               <ScopeReportSection
                 snapshot={snapshot}
                 canManage={canManage}
+                showTechnicalFields
                 onAddQuestion={addManualQuestion}
                 onResolveQuestion={resolveQuestion}
               />
@@ -851,6 +969,7 @@ function ScopeBoardEditorPage({
                         title={section.name}
                         issues={section.issues}
                         byStatus={sectionMetrics?.by_status ?? {}}
+                        showTechnicalFields
                         embedded
                       />
                     </details>
@@ -937,11 +1056,13 @@ function ScopeTasksSection({
   title,
   issues,
   byStatus,
+  showTechnicalFields = false,
   embedded = false,
 }: {
   title: string;
   issues: ScopeBoardIssue[];
   byStatus: Record<string, number>;
+  showTechnicalFields?: boolean;
   embedded?: boolean;
 }) {
   const { visibleItems, hasMore, loadMore, loadedCount, total } = useIncrementalList(issues);
@@ -965,15 +1086,13 @@ function ScopeTasksSection({
                   <span>{issue.status}</span>
                   {issue.priority ? <Badge tone="info">{issue.priority}</Badge> : null}
                   {issue.severity ? <Badge tone="danger">{issue.severity}</Badge> : null}
-                  {issue.scope_creep ? <Badge tone="warning">Scope creep</Badge> : null}
+                  {showTechnicalFields && issue.scope_creep ? <Badge tone="warning">Добавлено после плана</Badge> : null}
                 </span>
               }
             >
               <MobileRecordField label="Тип" value={issue.issue_type || "—"} />
               <MobileRecordField label="Owner" value={issue.assignee || "—"} />
               <MobileRecordField label="Epic / Sprint" value={[issue.epic_key || issue.parent_key, issue.sprint].filter(Boolean).join(" · ") || "—"} />
-              <MobileRecordField label="Domain / Plan" value={[issue.domain, issue.plan_status].filter(Boolean).join(" · ") || "—"} />
-              <MobileRecordField label="Plan change" value={planChangeReasonLabel(issue) || "—"} />
               <MobileRecordField
                 label="Front / Back / QA"
                 value={[issue.role_contributors?.front?.name, issue.role_contributors?.back?.name, issue.role_contributors?.qa?.name]
@@ -981,6 +1100,12 @@ function ScopeTasksSection({
                   .join(" · ") || "—"}
               />
               <MobileRecordField label="Создана" value={formatCreated(issue.created)} />
+              {showTechnicalFields ? (
+                <>
+                  <MobileRecordField label="Domain / Plan" value={[issue.domain, issue.plan_status].filter(Boolean).join(" · ") || "—"} />
+                  <MobileRecordField label="Причина изменения плана" value={planChangeReasonLabel(issue) || "—"} />
+                </>
+              ) : null}
             </MobileRecordCard>
           ))}
         </div>
@@ -996,8 +1121,8 @@ function ScopeTasksSection({
                 <th className="px-3 py-2 text-left font-bold">Priority</th>
                 <th className="px-3 py-2 text-left font-bold">Owner</th>
                 <th className="px-3 py-2 text-left font-bold">Epic / Sprint</th>
-                <th className="px-3 py-2 text-left font-bold">Signals</th>
-                <th className="px-3 py-2 text-left font-bold">Creep</th>
+                {showTechnicalFields ? <th className="px-3 py-2 text-left font-bold">Технические сигналы</th> : null}
+                {showTechnicalFields ? <th className="px-3 py-2 text-left font-bold">Добавлено после плана</th> : null}
               </tr>
             </thead>
             <tbody>
@@ -1016,12 +1141,16 @@ function ScopeTasksSection({
                   <td className="px-3 py-2 align-top text-ink2">
                     {[issue.epic_key || issue.parent_key, issue.sprint].filter(Boolean).join(" · ") || "—"}
                   </td>
-                  <td className="px-3 py-2 align-top text-ink2">
-                    {[issue.domain, issue.plan_status, planChangeReasonLabel(issue), issue.request_type]
-                      .filter(Boolean)
-                      .join(" · ") || issue.issue_type || "—"}
-                  </td>
-                  <td className="px-3 py-2 align-top text-ink2">{issue.scope_creep ? "Да" : "—"}</td>
+                  {showTechnicalFields ? (
+                    <td className="px-3 py-2 align-top text-ink2">
+                      {[issue.domain, issue.plan_status, planChangeReasonLabel(issue), issue.request_type]
+                        .filter(Boolean)
+                        .join(" · ") || issue.issue_type || "—"}
+                    </td>
+                  ) : null}
+                  {showTechnicalFields ? (
+                    <td className="px-3 py-2 align-top text-ink2">{issue.scope_creep ? "Да" : "—"}</td>
+                  ) : null}
                 </tr>
               ))}
             </tbody>

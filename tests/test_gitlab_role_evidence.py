@@ -83,7 +83,20 @@ def test_unresolved_reason_no_gitlab_link():
     assert reason == "unresolved_no_gitlab_link"
 
 
-def test_unresolved_reason_ambiguous_role():
+def test_unresolved_reason_does_not_require_other_role_when_opposite_evidence_exists():
+    reason = unresolved_reason_for_role(
+        role="back",
+        labels=["frontend", "backend"],
+        gitlab_items=[
+            {"role": "front", "name": "Front Dev", "source": "gitlab_api_mr"},
+        ],
+        comment_gitlab_roles=set(),
+        has_trusted_name=False,
+    )
+    assert reason == ""
+
+
+def test_unresolved_reason_not_ambiguous_for_full_stack_with_role_evidence():
     reason = unresolved_reason_for_role(
         role="back",
         labels=["backend"],
@@ -94,7 +107,33 @@ def test_unresolved_reason_ambiguous_role():
         comment_gitlab_roles=set(),
         has_trusted_name=False,
     )
-    assert reason == "unresolved_ambiguous_role"
+    assert reason == "unresolved_no_gitlab_link"
+
+
+def test_unresolved_reason_does_not_flag_back_when_only_front_evidence():
+    reason = unresolved_reason_for_role(
+        role="back",
+        labels=["frontend"],
+        gitlab_items=[
+            {"role": "front", "name": "Front Dev", "source": "gitlab_api_mr"},
+        ],
+        comment_gitlab_roles=set(),
+        has_trusted_name=False,
+    )
+    assert reason == ""
+
+
+def test_unresolved_reason_does_not_flag_other_role_for_single_role_evidence():
+    reason = unresolved_reason_for_role(
+        role="front",
+        labels=["backend"],
+        gitlab_items=[
+            {"role": "back", "name": "Back Dev", "source": "gitlab_api_mr"},
+        ],
+        comment_gitlab_roles=set(),
+        has_trusted_name=False,
+    )
+    assert reason == ""
 
 
 def test_gitlab_api_sources_constant():

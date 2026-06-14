@@ -316,7 +316,6 @@ async def _call_anthropic(
     if not api_key:
         raise LlmSummaryError("LLM is not configured", status_code=503)
 
-    prefill = "{"
     user_content = _repair_user_prompt(task_context, repair_error) if repair_error else _user_prompt(task_context)
     payload = {
         "model": _anthropic_model(),
@@ -325,7 +324,6 @@ async def _call_anthropic(
         "system": _system_prompt(),
         "messages": [
             {"role": "user", "content": user_content},
-            {"role": "assistant", "content": prefill},
         ],
     }
     headers = {
@@ -373,8 +371,6 @@ async def _call_anthropic(
     combined = "\n".join(part for part in text_parts if part).strip()
     if not combined:
         raise LlmSummaryError("LLM response was empty", status_code=502)
-    if not combined.lstrip().startswith(prefill):
-        combined = f"{prefill}{combined}"
     return combined
 
 
