@@ -43,6 +43,13 @@ describe("intakeStatusMeta", () => {
     expect(meta.tone).toBe("danger");
     expect(meta.bannerTitle).toContain("Буфер");
   });
+
+  it("explains unestimated tasks when buffer is still available", () => {
+    const meta = intakeStatusMeta("stop", { buffer_sp: 29, unestimated_count: 3 });
+    expect(meta.tone).toBe("danger");
+    expect(meta.bannerTitle).toContain("без оценки");
+    expect(meta.bannerTitle).not.toContain("Буфер исчерпан");
+  });
 });
 
 describe("bufferBarSegments", () => {
@@ -183,11 +190,13 @@ describe("classifyScopeReportBucket parity with backend", () => {
       }) as const;
 
     expect(classifyScopeReportBucket(issue("В работе"))).toBe("in_work");
-    expect(classifyScopeReportBucket(issue("К тестированию"))).toBe("in_test");
+    expect(classifyScopeReportBucket(issue("К тестированию"))).toBe("in_work");
     expect(classifyScopeReportBucket(issue("Тестирование"))).toBe("in_test");
     expect(classifyScopeReportBucket(issue("Готово", "done"))).toBe("done");
     expect(classifyScopeReportBucket(issue("Пауза"))).toBe("open_questions");
-    expect(classifyScopeReportBucket(issue("К релизу"))).toBe("in_work");
+    expect(classifyScopeReportBucket(issue("К релизу"))).toBe("in_test");
+    expect(classifyScopeReportBucket(issue("Backlog", "new"))).toBe("not_started");
+    expect(classifyScopeReportBucket(issue("К выполнению", "new"))).toBe("not_started");
   });
 });
 

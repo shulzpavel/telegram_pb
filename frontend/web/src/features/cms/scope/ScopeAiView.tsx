@@ -67,7 +67,7 @@ export function ScopeAiView({
   const whatsCritical = summary.whats_critical ?? [];
   const roleRisks = summary.role_risks ?? [];
   const roleFocus = summary.role_focus ?? [];
-  const intake = metrics ? intakeStatusMeta(metrics.intake_status) : null;
+  const intake = metrics ? intakeStatusMeta(metrics.intake_status, metrics) : null;
 
   return (
     <AiIntelligenceSurface className="space-y-5 p-5 sm:p-6" sparkleLabel="AI-сводка для бизнеса">

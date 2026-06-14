@@ -617,8 +617,9 @@ def _plan_change_reason_counts(issues: list[dict[str, Any]]) -> dict[str, int]:
 
 
 _PAUSE_STATUS_KEYWORDS = ("пауз", "pause", "on hold", "blocked")
-_TEST_STATUS_KEYWORDS = ("тестир", "testing", " in test", "to test", "к тест")
+_TEST_STATUS_NAMES = frozenset({"тестирование", "к релизу"})
 _DONE_STATUS_NAMES = frozenset({"готово", "done", "closed", "resolved", "cancelled", "canceled", "won't do", "wont do"})
+_NOT_STARTED_STATUS_NAMES = frozenset({"backlog", "бэклог", "к выполнению", "to do", "todo", "open"})
 
 
 def _status_tokens(issue: dict[str, Any]) -> tuple[str, str]:
@@ -627,15 +628,17 @@ def _status_tokens(issue: dict[str, Any]) -> tuple[str, str]:
     return status, category
 
 
-def classify_scope_report_bucket(issue: dict[str, Any]) -> Literal["in_work", "in_test", "done", "open_questions"]:
+def classify_scope_report_bucket(issue: dict[str, Any]) -> Literal["in_work", "in_test", "done", "open_questions", "not_started"]:
     """Bucket an issue for the monthly scope status report."""
     status, category = _status_tokens(issue)
     if category == "done" or status in _DONE_STATUS_NAMES:
         return "done"
     if status == "пауза" or any(token in status for token in _PAUSE_STATUS_KEYWORDS):
         return "open_questions"
-    if any(token in status for token in _TEST_STATUS_KEYWORDS):
+    if status in _TEST_STATUS_NAMES:
         return "in_test"
+    if category == "new" or status in _NOT_STARTED_STATUS_NAMES:
+        return "not_started"
     return "in_work"
 
 
@@ -715,7 +718,7 @@ def _build_epic_report_section(issues: list[dict[str, Any]], bucket_name: str) -
     }
     for issue in issues:
         bucket = classify_scope_report_bucket(issue)
-        if bucket == "open_questions":
+        if bucket in {"open_questions", "not_started"}:
             continue
         section[bucket].append({**issue, "bucket": bucket_name})
 

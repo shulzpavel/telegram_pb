@@ -1,5 +1,6 @@
 import type {
   ScopeBoardIssue,
+  ScopeBoardMetrics,
   ScopeBoardReport,
   ScopeBoardSnapshot,
   ScopeEpicReportSection,
@@ -13,7 +14,7 @@ import { resolveSnapshotSections } from "./scopeSectionHelpers";
 
 type BadgeTone = "neutral" | "info" | "success" | "warning" | "danger";
 
-export type ScopeReportBucket = "in_work" | "in_test" | "done" | "open_questions";
+export type ScopeReportBucket = "in_work" | "in_test" | "done" | "open_questions" | "not_started";
 
 export type ScopeOpenQuestion = (ScopeBoardIssue | ScopeManualQuestion) & {
   id: string;
@@ -26,7 +27,8 @@ export type ScopeOpenQuestion = (ScopeBoardIssue | ScopeManualQuestion) & {
 
 const DONE_STATUS_NAMES = new Set(["готово", "done", "closed", "resolved", "cancelled", "canceled", "won't do", "wont do"]);
 const PAUSE_STATUS_KEYWORDS = ["пауз", "pause", "on hold", "blocked"];
-const TEST_STATUS_KEYWORDS = ["тестир", "testing", " in test", "to test", "к тест"];
+const TEST_STATUS_NAMES = new Set(["тестирование", "к релизу"]);
+const NOT_STARTED_STATUS_NAMES = new Set(["backlog", "бэклог", "к выполнению", "to do", "todo", "open"]);
 
 const JIRA_PRIORITY_RANK: Record<string, number> = {
   blocker: 0,
@@ -92,8 +94,11 @@ export function classifyScopeReportBucket(issue: ScopeBoardIssue): ScopeReportBu
   if (status === "пауза" || PAUSE_STATUS_KEYWORDS.some((token) => status.includes(token))) {
     return "open_questions";
   }
-  if (TEST_STATUS_KEYWORDS.some((token) => status.includes(token))) {
+  if (TEST_STATUS_NAMES.has(status)) {
     return "in_test";
+  }
+  if (category === "new" || NOT_STARTED_STATUS_NAMES.has(status)) {
+    return "not_started";
   }
   return "in_work";
 }
@@ -133,7 +138,7 @@ function buildEpicReportSection(issues: ScopeBoardIssue[], bucket: string): Scop
 
   for (const issue of issues) {
     const column = classifyScopeReportBucket(issue);
-    if (column === "open_questions") continue;
+    if (column === "open_questions" || column === "not_started") continue;
     section[column].push({ ...issue, bucket });
   }
 
@@ -222,23 +227,60 @@ function isReportSectionBlock(value: unknown): value is ScopeReportSectionBlock 
   return typeof section.id === "string" && typeof section.name === "string";
 }
 
+function scrubReportSection<T extends ScopeEpicReportSection>(section: T): T {
+  const next = {
+    ...section,
+    in_work: sortReportColumnIssues(
+      "in_work",
+      section.in_work.filter((issue) => classifyScopeReportBucket(issue) === "in_work")
+    ),
+    in_test: sortReportColumnIssues(
+      "in_test",
+      section.in_test.filter((issue) => classifyScopeReportBucket(issue) === "in_test")
+    ),
+    done: sortReportColumnIssues(
+      "done",
+      section.done.filter((issue) => classifyScopeReportBucket(issue) === "done")
+    ),
+  };
+  next.counts = {
+    in_work: next.in_work.length,
+    in_test: next.in_test.length,
+    done: next.done.length,
+    total: next.in_work.length + next.in_test.length + next.done.length,
+  };
+  return next;
+}
+
 /** Normalize legacy flat and Plan/Unplan report payloads. */
 export function normalizeScopeReport(report: ScopeBoardReport | Record<string, unknown>): ScopeBoardReport {
   const typed = report as ScopeBoardReport;
   if (Array.isArray(typed.sections) && typed.sections.every(isReportSectionBlock)) {
+    const sections = typed.sections.map(scrubReportSection);
+    const plan = typed.plan ? scrubReportSection(typed.plan) : aggregateReportSections(sections, "planned");
+    const unplan = typed.unplan ? scrubReportSection(typed.unplan) : aggregateReportSections(sections, "unplanned");
     return {
       ...typed,
-      plan: typed.plan || aggregateReportSections(typed.sections, "planned"),
-      unplan: typed.unplan || aggregateReportSections(typed.sections, "unplanned"),
+      sections,
+      plan,
+      unplan,
+      counts: {
+        in_work: plan.counts.in_work + unplan.counts.in_work,
+        in_test: plan.counts.in_test + unplan.counts.in_test,
+        done: plan.counts.done + unplan.counts.done,
+        open_questions: typed.open_questions?.length ?? typed.counts?.open_questions ?? 0,
+      },
     };
   }
 
   if (isEpicReportSection(typed.plan) && isEpicReportSection(typed.unplan)) {
+    const plan = scrubReportSection(typed.plan);
+    const unplan = scrubReportSection(typed.unplan);
     const sections: ScopeReportSectionBlock[] = [
-      { id: "plan", name: "Plan", kind: "planned", order: 0, ...typed.plan },
-      { id: "unplan", name: "Unplan", kind: "unplanned", order: 1, ...typed.unplan },
+      { id: "plan", name: "Plan", kind: "planned", order: 0, ...plan },
+      { id: "unplan", name: "Unplan", kind: "unplanned", order: 1, ...unplan },
     ];
-    return { ...typed, sections };
+    return { ...typed, plan, unplan, sections };
   }
 
   const legacy = report as {
@@ -375,9 +417,21 @@ export interface IntakeStatusMeta {
   bannerTone: "warning" | "danger" | null;
 }
 
-export function intakeStatusMeta(status: ScopeIntakeStatus): IntakeStatusMeta {
+type IntakeStatusMetricContext = Pick<ScopeBoardMetrics, "buffer_sp" | "unestimated_count">;
+
+export function intakeStatusMeta(status: ScopeIntakeStatus, metrics?: IntakeStatusMetricContext | null): IntakeStatusMeta {
   switch (status) {
-    case "stop":
+    case "stop": {
+      if (metrics && metrics.buffer_sp > 0 && metrics.unestimated_count > 0) {
+        return {
+          label: "Стоп intake",
+          tone: "danger",
+          bannerTitle: "Есть задачи без оценки — новые задачи не берём",
+          bannerMessage:
+            "Буфер ещё есть, но активные задачи без SP делают capacity недостоверной. Сначала оцените задачи или согласуйте исключение.",
+          bannerTone: "danger",
+        };
+      }
       return {
         label: "Стоп intake",
         tone: "danger",
@@ -386,6 +440,7 @@ export function intakeStatusMeta(status: ScopeIntakeStatus): IntakeStatusMeta {
           "План и незапланированный burn превышают capacity, или есть активные задачи без оценки. Новый intake только после согласования.",
         bannerTone: "danger",
       };
+    }
     case "warning":
       return {
         label: "Осторожно",

@@ -153,11 +153,13 @@ def test_scope_creep_detection():
 
 def test_classify_scope_report_bucket_flex_statuses():
     assert classify_scope_report_bucket(_issue("P-1", 3, status="В работе", category="indeterminate")) == "in_work"
-    assert classify_scope_report_bucket(_issue("P-2", 3, status="К тестированию", category="indeterminate")) == "in_test"
+    assert classify_scope_report_bucket(_issue("P-2", 3, status="К тестированию", category="indeterminate")) == "in_work"
     assert classify_scope_report_bucket(_issue("P-3", 3, status="Тестирование", category="indeterminate")) == "in_test"
     assert classify_scope_report_bucket(_issue("P-4", 3, status="Готово", category="done")) == "done"
     assert classify_scope_report_bucket(_issue("P-5", 3, status="Пауза", category="indeterminate")) == "open_questions"
-    assert classify_scope_report_bucket(_issue("P-6", 3, status="К релизу", category="indeterminate")) == "in_work"
+    assert classify_scope_report_bucket(_issue("P-6", 3, status="К релизу", category="indeterminate")) == "in_test"
+    assert classify_scope_report_bucket(_issue("P-7", 3, status="Backlog", category="new")) == "not_started"
+    assert classify_scope_report_bucket(_issue("P-8", 3, status="К выполнению", category="new")) == "not_started"
 
 
 def test_compute_scope_report_groups_plan_and_unplan():
@@ -177,6 +179,33 @@ def test_compute_scope_report_groups_plan_and_unplan():
     assert report["plan"]["counts"]["in_work"] == 1
     assert report["unplan"]["counts"]["total"] == 0
     assert report["open_questions"][0]["last_comment"] == "Ждём ответ от провайдера"
+
+
+def test_compute_scope_report_excludes_not_started_but_keeps_done():
+    issues = [
+        *[_issue(f"B-{idx}", 1, status="Backlog", category="new") for idx in range(5)],
+        *[_issue(f"T-{idx}", 1, status="К выполнению", category="new") for idx in range(2)],
+        *[_issue(f"W-{idx}", 1, status="В работе", category="indeterminate") for idx in range(3)],
+        _issue("Q-1", 1, status="Пауза", category="indeterminate"),
+        _issue("IBO2-1561", 1, status="Готово", category="done"),
+        _issue("IBO2-1560", 1, status="Готово", category="done"),
+        *[_issue(f"D-{idx}", 1, status="Готово", category="done") for idx in range(3)],
+    ]
+    report = compute_scope_report_from_sections(
+        [
+            {
+                "id": "ibo2-1610",
+                "name": "BO.[tech] оптимизация. Июнь. 2026",
+                "kind": "planned",
+                "order": 0,
+                "issues": issues,
+            }
+        ]
+    )
+    section = report["sections"][0]
+    assert section["counts"] == {"in_work": 3, "in_test": 0, "done": 5, "total": 8}
+    assert {"IBO2-1560", "IBO2-1561"}.issubset({issue["key"] for issue in section["done"]})
+    assert [issue["key"] for issue in report["open_questions"]] == ["Q-1"]
 
 
 def test_sort_done_issues_by_recent_status():

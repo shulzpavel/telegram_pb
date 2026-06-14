@@ -4,7 +4,7 @@ import { formatScopeSp, intakeStatusMeta } from "./scopeBoardHelpers";
 import { buildCapacityVisual, donutArcs } from "./scopeBoardVisuals";
 
 export function ScopeVisualDashboard({ metrics }: { metrics: ScopeBoardMetrics }) {
-  const intake = intakeStatusMeta(metrics.intake_status);
+  const intake = intakeStatusMeta(metrics.intake_status, metrics);
   const visual = buildCapacityVisual(metrics);
   const arcs = donutArcs(visual.segments);
 

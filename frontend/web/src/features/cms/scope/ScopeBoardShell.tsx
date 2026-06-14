@@ -279,7 +279,7 @@ function ScopeBoardList({
       <div className="grid grid-cols-1 gap-3 lg:hidden">
         {visibleItems.map((item) => {
           const metrics = item.snapshot?.metrics;
-          const intake = metrics ? intakeStatusMeta(metrics.intake_status) : null;
+          const intake = metrics ? intakeStatusMeta(metrics.intake_status, metrics) : null;
           return (
             <MobileRecordCard
               key={item.id}
@@ -327,7 +327,7 @@ function ScopeBoardList({
           <tbody>
             {visibleItems.map((item) => {
               const metrics = item.snapshot?.metrics;
-              const intake = metrics ? intakeStatusMeta(metrics.intake_status) : null;
+              const intake = metrics ? intakeStatusMeta(metrics.intake_status, metrics) : null;
               return (
                 <tr key={item.id} className="border-t border-line">
                   <td className="px-3 py-2 align-top">
