@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from types import SimpleNamespace
 from typing import Any, Awaitable, Callable, Optional
 
 from app.domain.session import Session
@@ -15,6 +16,11 @@ from services.voting_service.scope_ai_llm import LlmScopeError, generate_scope_a
 logger = logging.getLogger(__name__)
 
 PhaseSetter = Callable[[str], Awaitable[None]]
+
+
+def _background_request(app) -> SimpleNamespace:
+    """Minimal request-like object for shared helpers used from background jobs."""
+    return SimpleNamespace(app=app, headers={}, client=None)
 
 
 async def run_scope_ai_job(
@@ -153,6 +159,7 @@ async def run_session_ai_summary_job(
     topic_id: Optional[int],
     task_id: str,
     actor_username: str,
+    force_refresh: bool = False,
 ) -> None:
     from services.voting_service.app_api import (
         _audit as app_audit,
@@ -166,7 +173,7 @@ async def run_session_ai_summary_job(
     repo = app.state.repository
     http_session = app.state.http_session
     kind = "session_ai_summary"
-    resource_key = f"session:{chat_id}:{task_id}"
+    resource_key = f"session:{chat_id}:{task_id}:refresh" if force_refresh else f"session:{chat_id}:{task_id}"
 
     async def runner(set_phase: PhaseSetter) -> dict[str, Any]:
         await set_phase("building_context")
@@ -180,7 +187,20 @@ async def run_session_ai_summary_job(
             raise LlmSummaryError("Start voting before generating an AI summary.", status_code=400)
 
         task = session.current_task
-        if task.ai_summary:
+        if task.ai_summary and not force_refresh:
+            if task.jira_key:
+                from services.voting_service.ai_summary_jira_export import should_skip_jira_export
+
+                if not should_skip_jira_export(task.ai_summary):
+                    spawn_session_ai_jira_export(
+                        app,
+                        chat_id=chat_id,
+                        topic_id=topic_id,
+                        task_id=task_id,
+                        issue_key=task.jira_key,
+                        summary=dict(task.ai_summary),
+                        actor_username=actor_username,
+                    )
             return {"session": _manager_session_payload(session), "cached": True}
 
         jira_context = None
@@ -205,12 +225,10 @@ async def run_session_ai_summary_job(
         if error:
             raise LlmSummaryError(error, status_code=400)
 
-        class _FakeRequest:
-            app = app
-
-        await _publish_state(_FakeRequest(), session)
+        fake_request = _background_request(app)
+        await _publish_state(fake_request, session)
         await app_audit(
-            _FakeRequest(),
+            fake_request,
             "app.task.ai_summary.generate",
             actor_username,
             "ok",
@@ -222,6 +240,16 @@ async def run_session_ai_summary_job(
             task_id,
             actor_username,
         )
+        if task.jira_key:
+            spawn_session_ai_jira_export(
+                app,
+                chat_id=chat_id,
+                topic_id=topic_id,
+                task_id=task_id,
+                issue_key=task.jira_key,
+                summary=dict(summary),
+                actor_username=actor_username,
+            )
         return {"session": _manager_session_payload(session), "cached": False}
 
     await run_phased_job(
@@ -231,4 +259,99 @@ async def run_session_ai_summary_job(
         resource_key=resource_key,
         label=f"session:{chat_id}:{task_id}",
         runner=runner,
+    )
+
+
+async def run_session_ai_jira_export(
+    app,
+    *,
+    chat_id: int,
+    topic_id: Optional[int],
+    task_id: str,
+    issue_key: str,
+    summary: dict[str, Any],
+    actor_username: str,
+) -> None:
+    """Fire-and-forget export of AI summary to Jira as an ADF comment."""
+    from app.adapters.jira_service_client import JiraServiceHttpClient
+    from services.voting_service.ai_summary_jira_export import (
+        ai_summary_jira_export_enabled,
+        export_ai_summary_to_jira,
+        should_skip_jira_export,
+    )
+    from services.voting_service.app_api import (
+        _get_repo_session,
+        _mutate_repo_session,
+        _publish_state,
+    )
+
+    if not ai_summary_jira_export_enabled() or not issue_key:
+        return
+    if should_skip_jira_export(summary):
+        return
+
+    client = JiraServiceHttpClient()
+    try:
+        session = await _get_repo_session(app.state.repository, chat_id, topic_id)
+        task_summary = None
+        if session.current_task and session.current_task.task_id == task_id:
+            task_summary = session.current_task.summary
+
+        jira_export = await export_ai_summary_to_jira(
+            client,
+            issue_key=issue_key,
+            summary=summary,
+            task_summary=task_summary,
+        )
+
+        def mutate(active: Session) -> Optional[str]:
+            if not active.current_task or active.current_task.task_id != task_id:
+                return None
+            current_summary = active.current_task.ai_summary
+            if not isinstance(current_summary, dict):
+                return None
+            merged = dict(current_summary)
+            merged["jira_export"] = jira_export
+            active.current_task.ai_summary = merged
+            active.current_task.touch()
+            active.bump_tasks_version()
+            return None
+
+        session, _ = await _mutate_repo_session(app.state.repository, chat_id, topic_id, mutate)
+        if session:
+            await _publish_state(_background_request(app), session)
+        logger.info(
+            "session AI Jira export chat_id=%s task_id=%s key=%s status=%s actor=%s",
+            chat_id,
+            task_id,
+            issue_key,
+            jira_export.get("status"),
+            actor_username,
+        )
+    finally:
+        await client.close()
+
+
+def spawn_session_ai_jira_export(
+    app,
+    *,
+    chat_id: int,
+    topic_id: Optional[int],
+    task_id: str,
+    issue_key: str,
+    summary: dict[str, Any],
+    actor_username: str,
+) -> None:
+    from services.voting_service.ai_jobs import spawn_ai_job
+
+    spawn_ai_job(
+        run_session_ai_jira_export(
+            app,
+            chat_id=chat_id,
+            topic_id=topic_id,
+            task_id=task_id,
+            issue_key=issue_key,
+            summary=summary,
+            actor_username=actor_username,
+        )
     )

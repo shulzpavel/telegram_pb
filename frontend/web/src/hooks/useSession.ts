@@ -24,6 +24,14 @@ export interface TaskInfo {
   total: number;
 }
 
+export interface AiSummaryJiraExport {
+  status: "ok" | "error";
+  hash?: string;
+  comment_id?: string | null;
+  exported_at?: string;
+  error?: string;
+}
+
 export interface AiTaskSummary {
   description: string;
   methods: string[];
@@ -37,6 +45,7 @@ export interface AiTaskSummary {
   estimation_model?: string;
   generated_at?: string;
   source?: string;
+  jira_export?: AiSummaryJiraExport;
 }
 
 export type ParticipantRole = "backend" | "frontend" | "qa";

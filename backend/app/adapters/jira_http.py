@@ -968,6 +968,30 @@ class JiraHttpClient(JiraClient):
         payload = {"body": self._comment_text_to_adf(cleaned)}
         return await self._make_request("POST", f"issue/{issue_key}/comment", payload, api_versions=["3"])
 
+    async def add_issue_comment_adf(self, issue_key: str, body: Mapping[str, Any]) -> Optional[Dict[str, Any]]:
+        """Append an ADF comment to a Jira issue."""
+        if not issue_key or not isinstance(body, Mapping) or body.get("type") != "doc":
+            return None
+        payload = {"body": body}
+        return await self._make_request("POST", f"issue/{issue_key}/comment", payload, api_versions=["3"])
+
+    async def update_issue_comment_adf(
+        self,
+        issue_key: str,
+        comment_id: str,
+        body: Mapping[str, Any],
+    ) -> Optional[Dict[str, Any]]:
+        """Replace an existing Jira comment body with ADF."""
+        if not issue_key or not comment_id or not isinstance(body, Mapping) or body.get("type") != "doc":
+            return None
+        payload = {"body": body}
+        return await self._make_request(
+            "PUT",
+            f"issue/{issue_key}/comment/{comment_id}",
+            payload,
+            api_versions=["3"],
+        )
+
     def _comment_text_to_adf(self, text: str) -> Dict[str, Any]:
         paragraphs = []
         for line in text.splitlines() or [text]:

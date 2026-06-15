@@ -23,6 +23,14 @@ export interface ReportParticipant {
   track_label?: string | null;
 }
 
+export interface AiSummaryJiraExport {
+  status: "ok" | "error";
+  hash?: string;
+  comment_id?: string | null;
+  exported_at?: string;
+  error?: string;
+}
+
 export interface AiTaskSummary {
   description: string;
   methods: string[];
@@ -36,6 +44,7 @@ export interface AiTaskSummary {
   estimation_model?: string;
   generated_at?: string;
   source?: string;
+  jira_export?: AiSummaryJiraExport;
 }
 
 /** A task that has already been played in the current batch. Used by the

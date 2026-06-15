@@ -727,7 +727,11 @@ function ManagerWorkspace({
     setAiSummaryProgress("Запускаем AI...");
     setError(null);
     try {
-      const started = await managerApi.startAiSummary(sessionRef.chatId, sessionRef.topicId);
+      const started = await managerApi.startAiSummary(
+        sessionRef.chatId,
+        sessionRef.topicId,
+        Boolean(session?.state.task?.ai_summary),
+      );
       if (isManagerSessionAiStart(started)) {
         setSession((prev) =>
           mergePaginatedRefresh(prev, {
@@ -774,7 +778,7 @@ function ManagerWorkspace({
       setAiSummaryBusy(false);
       setAiSummaryProgress(null);
     }
-  }, [loadTasks, sessionRef, toast]);
+  }, [loadTasks, session?.state.task?.ai_summary, sessionRef, toast]);
 
   // Auto-advance to the next task as soon as the manager picks a final SP.
   // Last-task case (no more tasks ahead) lands the session in phase=complete

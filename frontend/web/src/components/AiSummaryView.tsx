@@ -46,6 +46,14 @@ export default function AiSummaryView({
         {helperText ? (
           <span className="text-xs text-ink3">{helperText}</span>
         ) : null}
+        {summary.jira_export?.status === "ok" ? (
+          <span className="text-xs text-green">Сохранено в Jira</span>
+        ) : null}
+        {summary.jira_export?.status === "error" ? (
+          <span className="text-xs text-red" title={summary.jira_export.error}>
+            Ошибка сохранения в Jira
+          </span>
+        ) : null}
       </div>
       <p className="mt-3 text-sm leading-6 text-ink2">{summary.description}</p>
       <div className="mt-3 grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">

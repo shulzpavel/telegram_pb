@@ -41,6 +41,9 @@ def test_prompt_lists_full_fibonacci_scale() -> None:
         "Эпики",  # epics-not-estimated rule
         "spike",  # research-task escape hatch
         "ретро",  # what NOT to estimate
+        "инженерную сложность",  # estimate task implementation complexity, not doc size
+        "не длину документации",  # long Jira/Confluence body alone must not inflate SP
+        "edge cases",  # implementation complexity signal
         "low",  # confidence enum
         "high",  # confidence enum
     ],
@@ -60,7 +63,7 @@ def test_prompt_demands_strict_json_object() -> None:
     prompt = _system_prompt()
     assert "JSON" in prompt
     assert "schema" in prompt.lower() or "схеме" in prompt
-    assert "большое, короткое или неполное" in prompt
+    assert "Большое описание само по себе не повышает SP" in prompt
 
 
 def test_validator_still_accepts_well_formed_response() -> None:

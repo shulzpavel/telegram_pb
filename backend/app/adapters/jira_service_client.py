@@ -53,6 +53,27 @@ class JiraServiceHttpClient(JiraClient):
                 await asyncio.sleep(0.2 * attempt)
         raise RuntimeError(f"Jira Service unavailable: {last_error}") from last_error
 
+    async def _put_json(self, url: str, body: dict[str, Any]) -> dict[str, Any]:
+        session = await self._get_session()
+        transient_statuses = {429, 500, 502, 503, 504}
+        last_error: Optional[BaseException] = None
+        for attempt in range(1, self._retry_attempts + 1):
+            try:
+                async with session.put(url, json=body) as resp:
+                    if resp.status == 200:
+                        return await resp.json()
+                    if resp.status in transient_statuses and attempt < self._retry_attempts:
+                        await asyncio.sleep(0.2 * attempt)
+                        continue
+                    raise RuntimeError(f"Jira Service returned status {resp.status}: {(await resp.text())[:500]}")
+            except aiohttp.ClientError as exc:
+                last_error = exc
+                if attempt >= self._retry_attempts:
+                    break
+                logger.warning("Jira Service request failed, retrying: url=%s attempt=%s", url, attempt)
+                await asyncio.sleep(0.2 * attempt)
+        raise RuntimeError(f"Jira Service unavailable: {last_error}") from last_error
+
     async def search_issues(self, jql: str, max_results: int = 100) -> Optional[Dict[str, Any]]:
         """Search issues via Jira Service."""
         url = f"{self.base_url}/api/v1/search"
@@ -141,6 +162,27 @@ class JiraServiceHttpClient(JiraClient):
             return await self._post_json(url, {"text": text})
         except Exception as e:
             raise RuntimeError(f"Failed to add Jira comment via Jira Service: {e}") from e
+
+    async def add_issue_comment_adf(self, issue_key: str, body: Mapping[str, Any]) -> dict[str, Any]:
+        """Append an ADF comment through Jira Service."""
+        url = f"{self.base_url}/api/v1/issue/{issue_key}/comment/adf"
+        try:
+            return await self._post_json(url, {"body": dict(body)})
+        except Exception as e:
+            raise RuntimeError(f"Failed to add Jira ADF comment via Jira Service: {e}") from e
+
+    async def update_issue_comment_adf(
+        self,
+        issue_key: str,
+        comment_id: str,
+        body: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Update an existing Jira comment with ADF through Jira Service."""
+        url = f"{self.base_url}/api/v1/issue/{issue_key}/comment/{comment_id}/adf"
+        try:
+            return await self._put_json(url, {"body": dict(body)})
+        except Exception as e:
+            raise RuntimeError(f"Failed to update Jira ADF comment via Jira Service: {e}") from e
 
     async def parse_jira_request(self, text: str, max_results: int = 500) -> Optional[List[Dict[str, Any]]]:
         """Parse Jira request via Jira Service."""

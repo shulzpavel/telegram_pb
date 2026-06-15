@@ -187,6 +187,18 @@ class AddCommentResponse(BaseModel):
     comment_id: Optional[str] = None
 
 
+class AddAdfCommentRequest(BaseModel):
+    """Request model for adding a Jira comment with ADF body."""
+
+    body: Dict[str, Any]
+
+
+class UpdateAdfCommentResponse(BaseModel):
+    success: bool
+    issue_key: str
+    comment_id: Optional[str] = None
+
+
 DEMO_ISSUES: list[dict] = [
     {
         "key": "DEMO-101",
@@ -641,6 +653,55 @@ async def add_issue_comment(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to add Jira comment: {str(e)}")
+
+
+@router.post("/issue/{issue_key}/comment/adf", response_model=AddCommentResponse)
+async def add_issue_comment_adf(
+    issue_key: str,
+    body: AddAdfCommentRequest,
+    client: JiraServiceClient = Depends(get_jira_client),
+) -> AddCommentResponse:
+    """Append an ADF comment to a Jira issue."""
+    if not isinstance(body.body, dict) or body.body.get("type") != "doc":
+        raise HTTPException(status_code=400, detail="Comment body must be an ADF doc")
+    try:
+        comment = await client.add_issue_comment_adf(issue_key, body.body)
+        if not comment:
+            raise HTTPException(status_code=400, detail=f"Failed to add ADF comment for {issue_key}")
+        return AddCommentResponse(
+            success=True,
+            issue_key=issue_key,
+            comment_id=str(comment.get("id") or "") or None,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to add Jira ADF comment: {str(e)}")
+
+
+@router.put("/issue/{issue_key}/comment/{comment_id}/adf", response_model=UpdateAdfCommentResponse)
+async def update_issue_comment_adf(
+    issue_key: str,
+    comment_id: str,
+    body: AddAdfCommentRequest,
+    client: JiraServiceClient = Depends(get_jira_client),
+) -> UpdateAdfCommentResponse:
+    """Replace an existing Jira comment with ADF."""
+    if not isinstance(body.body, dict) or body.body.get("type") != "doc":
+        raise HTTPException(status_code=400, detail="Comment body must be an ADF doc")
+    try:
+        comment = await client.update_issue_comment_adf(issue_key, comment_id, body.body)
+        if not comment:
+            raise HTTPException(status_code=400, detail=f"Failed to update ADF comment for {issue_key}")
+        return UpdateAdfCommentResponse(
+            success=True,
+            issue_key=issue_key,
+            comment_id=str(comment.get("id") or comment_id) or None,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to update Jira ADF comment: {str(e)}")
 
 
 @router.post("/parse", response_model=SearchResponse)

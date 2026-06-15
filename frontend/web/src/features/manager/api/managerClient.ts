@@ -170,9 +170,9 @@ export const managerApi = {
     }),
   generateAiSummary: (chatId: number, topicId: number | null = null) =>
     appFetch<ManagerSession>(`/sessions/${chatId}/ai-summary${query({ topic_id: topicId })}`, { method: "POST" }),
-  startAiSummary: (chatId: number, topicId: number | null = null) =>
+  startAiSummary: (chatId: number, topicId: number | null = null, refresh = false) =>
     appFetch<SessionAiSummaryStartResponse>(
-      `/sessions/${chatId}/ai-summary${query({ topic_id: topicId, async: "1" })}`,
+      `/sessions/${chatId}/ai-summary${query({ topic_id: topicId, async: "1", refresh: refresh ? "1" : undefined })}`,
       { method: "POST" }
     ),
   getAiSummaryJob: (chatId: number, jobId: string, topicId: number | null = null) =>

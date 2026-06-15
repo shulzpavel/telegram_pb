@@ -141,6 +141,21 @@ class JiraServiceClient:
         self._cache.clear()
         return await self._client.add_issue_comment(issue_key, text)
 
+    async def add_issue_comment_adf(self, issue_key: str, body: Mapping[str, Any]) -> Optional[Dict[str, Any]]:
+        """Append an ADF Jira comment and clear cached issue/search projections."""
+        self._cache.clear()
+        return await self._client.add_issue_comment_adf(issue_key, body)
+
+    async def update_issue_comment_adf(
+        self,
+        issue_key: str,
+        comment_id: str,
+        body: Mapping[str, Any],
+    ) -> Optional[Dict[str, Any]]:
+        """Update an existing Jira comment with ADF and clear cache."""
+        self._cache.clear()
+        return await self._client.update_issue_comment_adf(issue_key, comment_id, body)
+
     def get_issue_url(self, issue_key: str) -> str:
         """Get issue URL."""
         return self._client.get_issue_url(issue_key)

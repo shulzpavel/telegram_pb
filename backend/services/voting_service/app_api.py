@@ -1128,6 +1128,7 @@ async def app_generate_ai_summary(
     request: Request,
     topic_id: Optional[int] = None,
     async_mode: bool = Query(False, alias="async"),
+    refresh: bool = Query(False),
     actor: CmsPrincipal = Depends(_require_manager_session),
 ) -> dict:
     """Generate a facilitator-facing AI hint for the current voting task via Anthropic.
@@ -1150,7 +1151,21 @@ async def app_generate_ai_summary(
         raise HTTPException(status_code=400, detail="Start voting before generating an AI summary.")
 
     task = session.current_task
-    if task.ai_summary:
+    if task.ai_summary and not refresh:
+        if task.jira_key and isinstance(task.ai_summary, dict):
+            from services.voting_service.ai_job_runners import spawn_session_ai_jira_export
+            from services.voting_service.ai_summary_jira_export import should_skip_jira_export
+
+            if not should_skip_jira_export(task.ai_summary):
+                spawn_session_ai_jira_export(
+                    request.app,
+                    chat_id=chat_id,
+                    topic_id=topic_id,
+                    task_id=task.task_id,
+                    issue_key=task.jira_key,
+                    summary=dict(task.ai_summary),
+                    actor_username=actor.username,
+                )
         return _manager_session_payload(session)
 
     from services.voting_service.ai_job_runners import run_session_ai_summary_job
@@ -1158,10 +1173,11 @@ async def app_generate_ai_summary(
 
     if async_mode:
         redis = request.app.state.web_redis
+        resource_key = f"session:{chat_id}:{task.task_id}:refresh" if refresh else f"session:{chat_id}:{task.task_id}"
         job_id, is_new = await get_or_create_job(
             redis,
             kind="session_ai_summary",
-            resource_key=f"session:{chat_id}:{task.task_id}",
+            resource_key=resource_key,
             actor=actor.username,
         )
         if is_new:
@@ -1173,6 +1189,7 @@ async def app_generate_ai_summary(
                     topic_id=topic_id,
                     task_id=task.task_id,
                     actor_username=actor.username,
+                    force_refresh=refresh,
                 )
             )
         job_record = await get_job(redis, job_id)
@@ -1224,6 +1241,18 @@ async def app_generate_ai_summary(
         "ok",
         {"chat_id": chat_id, "task_id": session.current_task_id, "source": summary.get("source")},
     )
+    if task.jira_key:
+        from services.voting_service.ai_job_runners import spawn_session_ai_jira_export
+
+        spawn_session_ai_jira_export(
+            request.app,
+            chat_id=chat_id,
+            topic_id=topic_id,
+            task_id=task.task_id,
+            issue_key=task.jira_key,
+            summary=dict(summary),
+            actor_username=actor.username,
+        )
     return _manager_session_payload(session)
 
 
