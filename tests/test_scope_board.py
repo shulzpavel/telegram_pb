@@ -257,11 +257,12 @@ def test_merge_scope_issues_prefers_later_group():
     assert merged[0]["status"] == "Пауза"
 
 
-def test_merge_priority_queue_preserves_order_and_rebuilds_appeared_timeline():
+def test_merge_priority_queue_puts_new_issues_first_and_preserves_existing_order():
     fetched = [
         {**_issue("P-1", 3), "priority": "High", "status": "К выполнению", "status_entered_at": "2026-06-10T10:00:00+00:00"},
         {**_issue("P-2", 2), "priority": "Highest", "status": "К выполнению", "status_entered_at": "2026-06-11T10:00:00+00:00"},
         {**_issue("P-3", 1), "priority": "Low", "status": "К выполнению", "status_entered_at": "2026-06-18T10:00:00+00:00"},
+        {**_issue("P-4", 1), "issue_type": "Bug", "priority": "Highest", "status": "К выполнению", "status_entered_at": "2026-06-19T10:00:00+00:00"},
     ]
     previous = {
         "order": ["P-2", "P-1"],
@@ -283,9 +284,9 @@ def test_merge_priority_queue_preserves_order_and_rebuilds_appeared_timeline():
         queue_label="Задачи к выполнению",
         refreshed_at="2026-06-20T10:00:00+00:00",
     )
-    assert [issue["key"] for issue in merged["issues"]] == ["P-2", "P-1", "P-3"]
+    assert [issue["key"] for issue in merged["issues"]] == ["P-3", "P-2", "P-1", "P-4"]
     appeared = [entry for entry in merged["history"] if entry["type"] == "appeared"]
-    assert len(appeared) == 3
+    assert len(appeared) == 4
     by_key = {entry["issue_key"]: entry["at"] for entry in appeared}
     assert by_key["P-1"] == "2026-06-10T10:00:00+00:00"
     assert by_key["P-3"] == "2026-06-18T10:00:00+00:00"

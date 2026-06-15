@@ -651,6 +651,13 @@ def sort_issues_by_jira_priority(issues: list[dict[str, Any]]) -> list[dict[str,
     )
 
 
+def _queue_issue_type_rank(issue: dict[str, Any]) -> int:
+    issue_type = str(issue.get("issue_type") or "").strip().lower()
+    if issue_type in {"story", "user story", "история"}:
+        return 0
+    return 1
+
+
 def _status_entered_timestamp(issue: dict[str, Any]) -> float:
     for field in ("status_entered_at", "status_changed_at", "resolution_date", "updated"):
         value = issue.get(field)
@@ -1034,9 +1041,16 @@ def merge_priority_queue(
     previous_order = [str(key) for key in previous.get("order") or [] if str(key) in merged_by_key]
     new_keys = sorted(
         [key for key in merged_by_key if key not in previous_order],
-        key=lambda key: (jira_priority_rank(merged_by_key[key].get("priority")), key),
+        key=lambda key: (
+            _queue_issue_type_rank(merged_by_key[key]),
+            jira_priority_rank(merged_by_key[key].get("priority")),
+            key,
+        ),
     )
-    order = previous_order + new_keys
+    raw_order = new_keys + previous_order
+    order = [key for key in raw_order if _queue_issue_type_rank(merged_by_key[key]) == 0] + [
+        key for key in raw_order if _queue_issue_type_rank(merged_by_key[key]) != 0
+    ]
     issues = [merged_by_key[key] for key in order]
     history = list(previous.get("history") or [])
     filter_seen_at = dict(previous.get("filter_seen_at") or {})

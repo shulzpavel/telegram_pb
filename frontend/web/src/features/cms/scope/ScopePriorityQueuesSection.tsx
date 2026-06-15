@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useRef, useState } from "react";
 import {
   DndContext,
   KeyboardSensor,
@@ -75,6 +75,21 @@ function resolveQueue(snapshot: ScopeBoardSnapshot, kind: ScopePriorityQueueKind
   };
 }
 
+function queueBlockToneClasses(kind: ScopePriorityQueueKind): { frame: string; header: string; count: string } {
+  if (kind === "test") {
+    return {
+      frame: "border-purple/25",
+      header: "border-purple/15 bg-purple/[0.07]",
+      count: "border-purple/25 bg-purple/[0.08] text-ink",
+    };
+  }
+  return {
+    frame: "border-blue/25",
+    header: "border-blue/15 bg-blue/[0.07]",
+    count: "border-blue/25 bg-blue/[0.08] text-ink",
+  };
+}
+
 function formatHistoryTime(iso: string): string {
   try {
     return new Date(iso).toLocaleString("ru-RU", { dateStyle: "short", timeStyle: "short" });
@@ -99,7 +114,7 @@ export function ScopePriorityQueuesSection({
   onAddQueueComment: (queue: ScopePriorityQueueKind, issueKey: string, text: string) => Promise<void>;
 }) {
   return (
-    <div className="space-y-3">
+    <div className="space-y-5">
       <PriorityQueueBlock
         kind="todo"
         queue={resolveQueue(snapshot, "todo")}
@@ -136,15 +151,21 @@ function PriorityQueueBlock({
   onAddQueueComment: (queue: ScopePriorityQueueKind, issueKey: string, text: string) => Promise<void>;
 }) {
   const meta = QUEUE_META[kind];
+  const blockTone = queueBlockToneClasses(kind);
   const [pendingOrder, setPendingOrder] = useState<string[] | null>(null);
   const [pendingMovedKey, setPendingMovedKey] = useState<string | null>(null);
   const [reorderComment, setReorderComment] = useState("");
   const [reordering, setReordering] = useState(false);
   const [reorderError, setReorderError] = useState<string | null>(null);
+  const listTopRef = useRef<HTMLDivElement | null>(null);
+  const listBottomRef = useRef<HTMLDivElement | null>(null);
 
   const issues = queue.issues;
-  const { visibleItems, hasMore, loadMore, loadedCount, total } = useIncrementalList(issues);
+  const groupedIssues = useMemo(() => groupQueueIssues(issues), [issues]);
+  const { visibleItems, hasMore, loadMore, loadedCount, total } = useIncrementalList(groupedIssues);
   const sortableIds = useMemo(() => visibleItems.map((issue) => issue.key), [visibleItems]);
+  const storyCount = useMemo(() => groupedIssues.filter(isQueueStoryIssue).length, [groupedIssues]);
+  const otherCount = issues.length - storyCount;
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
@@ -156,11 +177,11 @@ function PriorityQueueBlock({
     const overId = event.over ? String(event.over.id) : null;
     if (!overId || activeId === overId) return;
 
-    const oldIndex = issues.findIndex((issue) => issue.key === activeId);
-    const newIndex = issues.findIndex((issue) => issue.key === overId);
+    const oldIndex = groupedIssues.findIndex((issue) => issue.key === activeId);
+    const newIndex = groupedIssues.findIndex((issue) => issue.key === overId);
     if (oldIndex < 0 || newIndex < 0 || oldIndex === newIndex) return;
 
-    const nextOrder = arrayMove(issues, oldIndex, newIndex).map((issue) => issue.key);
+    const nextOrder = arrayMove(groupedIssues, oldIndex, newIndex).map((issue) => issue.key);
     setPendingOrder(nextOrder);
     setPendingMovedKey(activeId);
     setReorderComment("");
@@ -188,14 +209,36 @@ function PriorityQueueBlock({
     }
   }
 
+  function scrollToQueueEdge(edge: "top" | "bottom") {
+    const target = edge === "top" ? listTopRef.current : listBottomRef.current;
+    target?.scrollIntoView({ behavior: "smooth", block: edge === "top" ? "start" : "end" });
+  }
+
   return (
     <>
-      <details className="rounded-lg border border-line bg-surface">
-        <summary className="cursor-pointer list-none px-4 py-3 text-sm font-semibold text-ink marker:content-none sm:px-5">
-          {meta.title} · {issues.length}
+      <details className={cn("overflow-hidden rounded-xl border bg-surface shadow-card", blockTone.frame)}>
+        <summary className={cn("cursor-pointer list-none border-b px-5 py-4 marker:content-none sm:px-6", blockTone.header)}>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="text-base font-semibold text-ink">{meta.title}</p>
+              <p className="mt-0.5 text-xs text-ink3">{meta.jqlHint}</p>
+            </div>
+            <span className={cn("rounded-full border px-3 py-1 text-sm font-semibold tabular-nums", blockTone.count)}>
+              {issues.length} задач
+            </span>
+          </div>
         </summary>
-        <div className="space-y-4 border-t border-line px-4 py-4 sm:px-5">
-          <p className="text-sm text-ink2">{meta.subtitle}</p>
+        <div className="space-y-4 px-5 py-5 sm:px-6">
+          <div ref={listTopRef} className="flex flex-wrap items-start justify-between gap-3">
+            <p className="min-w-0 flex-1 text-sm text-ink2">{meta.subtitle}</p>
+            {issues.length > 8 ? (
+              <div className="flex shrink-0 flex-wrap gap-1.5">
+                <Button type="button" size="sm" variant="ghost" className="min-h-7 px-2 text-xs" onClick={() => scrollToQueueEdge("bottom")}>
+                  В самый низ
+                </Button>
+              </div>
+            ) : null}
+          </div>
           {jql.trim() ? (
             <p className="rounded-md border border-line bg-bg px-3 py-2 font-mono text-xs text-ink3">{jql.trim()}</p>
           ) : (
@@ -208,17 +251,23 @@ function PriorityQueueBlock({
             <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
               <SortableContext items={sortableIds} strategy={verticalListSortingStrategy}>
                 <ol className="space-y-2">
-                  {visibleItems.map((issue) => (
-                    <SortableQueueIssueCard
-                      key={issue.key}
-                      issue={issue}
-                      index={issues.findIndex((item) => item.key === issue.key)}
-                      history={queue.history}
-                      canManage={canManage}
-                      draggable={canManage}
-                      onAddComment={(text) => onAddQueueComment(kind, issue.key, text)}
-                    />
-                  ))}
+                  {visibleItems.map((issue) => {
+                    const issueIndex = groupedIssues.findIndex((item) => item.key === issue.key);
+                    const groupLabel = queueGroupLabelForIndex(groupedIssues, issueIndex, storyCount, otherCount);
+                    return (
+                      <Fragment key={issue.key}>
+                        {groupLabel ? <QueueGroupDivider label={groupLabel.label} count={groupLabel.count} /> : null}
+                        <SortableQueueIssueCard
+                          issue={issue}
+                          index={issueIndex}
+                          history={queue.history}
+                          canManage={canManage}
+                          draggable={canManage}
+                          onAddComment={(text) => onAddQueueComment(kind, issue.key, text)}
+                        />
+                      </Fragment>
+                    );
+                  })}
                 </ol>
               </SortableContext>
               <ScopeIncrementalFooter
@@ -227,6 +276,14 @@ function PriorityQueueBlock({
                 hasMore={hasMore}
                 onMore={loadMore}
               />
+              <div ref={listBottomRef} aria-hidden="true" />
+              {issues.length > 8 ? (
+                <div className="flex justify-end">
+                  <Button type="button" size="sm" variant="ghost" className="min-h-7 px-2 text-xs" onClick={() => scrollToQueueEdge("top")}>
+                    В самый верх
+                  </Button>
+                </div>
+              ) : null}
             </DndContext>
           )}
         </div>
@@ -265,6 +322,46 @@ function PriorityQueueBlock({
         onConfirm={() => void confirmReorder()}
       />
     </>
+  );
+}
+
+function isQueueStoryIssue(issue: ScopeBoardIssue): boolean {
+  const type = (issue.issue_type || "").trim().toLowerCase();
+  return type === "story" || type === "user story" || type === "история";
+}
+
+function groupQueueIssues(issues: ScopeBoardIssue[]): ScopeBoardIssue[] {
+  const stories = issues.filter(isQueueStoryIssue);
+  const others = issues.filter((issue) => !isQueueStoryIssue(issue));
+  return [...stories, ...others];
+}
+
+function queueGroupLabelForIndex(
+  issues: ScopeBoardIssue[],
+  index: number,
+  storyCount: number,
+  otherCount: number
+): { label: string; count: number } | null {
+  if (index < 0 || index >= issues.length) return null;
+  const currentIsStory = isQueueStoryIssue(issues[index]!);
+  const previous = index > 0 ? issues[index - 1] : null;
+  const isFirstInGroup = !previous || isQueueStoryIssue(previous) !== currentIsStory;
+  if (!isFirstInGroup) return null;
+  if (currentIsStory) return { label: "Истории", count: storyCount };
+  return { label: "Остальные задачи", count: otherCount };
+}
+
+function QueueGroupDivider({ label, count }: { label: string; count: number }) {
+  return (
+    <li className="list-none py-1" aria-label={`${label}: ${count}`}>
+      <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-ink3">
+        <span className="h-px flex-1 bg-line" />
+        <span className="rounded-full border border-line bg-surface px-2 py-0.5">
+          {label} · {count}
+        </span>
+        <span className="h-px flex-1 bg-line" />
+      </div>
+    </li>
   );
 }
 
@@ -352,8 +449,10 @@ function QueueIssueCard({
     }
   }
 
+  const toneClasses = queueIssueToneClasses(issue);
+
   return (
-    <div className="rounded-lg border border-line bg-bg px-3 py-3 sm:px-4">
+    <div className={cn("rounded-lg border bg-bg px-3 py-3 sm:px-4", toneClasses.card)}>
       <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(260px,360px)]">
         <div className="flex min-w-0 gap-3">
           <div className="flex shrink-0 flex-col items-center gap-1.5 pt-0.5">
@@ -394,9 +493,9 @@ function QueueIssueCard({
             <QueueMilestoneLine milestone={milestone} />
 
             {issue.grooming_comment ? (
-              <div className="rounded-md border border-blue/15 border-l-[3px] border-l-blue/60 bg-blue/[0.06] px-2.5 py-2">
+              <div className={cn("rounded-md border border-l-[3px] bg-surface px-2.5 py-2", toneClasses.grooming)}>
                 <p className="text-xs leading-snug text-ink">
-                  <span className="font-semibold text-blue">Груминг: </span>
+                  <span className={cn("font-semibold", toneClasses.accent)}>Груминг: </span>
                   {issue.grooming_comment}
                 </p>
                 {issue.grooming_comment_by ? (
@@ -419,7 +518,7 @@ function QueueIssueCard({
         </div>
 
         {canManage ? (
-          <div className="lg:border-l lg:border-line lg:pl-3">
+          <div className={cn("rounded-md lg:border-l lg:pl-3", toneClasses.commentPanel)}>
             <TextareaField
               label="Комментарий → Jira"
               rows={2}
@@ -456,6 +555,53 @@ function QueueIssueSpBadge({ storyPoints }: { storyPoints: number | null | undef
       {label}
     </span>
   );
+}
+
+function queueIssueTypeTone(issue: ScopeBoardIssue): "story" | "bug" | "epic" | "task" {
+  const type = (issue.issue_type || "").trim().toLowerCase();
+  if (type === "story" || type === "user story" || type === "история") return "story";
+  if (type === "bug" || type === "баг" || type === "defect" || type === "ошибка") return "bug";
+  if (type === "epic" || type === "эпик") return "epic";
+  return "task";
+}
+
+function queueIssueToneClasses(issue: ScopeBoardIssue): {
+  card: string;
+  commentPanel: string;
+  grooming: string;
+  accent: string;
+} {
+  const tone = queueIssueTypeTone(issue);
+  if (tone === "story") {
+    return {
+      card: "border-green/35",
+      commentPanel: "border-green/25 lg:pl-3",
+      grooming: "border-green/25 border-l-green/65",
+      accent: "text-ink",
+    };
+  }
+  if (tone === "bug") {
+    return {
+      card: "border-red/35",
+      commentPanel: "border-red/25 lg:pl-3",
+      grooming: "border-red/25 border-l-red/65",
+      accent: "text-ink",
+    };
+  }
+  if (tone === "epic") {
+    return {
+      card: "border-purple/35",
+      commentPanel: "border-purple/25 lg:pl-3",
+      grooming: "border-purple/25 border-l-purple/65",
+      accent: "text-ink",
+    };
+  }
+  return {
+    card: "border-blue/35",
+    commentPanel: "border-blue/25 lg:pl-3",
+    grooming: "border-blue/25 border-l-blue/65",
+    accent: "text-ink",
+  };
 }
 
 function QueueIssueMetaRow({ issue }: { issue: ScopeBoardIssue }) {
