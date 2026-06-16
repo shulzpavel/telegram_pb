@@ -20,7 +20,15 @@ const ACTIONS: HubAction[] = [
     title: "Посчитать capacity и velocity",
     description: "Соберите команду, отпуска и историю спринтов — калькулятор подскажет реалистичный план в story points.",
     details: ["Velocity", "Capacity", "Роли и треки", "Сохранённые расчёты"],
-    cta: { label: "Открыть калькулятор", to: "/cms/planner", variant: "primary" },
+    cta: { label: "Открыть калькулятор", to: "/cms/planner", variant: "secondary" },
+  },
+  {
+    id: "reports",
+    eyebrow: "Главный контур",
+    title: "Собрать отчёт месяца",
+    description: "Сведите плановый и внеплановый scope, capacity health, очереди todo/test и AI-выводы в один общий отчёт для команды.",
+    details: ["Monthly scope", "Capacity health", "Очереди todo/test", "AI summary"],
+    cta: { label: "Открыть отчёты", to: "/cms/scope", variant: "primary" },
   },
   {
     id: "sessions",
@@ -81,18 +89,18 @@ export default function LandingPage() {
             <div>
               <Badge tone="info">Общая ссылка для команды</Badge>
               <h1 className="mt-5 max-w-3xl text-balance text-3xl font-bold leading-tight tracking-tight sm:text-5xl sm:leading-[1.05]">
-                Планирование, poker и ретро в одном месте
+                Планирование, отчёты, poker и ретро в одном месте
               </h1>
               <p className="mt-5 max-w-2xl text-base leading-8 text-ink2 sm:text-lg">
-                Начните с калькулятора capacity, проведите planning session и закройте цикл ретроспективой с анонимными карточками.
+                Начните с capacity, соберите monthly scope report, проведите planning session и закройте цикл ретроспективой.
               </p>
             </div>
             <div className="rounded-2xl border border-blue/20 bg-blue/10 p-5 text-sm leading-7 text-ink2 shadow-card sm:p-6">
-              Уже есть invite-ссылка? Откройте её напрямую — ссылки на сессии и ретро ведут сразу на нужный экран команды.
+              Отчёты стали центральным рабочим экраном: JQL-секции, буфер capacity, риски scope, очереди и AI-сводка живут в одном monthly board.
             </div>
           </motion.div>
 
-          <div className="grid gap-5 lg:grid-cols-3">
+          <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-4">
             {ACTIONS.map((action, index) => (
               <motion.div
                 key={action.id}
@@ -161,13 +169,16 @@ export default function LandingPage() {
                 })}
           >
             <Surface className="p-5 sm:p-6">
-              <div className="grid gap-4 lg:grid-cols-[0.8fr_1fr_1fr_1fr] lg:items-center">
+              <div className="grid gap-4 lg:grid-cols-[0.8fr_1fr_1fr_1fr_1fr] lg:items-center">
                 <div>
                   <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue">Как это работает</p>
                   <h2 className="mt-2 text-lg font-bold text-ink">Рабочий порядок</h2>
                 </div>
                 <HubStep title="Калькулятор">
                   Зафиксируйте состав команды, absences и velocity перед тем, как брать объём в спринт.
+                </HubStep>
+                <HubStep title="Отчёты">
+                  Соберите monthly scope: план, внеплан, capacity, очереди, риски и AI-выводы по команде.
                 </HubStep>
                 <HubStep title="Сессии">
                   Команда голосует по invite-ссылке, ведущий управляет задачами, AI и финальными SP.
@@ -177,7 +188,8 @@ export default function LandingPage() {
                 </HubStep>
               </div>
               <p className="mt-5 border-t border-line pt-5 text-sm leading-7 text-ink2">
-                Сначала оцените capacity команды, затем проведите planning poker по задачам и после спринта соберите ретро.
+                Сначала оцените capacity команды, затем держите monthly report как общий источник правды по scope.
+                После этого проводите planning poker по задачам и закрывайте цикл ретро.
                 Для быстрых проверок есть mock demo: голосование и ретро открываются без подготовки данных.
               </p>
             </Surface>
@@ -190,6 +202,7 @@ export default function LandingPage() {
           <p>Planning Poker для capacity planning, оценки задач и командных ретро.</p>
           <nav aria-label="Служебные ссылки" className="flex flex-wrap gap-4">
             <Link to="/cms" className="font-semibold text-ink2 hover:text-blue">CMS</Link>
+            <Link to="/cms/scope" className="font-semibold text-ink2 hover:text-blue">Reports</Link>
             <Link to="/demo?mock=1" className="font-semibold text-ink2 hover:text-blue">Demo poker</Link>
             <Link to="/r/demo-retro?mock=1" className="font-semibold text-ink2 hover:text-blue">Demo retro</Link>
           </nav>

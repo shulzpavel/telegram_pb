@@ -163,7 +163,7 @@ export function ScopeFloatingTodo({
   if (!open) {
     return (
       <div className="scope-no-print fixed bottom-5 right-5 z-40 hidden md:block">
-        <Button variant="secondary" className="shadow-pop" onClick={() => setOpen(true)}>
+        <Button variant="secondary" className="border-amber/30 bg-surface" onClick={() => setOpen(true)}>
           <span className="inline-flex h-2 w-2 rounded-full bg-amber" aria-hidden="true" />
           Мини todo
           {activeCount > 0 ? <Badge tone="warning">{activeCount}</Badge> : null}
@@ -174,10 +174,11 @@ export function ScopeFloatingTodo({
 
   return (
     <Surface
-      className="scope-no-print fixed z-40 hidden max-h-[min(70vh,420px)] overflow-hidden border-transparent bg-surface/95 p-0 shadow-pop backdrop-blur md:block"
+      className="scope-no-print fixed z-40 hidden max-h-[min(70vh,420px)] overflow-hidden border-line bg-surface p-0 ring-1 ring-amber/20 md:block"
       style={panelStyle}
       aria-label="Мини todo"
     >
+      <div className="h-1 bg-amber/70" aria-hidden="true" />
       <div
         className="scope-section-header flex cursor-move touch-none items-center justify-between gap-3 px-4 py-3"
         onPointerDown={handlePointerDown}
