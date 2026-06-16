@@ -152,8 +152,10 @@ export interface PlannerResult {
   hasActuals: boolean;
   /** Per-role breakdown for the detailed-capacity table. */
   roles: PlannerRoleBreakdown[];
-  /** Role with the smallest netCapacity. `null` when no roles defined. */
+  /** First role with the smallest netCapacity. Kept for older consumers. */
   bottleneckRole: PlannerRoleBreakdown | null;
+  /** All roles tied for the smallest netCapacity. Empty when no roles with headcount are defined. */
+  bottleneckRoles: PlannerRoleBreakdown[];
   /** True when no track had any historical SP at all and we used the first-sprint fallback. */
   usedBootstrapVelocity: boolean;
 }
@@ -219,13 +221,13 @@ function buildRoleBreakdowns(
   totalBase: number;
   totalNet: number;
   totalAbsences: number;
-  bottleneck: PlannerRoleBreakdown | null;
+  bottlenecks: PlannerRoleBreakdown[];
 } {
   const safeDays = nonNegative(workingDays);
   let totalBase = 0;
   let totalNet = 0;
   let totalAbsences = 0;
-  let bottleneck: PlannerRoleBreakdown | null = null;
+  let bottlenecks: PlannerRoleBreakdown[] = [];
 
   const rows = roles.map((role) => {
     const headcount = nonNegative(role.headcount);
@@ -249,13 +251,18 @@ function buildRoleBreakdowns(
       netCapacity,
       absences,
     };
-    if (headcount > 0 && (bottleneck === null || netCapacity < bottleneck.netCapacity)) {
-      bottleneck = row;
+    if (headcount > 0) {
+      const currentMin = bottlenecks[0]?.netCapacity;
+      if (currentMin === undefined || netCapacity < currentMin) {
+        bottlenecks = [row];
+      } else if (netCapacity === currentMin) {
+        bottlenecks.push(row);
+      }
     }
     return row;
   });
 
-  return { rows, totalBase, totalNet, totalAbsences, bottleneck };
+  return { rows, totalBase, totalNet, totalAbsences, bottlenecks };
 }
 
 export function computePlannerResult(inputs: PlannerInputs): PlannerResult {
@@ -365,7 +372,8 @@ export function computePlannerResult(inputs: PlannerInputs): PlannerResult {
     totalActualSp,
     hasActuals: actualEntries.length > 0,
     roles: roles.rows,
-    bottleneckRole: roles.bottleneck,
+    bottleneckRole: roles.bottlenecks[0] ?? null,
+    bottleneckRoles: roles.bottlenecks,
     usedBootstrapVelocity: everyVelocityEmpty && tracksWithRoles.length > 0,
   };
 }

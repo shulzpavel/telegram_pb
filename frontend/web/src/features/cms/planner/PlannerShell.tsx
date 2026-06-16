@@ -1304,6 +1304,11 @@ function ResultPanel({ result }: { result: PlannerResult }) {
   const visibleTracks = result.tracks.filter((t) => !hidden.has(t.id));
   const visiblePlanLimit = visibleTracks.reduce((acc, t) => acc + t.planLimit, 0);
   const visibleReserve = visibleTracks.reduce((acc, t) => acc + t.reserveSp, 0);
+  const bottleneckRows = new Set(result.bottleneckRoles);
+  const bottleneckNames = result.bottleneckRoles
+    .map((role) => `${role.name} (${role.trackLabel})`)
+    .join(", ");
+  const bottleneckCapacity = result.bottleneckRoles[0]?.netCapacity ?? 0;
 
   function toggle(id: string) {
     setHidden((prev) => {
@@ -1394,87 +1399,124 @@ function ResultPanel({ result }: { result: PlannerResult }) {
         </dl>
       </div>
 
-      <div className="rounded-lg border border-line bg-surface p-4 shadow-card">
-        <h3 className="text-sm font-bold text-ink">Расчёт по трекам</h3>
-        <p className="mt-1 text-xs text-ink3">
-          Velocity усреднена по истории. Capacity = чел-дней по ролям трека.
-          Adjusted = Velocity × (Capacity итого / Capacity база).
-        </p>
-        <div className="mt-3 overflow-x-auto">
-          <table className="w-full table-auto text-sm">
-            <thead className="text-xs uppercase text-ink3">
-              <tr>
-                <th className="px-2 py-1 text-left">Трек</th>
-                <th className="px-2 py-1 text-right">Velocity, SP</th>
-                <th className="px-2 py-1 text-right">База, чел-дней</th>
-                <th className="px-2 py-1 text-right">Итого, чел-дней</th>
-                <th className="px-2 py-1 text-right">План, SP</th>
-              </tr>
-            </thead>
-            <tbody>
-              {result.tracks.map((track) => (
-                <tr key={track.id} className="border-t border-line">
-                  <td className="px-2 py-1.5 text-ink">{track.label}</td>
-                  <td className="px-2 py-1.5 text-right text-ink2">
-                    {formatSp(track.velocity)}
-                    {track.usedBootstrap ? <Badge tone="info" className="ml-1">стартовая</Badge> : null}
-                  </td>
-                  <td className="px-2 py-1.5 text-right text-ink2">{formatSp(track.baseCapacity)}</td>
-                  <td className="px-2 py-1.5 text-right text-ink2">
-                    {formatSp(track.netCapacity)}
-                    {track.absences > 0 ? (
-                      <span className="ml-1 text-xs text-ink3">(−{formatSp(track.absences)})</span>
-                    ) : null}
-                  </td>
-                  <td className="px-2 py-1.5 text-right font-semibold text-ink">
-                    {formatSp(track.planLimit)}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        {result.bottleneckRole ? (
-          <Alert tone="warning" className="mt-4">
-            Узкое место: <b>{result.bottleneckRole.name}</b> ({result.bottleneckRole.trackLabel}) ·{" "}
-            {formatSp(result.bottleneckRole.netCapacity)} чел-дней.
-          </Alert>
-        ) : null}
-      </div>
+      <details className="group rounded-lg border border-line bg-surface p-4 shadow-card">
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-sm font-bold text-ink">
+          <span>Подробности расчёта</span>
+          <span className="text-xs font-semibold text-ink3 group-open:hidden">Показать</span>
+          <span className="hidden text-xs font-semibold text-ink3 group-open:inline">Скрыть</span>
+        </summary>
 
-      <div className="rounded-lg border border-line bg-surface p-4 shadow-card">
-        <h3 className="text-sm font-bold text-ink">Команда</h3>
-        <table className="mt-2 w-full table-auto text-sm">
-          <thead className="text-xs uppercase text-ink3">
-            <tr>
-              <th className="px-2 py-1 text-left">Роль</th>
-              <th className="px-2 py-1 text-left">Трек</th>
-              <th className="px-2 py-1 text-right">База</th>
-              <th className="px-2 py-1 text-right">Минус</th>
-              <th className="px-2 py-1 text-right">Итого</th>
-            </tr>
-          </thead>
-          <tbody>
-            {result.roles.length === 0 ? (
-              <tr>
-                <td colSpan={5} className="px-2 py-2 text-sm text-ink3">
-                  Добавьте роли, чтобы увидеть распределение.
-                </td>
-              </tr>
-            ) : (
-              result.roles.map((row, idx) => (
-                <tr key={`${row.name}-${idx}`} className="border-t border-line">
-                  <td className="px-2 py-1.5 text-ink">{row.name}</td>
-                  <td className="px-2 py-1.5 text-ink2">{row.trackLabel}</td>
-                  <td className="px-2 py-1.5 text-right text-ink2">{formatSp(row.baseCapacity)}</td>
-                  <td className="px-2 py-1.5 text-right text-ink2">{row.absences > 0 ? `−${formatSp(row.absences)}` : "—"}</td>
-                  <td className="px-2 py-1.5 text-right font-semibold text-ink">{formatSp(row.netCapacity)}</td>
+        <div className="mt-4 space-y-4">
+          <section>
+            <h3 className="text-sm font-bold text-ink">Расчёт по трекам</h3>
+            <div className="mt-2 space-y-1.5 text-xs text-ink3">
+              <p>
+                Velocity — среднее количество SP, закрытых по этому треку в прошлых спринтах.
+                Если истории пока нет, берётся стартовая рекомендация {BOOTSTRAP_VELOCITY_SP} SP и
+                делится между треками, где есть команда.
+              </p>
+              <p>
+                База — сколько человеко-дней было бы без отпусков и других отсутствий:
+                люди в ролях трека × рабочие дни спринта. Итого — та же база минус отсутствия.
+              </p>
+              <p>
+                План — историческая скорость, поправленная на доступность команды:
+                Velocity × (итого / база) минус буфер {formatSp(result.bufferPercent)}%.
+              </p>
+            </div>
+            <div className="mt-3 overflow-x-auto">
+              <table className="w-full table-auto text-sm">
+                <thead className="text-xs uppercase text-ink3">
+                  <tr>
+                    <th className="px-2 py-1 text-left">Трек</th>
+                    <th className="px-2 py-1 text-right">Velocity, SP</th>
+                    <th className="px-2 py-1 text-right">База, чел-дней</th>
+                    <th className="px-2 py-1 text-right">Итого, чел-дней</th>
+                    <th className="px-2 py-1 text-right">План, SP</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {result.tracks.map((track) => (
+                    <tr key={track.id} className="border-t border-line">
+                      <td className="px-2 py-1.5 text-ink">{track.label}</td>
+                      <td className="px-2 py-1.5 text-right text-ink2">
+                        {formatSp(track.velocity)}
+                        {track.usedBootstrap ? <Badge tone="info" className="ml-1">стартовая</Badge> : null}
+                      </td>
+                      <td className="px-2 py-1.5 text-right text-ink2">{formatSp(track.baseCapacity)}</td>
+                      <td className="px-2 py-1.5 text-right text-ink2">
+                        {formatSp(track.netCapacity)}
+                        {track.absences > 0 ? (
+                          <span className="ml-1 text-xs text-ink3">(−{formatSp(track.absences)})</span>
+                        ) : null}
+                      </td>
+                      <td className="px-2 py-1.5 text-right font-semibold text-ink">
+                        {formatSp(track.planLimit)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {result.bottleneckRoles.length > 0 ? (
+              <Alert tone="warning" className="mt-4">
+                Узкое место: <b>{bottleneckNames}</b> · {formatSp(bottleneckCapacity)} чел-дней.
+                Это роль или роли с минимальным доступным capacity среди всей команды.
+              </Alert>
+            ) : null}
+          </section>
+
+          <section>
+            <h3 className="text-sm font-bold text-ink">Команда</h3>
+            <p className="mt-1 text-xs text-ink3">
+              Здесь видно, из каких ролей собран capacity. Одна роль относится к одному треку,
+              поэтому её человеко-дни влияют только на план этого трека.
+            </p>
+            <table className="mt-2 w-full table-auto text-sm">
+              <thead className="text-xs uppercase text-ink3">
+                <tr>
+                  <th className="px-2 py-1 text-left">Роль</th>
+                  <th className="px-2 py-1 text-left">Трек</th>
+                  <th className="px-2 py-1 text-right">База</th>
+                  <th className="px-2 py-1 text-right">Минус</th>
+                  <th className="px-2 py-1 text-right">Итого</th>
                 </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
+              </thead>
+              <tbody>
+                {result.roles.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className="px-2 py-2 text-sm text-ink3">
+                      Добавьте роли, чтобы увидеть распределение.
+                    </td>
+                  </tr>
+                ) : (
+                  result.roles.map((row, idx) => {
+                    const bottleneck = bottleneckRows.has(row);
+                    return (
+                      <tr
+                        key={`${row.name}-${idx}`}
+                        className={
+                          "border-t border-line " +
+                          (bottleneck ? "bg-amber/10" : "")
+                        }
+                      >
+                        <td className="px-2 py-1.5 text-ink">
+                          {row.name}
+                          {bottleneck ? <Badge tone="warning" className="ml-1">узкое место</Badge> : null}
+                        </td>
+                        <td className="px-2 py-1.5 text-ink2">{row.trackLabel}</td>
+                        <td className="px-2 py-1.5 text-right text-ink2">{formatSp(row.baseCapacity)}</td>
+                        <td className="px-2 py-1.5 text-right text-ink2">{row.absences > 0 ? `−${formatSp(row.absences)}` : "—"}</td>
+                        <td className="px-2 py-1.5 text-right font-semibold text-ink">{formatSp(row.netCapacity)}</td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </section>
+        </div>
+      </details>
     </aside>
   );
 }

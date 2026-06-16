@@ -73,7 +73,7 @@ describe("computePlannerResult — per-track math", () => {
     expect(result.totalPlanLimit).toBe(Math.round(sum * 10) / 10);
   });
 
-  it("auto-detects bottleneck role across all tracks", () => {
+  it("auto-detects bottleneck roles across all tracks", () => {
     const result = computePlannerResult(
       makeInputs({
         roles: [
@@ -84,7 +84,25 @@ describe("computePlannerResult — per-track math", () => {
       }),
     );
     expect(result.bottleneckRole?.name).toBe("Backend");
+    expect(result.bottleneckRoles.map((role) => role.name)).toEqual(["Backend"]);
     expect(result.bottleneckRole?.netCapacity).toBe(58);
+  });
+
+  it("returns every role tied for the smallest net capacity", () => {
+    const result = computePlannerResult(
+      makeInputs({
+        roles: [
+          { name: "Backend", trackId: "back", headcount: 3, absences: 8 },
+          { name: "Frontend", trackId: "front", headcount: 3, absences: 8 },
+          { name: "QA", trackId: "qa", headcount: 4, absences: 0 },
+        ],
+      }),
+    );
+    expect(result.bottleneckRoles.map((role) => `${role.name}:${role.trackLabel}`)).toEqual([
+      "Backend:Backend",
+      "Frontend:Frontend",
+    ]);
+    expect(result.bottleneckRoles.every((role) => role.netCapacity === 58)).toBe(true);
   });
 
   it("uses bootstrap velocity split across role-bearing tracks when history is empty", () => {
