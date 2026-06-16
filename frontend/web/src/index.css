@@ -146,6 +146,43 @@
     -webkit-backdrop-filter: blur(2px);
   }
 
+  .scope-section-header {
+    background: linear-gradient(
+      90deg,
+      rgb(var(--c-line2) / 0.95) 0%,
+      rgb(var(--c-surface) / 0.9) 55%,
+      rgb(var(--c-elevated) / 0.82) 100%
+    );
+    color: rgb(var(--c-ink));
+  }
+
+  .scope-section-header-subtitle {
+    color: rgb(var(--c-ink3));
+  }
+
+  .scope-section-header-icon {
+    background: rgb(var(--c-line2) / 0.9);
+    color: rgb(var(--c-ink2));
+  }
+
+  .scope-collapsible-card {
+    box-shadow: var(--shadow-card);
+  }
+
+  .scope-section-header-warning {
+    background: rgb(var(--c-amber) / 0.08);
+    color: rgb(var(--c-amber));
+  }
+
+  .scope-section-header-warning .scope-section-header-subtitle {
+    color: rgb(var(--c-amber) / 0.8);
+  }
+
+  .scope-section-header-warning .scope-section-header-icon {
+    background: rgb(var(--c-amber) / 0.15);
+    color: rgb(var(--c-amber));
+  }
+
   .skeleton-shimmer {
     position: relative;
     overflow: hidden;

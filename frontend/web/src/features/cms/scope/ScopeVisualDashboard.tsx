@@ -198,15 +198,15 @@ function DataQualityDetailsBlock({ details }: { details: ScopeDataQualityDetails
   const attentionCount = new Set([...details.unestimated, ...details.roleIssues].map((issue) => issue.key)).size;
 
   return (
-    <details className="group mt-4 overflow-hidden rounded-2xl">
-      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 rounded-2xl bg-amber/[0.08] px-4 py-3 text-sm font-semibold text-amber marker:content-none group-open:rounded-b-none">
+    <details className="scope-collapsible-card group mt-4 overflow-hidden rounded-2xl">
+      <summary className="scope-section-header-warning flex cursor-pointer list-none items-center justify-between gap-3 rounded-2xl px-4 py-3 text-sm font-semibold marker:content-none group-open:rounded-b-none">
         <span>
           Какие задачи требуют внимания:
-          <span className="ml-2 font-normal text-amber/80">
+          <span className="scope-section-header-subtitle ml-2 font-normal">
             {attentionCount} задач
           </span>
         </span>
-        <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-amber/15 text-amber transition-transform group-open:rotate-180">
+        <span className="scope-section-header-icon inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full transition-transform group-open:rotate-180">
           <svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4" aria-hidden="true">
             <path d="M5.23 7.21a.75.75 0 0 1 1.06.02L10 11.17l3.71-3.94a.75.75 0 1 1 1.08 1.04l-4.25 4.5a.75.75 0 0 1-1.08 0l-4.25-4.5a.75.75 0 0 1 .02-1.06z" />
           </svg>

@@ -43,35 +43,46 @@ export function ScopeReportSection({
   const closedQuestions = resolvedQuestions(snapshot);
 
   return (
-    <section className="rounded-lg border border-line bg-surface">
-      <div className="border-b border-line px-4 py-3 sm:px-5">
-        <h2 className="text-sm font-semibold text-ink">Отчёт</h2>
-        <p className="mt-1 text-xs text-ink3">Каждая JQL-секция отдельно · внутри блока сортировка по приоритету Jira</p>
-      </div>
+    <details className="scope-collapsible-card overflow-hidden rounded-lg bg-surface">
+      <summary className="scope-section-header flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 marker:content-none sm:px-5">
+        <div>
+          <h2 className="text-base font-semibold text-ink">Отчёт</h2>
+          <p className="scope-section-header-subtitle mt-1 text-sm">
+            Каждая JQL-секция отдельно · внутри блока сортировка по приоритету Jira
+          </p>
+        </div>
+        <span className="scope-section-header-icon inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-transform group-open:rotate-180">
+          <svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4" aria-hidden="true">
+            <path d="M5.23 7.21a.75.75 0 0 1 1.06.02L10 11.17l3.71-3.94a.75.75 0 1 1 1.08 1.04l-4.25 4.5a.75.75 0 0 1-1.08 0l-4.25-4.5a.75.75 0 0 1 .02-1.06z" />
+          </svg>
+        </span>
+      </summary>
 
-      <div className="space-y-4 p-4 sm:p-5">
-        {(report.sections ?? []).map((section) => (
-          <EpicReportBlock
-            key={section.id}
-            title={section.name}
-            subtitle={section.kind === "planned" ? "Плановый scope" : "Внеплановый scope"}
-            accent={section.kind === "planned" ? "blue" : "amber"}
-            section={section}
-            showTechnicalFields={showTechnicalFields}
-          />
-        ))}
-      </div>
+      <div className="space-y-5 p-4 sm:p-6 lg:p-7">
+        <div className="space-y-5">
+          {(report.sections ?? []).map((section) => (
+            <EpicReportBlock
+              key={section.id}
+              title={section.name}
+              subtitle={section.kind === "planned" ? "Плановый scope" : "Внеплановый scope"}
+              accent={section.kind === "planned" ? "blue" : "amber"}
+              section={section}
+              showTechnicalFields={showTechnicalFields}
+            />
+          ))}
+        </div>
 
-      <OpenQuestionsBlock
-        snapshot={snapshot}
-        count={openQuestions.length}
-        canManage={canManage}
-        issues={openQuestions}
-        resolved={closedQuestions}
-        onAddQuestion={onAddQuestion}
-        onResolveQuestion={onResolveQuestion}
-      />
-    </section>
+        <OpenQuestionsBlock
+          snapshot={snapshot}
+          count={openQuestions.length}
+          canManage={canManage}
+          issues={openQuestions}
+          resolved={closedQuestions}
+          onAddQuestion={onAddQuestion}
+          onResolveQuestion={onResolveQuestion}
+        />
+      </div>
+    </details>
   );
 }
 
@@ -91,22 +102,22 @@ function EpicReportBlock({
   const accentStyles =
     accent === "blue"
       ? {
-          shell: "border-blue/30 bg-blue/[0.04]",
-          header: "border-blue/25 bg-blue/[0.08]",
+          shell: "bg-blue/[0.04]",
+          header: "bg-blue/[0.08]",
           title: "text-blue",
           chip: "info" as const,
         }
       : {
-          shell: "border-line bg-line2/30",
-          header: "border-line bg-line2/50",
+          shell: "bg-line2/30",
+          header: "bg-line2/60",
           title: "text-ink",
           chip: "warning" as const,
         };
 
   return (
-    <details className={`rounded-lg border ${accentStyles.shell}`}>
+    <details className={`overflow-hidden rounded-2xl shadow-sm ${accentStyles.shell}`}>
       <summary
-        className={`cursor-pointer list-none px-4 py-3 marker:content-none sm:px-5 ${accentStyles.header}`}
+        className={`cursor-pointer list-none px-4 py-4 marker:content-none sm:px-5 ${accentStyles.header}`}
       >
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
@@ -114,21 +125,19 @@ function EpicReportBlock({
               <h3 className={`text-base font-semibold ${accentStyles.title}`}>{title}</h3>
               <Badge tone={accentStyles.chip}>{section.counts.total} задач</Badge>
             </div>
-            <p className="mt-1 text-xs text-ink3">
+            <p className="mt-1 text-sm text-ink3">
               {subtitle} · «Готово» — недавно закрытые сверху · остальное по priority
             </p>
           </div>
-          <div className="flex flex-wrap gap-2 text-xs text-ink3">
-            <span>В работе: {section.counts.in_work}</span>
-            <span>·</span>
-            <span>В тесте: {section.counts.in_test}</span>
-            <span>·</span>
-            <span>Готово: {section.counts.done}</span>
+          <div className="flex flex-wrap gap-2 text-sm text-ink3">
+            <span className="rounded-full bg-surface/70 px-2.5 py-1">В работе: {section.counts.in_work}</span>
+            <span className="rounded-full bg-surface/70 px-2.5 py-1">В тесте: {section.counts.in_test}</span>
+            <span className="rounded-full bg-surface/70 px-2.5 py-1">Готово: {section.counts.done}</span>
           </div>
         </div>
       </summary>
 
-      <div className="grid gap-4 border-t border-line/60 p-4 sm:grid-cols-3 sm:p-5">
+      <div className="grid gap-4 p-4 lg:grid-cols-3 lg:p-5">
         {REPORT_COLUMNS.map((column) => (
           <ReportColumn
             key={column.key}
@@ -431,18 +440,18 @@ function ReportColumn({
   const { visibleItems, hasMore, loadMore, loadedCount, total } = useIncrementalList(sortedIssues);
 
   return (
-    <div className="rounded-md border border-line bg-bg p-3">
-      <div className="mb-3 flex items-center justify-between gap-2">
-        <h3 className="text-sm font-semibold text-ink">{title}</h3>
+    <div className="rounded-2xl bg-bg/70 p-4">
+      <div className="mb-4 flex items-center justify-between gap-2">
+        <h3 className="text-base font-semibold text-ink">{title}</h3>
         <Badge tone={tone}>{count}</Badge>
       </div>
       {sortedIssues.length === 0 ? (
-        <p className="text-xs text-ink3">Нет задач</p>
+        <p className="rounded-xl bg-line2/40 px-3 py-5 text-center text-sm text-ink3">Нет задач</p>
       ) : (
         <>
-          <ul className="space-y-2 text-sm">
+          <ul className="space-y-3 text-sm">
             {visibleItems.map((issue) => (
-              <li key={issue.key} className="rounded border border-line/70 bg-surface px-2 py-2">
+              <li key={issue.key} className="rounded-xl bg-surface/80 px-3 py-3">
                 <div className="flex flex-wrap items-center gap-2">
                   <ReportIssueLink issue={issue} />
                   {issue.priority ? (
@@ -452,18 +461,18 @@ function ReportColumn({
                   )}
                   <span className="text-xs text-ink3">{formatScopeSp(issue.story_points)} SP</span>
                 </div>
-                <p className="mt-1 line-clamp-2 text-xs text-ink2">{issue.summary}</p>
-                <div className="mt-1.5">
+                <p className="mt-2 line-clamp-3 text-sm text-ink2">{issue.summary}</p>
+                <div className="mt-2">
                   <RoleContributorsBadges issue={issue} showSource={showTechnicalFields} />
                   <PlanFieldBadges issue={issue} />
                 </div>
                 {columnKey === "done" && (issue.status_entered_at || issue.status_changed_at) ? (
-                  <p className="mt-1 text-xs text-ink3">
+                  <p className="mt-2 text-xs text-ink3">
                     В «{issue.status || "Готово"}» с{" "}
                     {formatQueueTimelineDate(issue.status_entered_at || issue.status_changed_at || "")}
                   </p>
                 ) : (
-                  <p className="mt-1 text-xs text-ink3">
+                  <p className="mt-2 text-xs text-ink3">
                     {[issue.status, issue.assignee].filter(Boolean).join(" · ") || "—"}
                   </p>
                 )}

@@ -75,18 +75,16 @@ function resolveQueue(snapshot: ScopeBoardSnapshot, kind: ScopePriorityQueueKind
   };
 }
 
-function queueBlockToneClasses(kind: ScopePriorityQueueKind): { frame: string; header: string; count: string } {
+function queueBlockToneClasses(kind: ScopePriorityQueueKind): { header: string; count: string } {
   if (kind === "test") {
     return {
-      frame: "border-purple/25",
-      header: "border-purple/15 bg-purple/[0.07]",
-      count: "border-purple/25 bg-purple/[0.08] text-ink",
+      header: "bg-purple/[0.07]",
+      count: "bg-purple/[0.08] text-ink",
     };
   }
   return {
-    frame: "border-blue/25",
-    header: "border-blue/15 bg-blue/[0.07]",
-    count: "border-blue/25 bg-blue/[0.08] text-ink",
+    header: "bg-blue/[0.07]",
+    count: "bg-blue/[0.08] text-ink",
   };
 }
 
@@ -222,14 +220,14 @@ function PriorityQueueBlock({
 
   return (
     <>
-      <details className={cn("min-w-0 rounded-xl border bg-surface shadow-card", blockTone.frame)}>
-        <summary className={cn("cursor-pointer list-none border-b px-4 py-4 marker:content-none sm:px-5", blockTone.header)}>
+      <details className="min-w-0 overflow-hidden rounded-2xl bg-surface shadow-card">
+        <summary className={cn("cursor-pointer list-none px-4 py-4 marker:content-none sm:px-5", blockTone.header)}>
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <p className="text-base font-semibold text-ink">{meta.title}</p>
               <p className="mt-0.5 text-xs text-ink3">{meta.jqlHint}</p>
             </div>
-            <span className={cn("rounded-full border px-3 py-1 text-sm font-semibold tabular-nums", blockTone.count)}>
+            <span className={cn("rounded-full px-3 py-1 text-sm font-semibold tabular-nums shadow-sm", blockTone.count)}>
               {issues.length} задач
             </span>
           </div>

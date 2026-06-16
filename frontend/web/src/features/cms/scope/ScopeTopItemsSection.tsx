@@ -45,17 +45,17 @@ export function ScopeTopItemsSection({
   }
 
   return (
-    <details className="group overflow-hidden rounded-2xl">
-      <summary className="cursor-pointer list-none rounded-2xl bg-blue/[0.07] px-4 py-3 marker:content-none sm:px-5 group-open:rounded-b-none">
+    <details className="scope-collapsible-card group overflow-hidden rounded-2xl">
+      <summary className="scope-section-header cursor-pointer list-none rounded-2xl px-4 py-3 marker:content-none sm:px-5 group-open:rounded-b-none">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-sm font-semibold text-blue">Топ-10 вопросов и задач</span>
+            <span className="text-sm font-semibold text-ink">Топ-10 вопросов и задач</span>
             <Badge tone={items.length > 0 ? "info" : "neutral"}>{items.length}/{MAX_TOP_ITEMS}</Badge>
           </div>
-          <span className="inline-flex items-center gap-2 text-xs font-semibold text-blue">
+          <span className="inline-flex items-center gap-2 text-xs font-semibold text-ink">
             <span className="group-open:hidden">Показать</span>
             <span className="hidden group-open:inline">Скрыть</span>
-            <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-blue/15 transition-transform group-open:rotate-180">
+            <span className="scope-section-header-icon inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full transition-transform group-open:rotate-180">
               <svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4" aria-hidden="true">
                 <path d="M5.23 7.21a.75.75 0 0 1 1.06.02L10 11.17l3.71-3.94a.75.75 0 1 1 1.08 1.04l-4.25 4.5a.75.75 0 0 1-1.08 0l-4.25-4.5a.75.75 0 0 1 .02-1.06z" />
               </svg>
