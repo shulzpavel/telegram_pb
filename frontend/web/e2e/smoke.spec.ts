@@ -13,11 +13,12 @@ import { expect, test } from "@playwright/test";
 // -----------------------------------------------------------------------------
 
 test.describe("public surfaces", () => {
-  test("landing hub presents calculator, sessions, retro and demos", async ({ page }) => {
+  test("landing hub presents reports, calculator, sessions, retro and demos", async ({ page }) => {
     await page.goto("/");
     await expect(
-      page.getByRole("heading", { level: 1, name: /Планирование, poker и ретро в одном месте/ }),
+      page.getByRole("heading", { level: 1, name: /Планирование, отчёты, poker и ретро в одном месте/ }),
     ).toBeVisible();
+    await expect(page.getByRole("link", { name: "Открыть отчёты" })).toBeVisible();
     await expect(page.getByRole("link", { name: "Открыть калькулятор" })).toBeVisible();
     await expect(page.getByRole("link", { name: "Открыть сессии" })).toBeVisible();
     await expect(page.getByRole("link", { name: "Открыть ретро" })).toBeVisible();
