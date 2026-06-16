@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { Alert, Badge, Button, DropdownField, EmptyState, TextField } from "../../../design-system";
+import { Alert, Badge, Button, DatePickerPopover, DropdownField, EmptyState, TextField } from "../../../design-system";
 import type { AuditEvent } from "../api/cmsTypes";
 import {
   DataTable,
@@ -44,9 +44,17 @@ function labelForAction(action: string): string {
   return ACTION_LABELS[action] ?? action;
 }
 
-function localDateTimeToIso(value: string): string | undefined {
+function localDateToIso(value: string, boundary: "start" | "end"): string | undefined {
   if (!value) return undefined;
-  const date = new Date(value);
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) return undefined;
+  const year = Number(match[1]);
+  const month = Number(match[2]) - 1;
+  const day = Number(match[3]);
+  const date =
+    boundary === "start"
+      ? new Date(year, month, day, 0, 0, 0, 0)
+      : new Date(year, month, day, 23, 59, 59, 999);
   return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
 }
 
@@ -185,8 +193,8 @@ export default function AuditEventsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [debouncedActor]);
 
-  const tsFrom = useMemo(() => localDateTimeToIso(debouncedFrom), [debouncedFrom]);
-  const tsTo = useMemo(() => localDateTimeToIso(debouncedTo), [debouncedTo]);
+  const tsFrom = useMemo(() => localDateToIso(debouncedFrom, "start"), [debouncedFrom]);
+  const tsTo = useMemo(() => localDateToIso(debouncedTo, "end"), [debouncedTo]);
   const dateRangeError =
     tsFrom && tsTo && new Date(tsFrom).getTime() > new Date(tsTo).getTime()
       ? "Начало периода должно быть раньше окончания."
@@ -255,21 +263,21 @@ export default function AuditEventsPage() {
           onChange={setStatus}
         />
         <div className="grid grid-cols-2 gap-2 md:col-span-2 xl:col-span-6">
-          <TextField
-            aria-label="Начало периода"
+          <DatePickerPopover
+            className="max-w-full"
             label="С"
-            type="datetime-local"
             value={fromFilter}
-            onChange={(event) => setFromFilter(event.target.value)}
-            reserveMessageSpace={false}
+            placeholder="дата начала"
+            reservePopoverSpace={false}
+            onChange={setFromFilter}
           />
-          <TextField
-            aria-label="Конец периода"
+          <DatePickerPopover
+            className="max-w-full"
             label="По"
-            type="datetime-local"
             value={toFilter}
-            onChange={(event) => setToFilter(event.target.value)}
-            reserveMessageSpace={false}
+            placeholder="дата конца"
+            reservePopoverSpace={false}
+            onChange={setToFilter}
           />
         </div>
         <Button

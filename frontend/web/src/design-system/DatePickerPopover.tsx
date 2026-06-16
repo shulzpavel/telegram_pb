@@ -68,6 +68,7 @@ export function DatePickerPopover({
   loading,
   label = "Дата",
   placeholder = "не задан",
+  reservePopoverSpace = true,
   className,
   onChange,
 }: {
@@ -76,6 +77,7 @@ export function DatePickerPopover({
   loading?: boolean;
   label?: string;
   placeholder?: string;
+  reservePopoverSpace?: boolean;
   className?: string;
   onChange: (value: string) => void;
 }) {
@@ -111,8 +113,8 @@ export function DatePickerPopover({
 
     const top = triggerRect.bottom + 8;
     setPopoverLayout({ left, top, width });
-    setSpacerHeight(popover.offsetHeight + 8);
-  }, []);
+    setSpacerHeight(reservePopoverSpace ? popover.offsetHeight + 8 : 0);
+  }, [reservePopoverSpace]);
 
   useEffect(() => {
     if (!open) {
@@ -123,7 +125,9 @@ export function DatePickerPopover({
 
     const frame = window.requestAnimationFrame(() => {
       layoutPopover();
-      popoverRef.current?.scrollIntoView({ behavior: "smooth", block: "end", inline: "nearest" });
+      if (reservePopoverSpace) {
+        popoverRef.current?.scrollIntoView({ behavior: "smooth", block: "end", inline: "nearest" });
+      }
     });
 
     window.addEventListener("resize", layoutPopover);
@@ -134,7 +138,7 @@ export function DatePickerPopover({
       window.removeEventListener("resize", layoutPopover);
       window.removeEventListener("scroll", layoutPopover, true);
     };
-  }, [layoutPopover, open, visibleMonth]);
+  }, [layoutPopover, open, reservePopoverSpace, visibleMonth]);
 
   useEffect(() => {
     if (!open) return;
@@ -262,7 +266,7 @@ export function DatePickerPopover({
           </div>
         </div>
       ) : null}
-      {open ? <div aria-hidden="true" style={{ height: spacerHeight }} /> : null}
+      {open && reservePopoverSpace ? <div aria-hidden="true" style={{ height: spacerHeight }} /> : null}
     </div>
   );
 }
