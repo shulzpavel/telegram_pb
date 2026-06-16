@@ -1095,6 +1095,52 @@ class JiraHttpClient(JiraClient):
         result = await self._make_request("PUT", f"issue/{issue_key}", payload, api_versions=["3", "2"])
         return result is not None
 
+    async def get_version(self, version_id: str) -> Optional[Dict[str, Any]]:
+        """Fetch Jira fix version metadata (dates, release status, name)."""
+        cleaned = str(version_id or "").strip()
+        if not cleaned:
+            return None
+        result = await self._make_request("GET", f"version/{quote(cleaned, safe='')}", api_versions=["3", "2"])
+        return result if isinstance(result, dict) else None
+
+    async def get_project_versions(self, project_key: str) -> List[Dict[str, Any]]:
+        """List fix versions configured on a Jira project."""
+        cleaned = str(project_key or "").strip().upper()
+        if not cleaned:
+            return []
+        result = await self._make_request(
+            "GET",
+            f"project/{quote(cleaned, safe='')}/versions",
+            api_versions=["3", "2"],
+        )
+        return result if isinstance(result, list) else []
+
+    async def resolve_version(
+        self,
+        *,
+        project_key: str = "",
+        version_id: str = "",
+        version_name: str = "",
+    ) -> Optional[Dict[str, Any]]:
+        """Resolve version metadata by numeric id or project + version name."""
+        cleaned_id = str(version_id or "").strip()
+        if cleaned_id:
+            resolved = await self.get_version(cleaned_id)
+            if resolved:
+                return resolved
+
+        cleaned_name = str(version_name or "").strip()
+        cleaned_project = str(project_key or "").strip().upper()
+        if cleaned_project and cleaned_name:
+            versions = await self.get_project_versions(cleaned_project)
+            target = cleaned_name.casefold()
+            for item in versions:
+                if not isinstance(item, dict):
+                    continue
+                if str(item.get("name") or "").strip().casefold() == target:
+                    return item
+        return None
+
     async def add_issue_comment(self, issue_key: str, text: str) -> Optional[Dict[str, Any]]:
         """Append a plain-text comment to a Jira issue."""
         cleaned = truncate_text(text, 4000)

@@ -723,6 +723,7 @@ export interface ScopeBoardSnapshot {
   unplan_issues: ScopeBoardIssue[];
   metrics: ScopeBoardMetrics;
   report?: ScopeBoardReport;
+  release_context?: ScopeReleaseContext;
   manual_questions?: ScopeManualQuestion[];
   top_items?: ScopeTopItem[];
   todo_items?: ScopeTodoItem[];
@@ -735,6 +736,64 @@ export interface ScopeBoardSnapshot {
   jira_fetch_warnings?: ScopeJiraFetchWarning[];
 }
 
+export type ScopeReleaseContext = {
+  current: ScopeReleaseBucket;
+  previous?: ScopeReleaseBucket;
+  next?: ScopeReleaseBucket;
+  custom?: ScopeReleaseBucket;
+  releases?: ScopeReleaseBucket[];
+};
+
+export type ScopeReleaseSlot = string;
+export type ScopeReleaseQueryType = "past" | "future";
+
+export interface ScopeReleaseQuery {
+  id: string;
+  type: ScopeReleaseQueryType;
+  label?: string;
+  jql: string;
+}
+
+export interface ScopeReleaseVersionMeta {
+  id: string;
+  name: string;
+  released: boolean;
+  archived?: boolean;
+  overdue?: boolean;
+  start_date?: string | null;
+  release_date?: string | null;
+  description?: string;
+  project_key?: string;
+  project_id?: string | null;
+}
+
+export interface ScopeReleaseBucket {
+  slot: ScopeReleaseSlot;
+  label: string;
+  jql: string;
+  relation?: ScopeReleaseQueryType;
+  order?: number;
+  project_key: string;
+  version_id: string;
+  version_name: string;
+  version_meta?: ScopeReleaseVersionMeta;
+  issues: ScopeBoardIssue[];
+  story_points?: number;
+  counts: {
+    total: number;
+    in_work: number;
+    in_test: number;
+    done: number;
+    open_questions: number;
+  };
+  by_status: Record<string, number>;
+  by_issue_type?: Record<string, number>;
+  in_work: ScopeBoardIssue[];
+  in_test: ScopeBoardIssue[];
+  done: ScopeBoardIssue[];
+  open_questions: ScopeBoardIssue[];
+}
+
 export interface ScopeJiraFetchWarning {
   jql: string;
   truncated: boolean;
@@ -745,10 +804,20 @@ export interface ScopeBoardRecord {
   id: number;
   name: string;
   month: string;
+  report_type?: "monthly" | "release";
   capacity_sp: number;
   plan_jql: string;
   unplan_jql: string;
   scope_sections: ScopeSectionConfig[] | null;
+  previous_release_jql?: string;
+  next_release_jql?: string;
+  custom_release_name?: string;
+  custom_release_jql?: string;
+  release_queries?: ScopeReleaseQuery[];
+  release_comment?: string;
+  previous_release_comment?: string;
+  next_release_comment?: string;
+  custom_release_comment?: string;
   todo_jql: string;
   test_jql: string;
   snapshot: ScopeBoardSnapshot | null;
@@ -777,6 +846,15 @@ export const cmsScopeApi = {
     scope_sections: ScopeSectionConfig[];
     todo_jql?: string;
     test_jql?: string;
+    previous_release_jql?: string;
+    next_release_jql?: string;
+    custom_release_name?: string;
+    custom_release_jql?: string;
+    release_queries?: ScopeReleaseQuery[];
+    release_comment?: string;
+    previous_release_comment?: string;
+    next_release_comment?: string;
+    custom_release_comment?: string;
     team_id?: number | null;
   }) =>
     cmsFetch<ScopeBoardRecord>("/scope-boards", {
@@ -792,9 +870,31 @@ export const cmsScopeApi = {
       scope_sections: ScopeSectionConfig[];
       todo_jql?: string;
       test_jql?: string;
+      previous_release_jql?: string;
+      next_release_jql?: string;
+      custom_release_name?: string;
+      custom_release_jql?: string;
+      release_queries?: ScopeReleaseQuery[];
+      release_comment?: string;
+      previous_release_comment?: string;
+      next_release_comment?: string;
+      custom_release_comment?: string;
     }
   ) =>
     cmsFetch<ScopeBoardRecord>(`/scope-boards/${boardId}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    }),
+  updateReleaseComments: (
+    boardId: number,
+    body: {
+      release_comment?: string;
+      previous_release_comment?: string;
+      next_release_comment?: string;
+      custom_release_comment?: string;
+    }
+  ) =>
+    cmsFetch<ScopeBoardRecord>(`/scope-boards/${boardId}/release-comments`, {
       method: "PATCH",
       body: JSON.stringify(body),
     }),

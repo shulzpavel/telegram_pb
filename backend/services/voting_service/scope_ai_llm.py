@@ -7,6 +7,7 @@ model for an actionable mid-sprint assessment the PO can run at any time.
 
 from __future__ import annotations
 
+import asyncio
 import os
 import json
 import logging
@@ -96,7 +97,9 @@ def _system_prompt() -> str:
         '"recommendations": [{"text": string, "impact": "low"|"medium"|"high"}], '
         '"focus_now": string[], "watch_list": string[]}\n'
         "Требования: summary 2-3 предложения; массивы 2-4 пункта; blockers до 4; recommendations 3-5; строки до 180 символов. "
-        "Обязательно оцени «Отчёт», «Открытые вопросы», «Нагрузка по ролям», intake_status, buffer_status и planned vs unplanned. "
+        "Обязательно оцени «Отчёт», «Открытые вопросы», «Нагрузка по ролям», intake_status, buffer_status и: "
+        "если в контексте есть release_context — оцени release slots (current/previous/next/custom) и их риски; "
+        "если release_context нет — оцени planned vs unplanned. "
         "В whats_bad/whats_critical/scope_risks подсвечивай неочевидные последствия: что сорвётся, где накопится очередь, что может скрыть нормальная метрика. "
         "В recommendations давай best-practice действия: stop/start/continue, WIP-limit, explicit owner, критерий done, sync с PO/QA/лидами, re-scope или декомпозиция. "
         "В focus_now формулируй вопросы для ближайшего business/PO sync, а не повторяй факты. "
@@ -459,6 +462,7 @@ def build_scope_analysis_context(board: dict[str, Any]) -> str:
     """Serialize board + snapshot for the LLM (pure, testable)."""
     snapshot = board.get("snapshot") or {}
     metrics = snapshot.get("metrics") or {}
+    release_context = snapshot.get("release_context") or None
     open_questions = _collect_open_questions(snapshot)
     open_questions_block = _format_open_questions_block(open_questions)
     role_workload_block = _format_role_workload_block(metrics, snapshot)
@@ -494,38 +498,68 @@ def build_scope_analysis_context(board: dict[str, Any]) -> str:
             f"by_status={section.get('by_status')}"
         )
 
-    report = snapshot.get("report") or {}
-    lines.append("## Отчёт — сводка по секциям")
-    for section in report.get("sections") or []:
-        if isinstance(section, dict):
-            counts = section.get("counts") or {}
+    if release_context:
+        lines.append("## Отчёт — релизные слоты (release_context)")
+        release_buckets: list[tuple[str, dict[str, Any]]] = []
+        if isinstance(release_context, dict):
+            for slot_key in ("current", "previous", "next", "custom"):
+                bucket = release_context.get(slot_key)
+                if isinstance(bucket, dict):
+                    release_buckets.append((slot_key, bucket))
+            for bucket in release_context.get("releases") or []:
+                if isinstance(bucket, dict):
+                    release_buckets.append((str(bucket.get("slot") or "release"), bucket))
+        for slot_key, bucket in release_buckets:
+            if not isinstance(bucket, dict):
+                continue
+            counts = bucket.get("counts") or {}
+            version_id = bucket.get("version_id") or bucket.get("version_name") or bucket.get("label") or slot_key
             lines.append(
-                f"report {section.get('name')}: in_work={counts.get('in_work')} "
-                f"in_test={counts.get('in_test')} done={counts.get('done')} total={counts.get('total')}"
+                f"release slot={slot_key} relation={bucket.get('relation') or 'current'} version={version_id} total={counts.get('total')} "
+                f"in_work={counts.get('in_work')} in_test={counts.get('in_test')} done={counts.get('done')} "
+                f"open_questions={counts.get('open_questions')}"
             )
-    for legacy_name in ("plan", "unplan"):
-        legacy = report.get(legacy_name)
-        if isinstance(legacy, dict):
-            counts = legacy.get("counts") or {}
-            lines.append(
-                f"report {legacy_name}: in_work={counts.get('in_work')} "
-                f"in_test={counts.get('in_test')} done={counts.get('done')} total={counts.get('total')}"
-            )
-    lines.append("")
-
-    lines.append("## Отчёт — задачи по колонкам")
-    report_sections = report.get("sections") or []
-    if report_sections:
-        for section in report_sections:
-            if isinstance(section, dict):
-                lines.extend(_report_section_lines(section))
-                lines.append("")
+            for col_key, col_label in (("in_work", "В работе"), ("in_test", "В тесте"), ("done", "Готово")):
+                issues = bucket.get(col_key) or []
+                if isinstance(issues, list) and issues:
+                    for issue in issues[:4]:
+                        if not isinstance(issue, dict):
+                            continue
+                        lines.append(f"- {slot_key} {col_label}: {issue.get('key')}: {issue.get('status')} · {issue.get('assignee')}")
+        lines.append("")
     else:
+        report = snapshot.get("report") or {}
+        lines.append("## Отчёт — сводка по секциям")
+        for section in report.get("sections") or []:
+            if isinstance(section, dict):
+                counts = section.get("counts") or {}
+                lines.append(
+                    f"report {section.get('name')}: in_work={counts.get('in_work')} "
+                    f"in_test={counts.get('in_test')} done={counts.get('done')} total={counts.get('total')}"
+                )
         for legacy_name in ("plan", "unplan"):
             legacy = report.get(legacy_name)
             if isinstance(legacy, dict):
-                lines.extend(_report_section_lines({**legacy, "name": legacy_name, "kind": legacy_name}))
-                lines.append("")
+                counts = legacy.get("counts") or {}
+                lines.append(
+                    f"report {legacy_name}: in_work={counts.get('in_work')} "
+                    f"in_test={counts.get('in_test')} done={counts.get('done')} total={counts.get('total')}"
+                )
+        lines.append("")
+
+        lines.append("## Отчёт — задачи по колонкам")
+        report_sections = report.get("sections") or []
+        if report_sections:
+            for section in report_sections:
+                if isinstance(section, dict):
+                    lines.extend(_report_section_lines(section))
+                    lines.append("")
+        else:
+            for legacy_name in ("plan", "unplan"):
+                legacy = report.get(legacy_name)
+                if isinstance(legacy, dict):
+                    lines.extend(_report_section_lines({**legacy, "name": legacy_name, "kind": legacy_name}))
+                    lines.append("")
 
     lines.append("")
     sections = snapshot.get("sections") or []
@@ -793,6 +827,8 @@ async def _call_anthropic(http_session: aiohttp.ClientSession, context: str, *, 
                 logger.warning("Anthropic scope error status=%s body=%s", response.status, body_text[:300])
                 raise LlmScopeError("LLM request failed", status_code=502)
             data = json.loads(body_text) if body_text else {}
+    except asyncio.TimeoutError as exc:
+        raise LlmScopeError("LLM request timed out", status_code=504) from exc
     except aiohttp.ClientError as exc:
         raise LlmScopeError("LLM service is unreachable", status_code=503) from exc
     except json.JSONDecodeError as exc:

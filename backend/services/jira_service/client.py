@@ -193,6 +193,49 @@ class JiraServiceClient:
 
         return result
 
+    async def get_version(self, version_id: str, *, force_refresh: bool = False) -> Optional[Dict[str, Any]]:
+        """Fetch Jira fix version metadata with caching."""
+        cleaned = str(version_id or "").strip()
+        if not cleaned:
+            return None
+        cache_key = self._get_cache_key("version", cleaned)
+        if not force_refresh:
+            cached = self._get_cached(cache_key)
+            if cached is not None:
+                return cached
+        result = await self._client.get_version(cleaned)
+        if result:
+            self._set_cached(cache_key, result)
+        return result
+
+    async def resolve_version(
+        self,
+        *,
+        project_key: str = "",
+        version_id: str = "",
+        version_name: str = "",
+        force_refresh: bool = False,
+    ) -> Optional[Dict[str, Any]]:
+        """Resolve Jira version metadata by id or project + name."""
+        cache_key = self._get_cache_key(
+            "version_resolve",
+            (project_key or "").upper(),
+            version_id or "",
+            version_name or "",
+        )
+        if not force_refresh:
+            cached = self._get_cached(cache_key)
+            if cached is not None:
+                return cached
+        result = await self._client.resolve_version(
+            project_key=project_key,
+            version_id=version_id,
+            version_name=version_name,
+        )
+        if result:
+            self._set_cached(cache_key, result)
+        return result
+
     async def close(self) -> None:
         """Close client connections."""
         await self._client.close()

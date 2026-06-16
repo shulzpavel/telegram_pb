@@ -9,7 +9,9 @@ from services.voting_service.ai_jobs import (
     fail_job,
     find_cached_scope_summary,
     get_job,
+    get_job_for_poll,
     get_or_create_job,
+    is_active_job_stale,
     job_public_view,
     update_job,
 )
@@ -100,6 +102,59 @@ async def test_fail_job_records_error_and_clears_dedupe() -> None:
     assert job["status"] == "error"
     assert job["error"] == "LLM failed"
     assert await redis.get("ai_job_dedupe:retro:retro:3") is None
+
+
+@pytest.mark.asyncio
+async def test_get_or_create_job_replaces_stale_running_job(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("services.voting_service.ai_jobs.AI_JOB_STALE_SECONDS", 60)
+    redis = JobRedis()
+    stale_id, _ = await get_or_create_job(
+        redis,
+        kind="scope",
+        resource_key="board:9",
+        actor="admin",
+    )
+    stale_job = await get_job(redis, stale_id)
+    assert stale_job is not None
+    await update_job(
+        redis,
+        stale_id,
+        status="running",
+        phase="calling_llm",
+        updated_at="2020-01-01T00:00:00+00:00",
+    )
+
+    new_id, is_new = await get_or_create_job(
+        redis,
+        kind="scope",
+        resource_key="board:9",
+        actor="admin",
+    )
+
+    assert is_new is True
+    assert new_id != stale_id
+    failed = await get_job(redis, stale_id)
+    assert failed is not None
+    assert failed["status"] == "error"
+
+
+@pytest.mark.asyncio
+async def test_get_job_for_poll_fails_stale_running_job(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("services.voting_service.ai_jobs.AI_JOB_STALE_SECONDS", 30)
+    redis = JobRedis()
+    job_id, _ = await get_or_create_job(
+        redis,
+        kind="scope",
+        resource_key="board:10",
+        actor="admin",
+    )
+    await update_job(redis, job_id, status="running", phase="calling_llm", updated_at="2020-01-01T00:00:00+00:00")
+
+    polled = await get_job_for_poll(redis, job_id)
+    assert polled is not None
+    assert polled["status"] == "error"
+    public = job_public_view(polled)
+    assert public["error"]
 
 
 def test_find_cached_scope_summary_matches_snapshot_refreshed_at() -> None:

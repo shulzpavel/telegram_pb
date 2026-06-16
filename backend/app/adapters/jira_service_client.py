@@ -4,6 +4,7 @@ import asyncio
 import logging
 import os
 from typing import Any, Dict, List, Mapping, Optional
+from urllib.parse import quote, urlencode
 
 import aiohttp
 
@@ -298,3 +299,73 @@ class JiraServiceHttpClient(JiraClient):
             ]
         except Exception as e:
             raise RuntimeError(f"Failed to fetch scope issues via Jira Service: {e}") from e
+
+    async def _get_json(self, url: str) -> dict[str, Any]:
+        session = await self._get_session()
+        transient_statuses = {429, 500, 502, 503, 504}
+        last_error: Optional[BaseException] = None
+        for attempt in range(1, self._retry_attempts + 1):
+            try:
+                async with session.get(url) as resp:
+                    if resp.status == 200:
+                        return await resp.json()
+                    if resp.status in transient_statuses and attempt < self._retry_attempts:
+                        await asyncio.sleep(0.2 * attempt)
+                        continue
+                    raise RuntimeError(f"Jira Service returned status {resp.status}: {(await resp.text())[:500]}")
+            except aiohttp.ClientError as exc:
+                last_error = exc
+                if attempt >= self._retry_attempts:
+                    break
+                logger.warning("Jira Service request failed, retrying: url=%s attempt=%s", url, attempt)
+                await asyncio.sleep(0.2 * attempt)
+        raise RuntimeError(f"Jira Service unavailable: {last_error}") from last_error
+
+    async def get_version(self, version_id: str, *, force_refresh: bool = False) -> Optional[Dict[str, Any]]:
+        """Fetch Jira fix version metadata via Jira Service."""
+        cleaned = str(version_id or "").strip()
+        if not cleaned:
+            return None
+        url = f"{self.base_url}/api/v1/version/{quote(cleaned, safe='')}"
+        if force_refresh:
+            url = f"{url}?force_refresh=1"
+        try:
+            data = await self._get_json(url)
+            return data if isinstance(data, dict) else None
+        except Exception as exc:
+            logger.warning("Jira version fetch failed version_id=%s error=%s", cleaned, exc)
+            return None
+
+    async def resolve_version(
+        self,
+        *,
+        project_key: str = "",
+        version_id: str = "",
+        version_name: str = "",
+        force_refresh: bool = False,
+    ) -> Optional[Dict[str, Any]]:
+        """Resolve Jira version metadata by id or project + name."""
+        if not (version_id or version_name):
+            return None
+        params = urlencode(
+            {
+                "project_key": project_key or "",
+                "version_id": version_id or "",
+                "version_name": version_name or "",
+            }
+        )
+        url = f"{self.base_url}/api/v1/version/resolve?{params}"
+        if force_refresh:
+            url = f"{url}&force_refresh=1"
+        try:
+            data = await self._get_json(url)
+            return data if isinstance(data, dict) else None
+        except Exception as exc:
+            logger.warning(
+                "Jira version resolve failed project=%s version_id=%s version_name=%s error=%s",
+                project_key,
+                version_id,
+                version_name,
+                exc,
+            )
+            return None

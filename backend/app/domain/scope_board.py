@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import re
 import secrets
 from datetime import datetime, timezone
 from typing import Any, Literal, Optional
@@ -1576,3 +1577,293 @@ def compute_scope_refresh_delta(
         events.append({"type": "unchanged", "message": "Без изменений с прошлого обновления"})
 
     return {"delta": delta, "events": events}
+
+
+ScopeReportType = Literal["monthly", "release"]
+_RELEASE_TEAM_MARKERS = ("ios", "android", "igaming")
+
+
+def infer_scope_report_type(team_slug: Optional[str] = None, team_name: Optional[str] = None) -> ScopeReportType:
+    """Mobile release teams use the release report template."""
+    haystack = f"{team_slug or ''} {team_name or ''}".casefold()
+    if any(marker in haystack for marker in _RELEASE_TEAM_MARKERS):
+        return "release"
+    return "monthly"
+
+
+def parse_release_jql(jql: str) -> dict[str, str]:
+    """Best-effort parse of project/fixVersion from a release JQL."""
+    cleaned = (jql or "").strip()
+    parsed: dict[str, str] = {"jql": cleaned}
+    if not cleaned:
+        return parsed
+
+    project_match = re.search(r"\bproject\s*=\s*([A-Za-z][A-Za-z0-9_-]*)", cleaned, flags=re.IGNORECASE)
+    if project_match:
+        parsed["project_key"] = project_match.group(1).upper()
+
+    version_name_match = re.search(r'\bfixVersion\s*=\s*"([^"]+)"', cleaned, flags=re.IGNORECASE)
+    if version_name_match:
+        parsed["version_name"] = version_name_match.group(1).strip()
+
+    version_name_match_single = re.search(r"\bfixVersion\s*=\s*'([^']+)'", cleaned, flags=re.IGNORECASE)
+    if version_name_match_single and "version_name" not in parsed:
+        parsed["version_name"] = version_name_match_single.group(1).strip()
+
+    if "version_name" not in parsed and "version_id" not in parsed:
+        version_unquoted_match = re.search(r"\bfixVersion\s*=\s*([^\"\s]+)", cleaned, flags=re.IGNORECASE)
+        if version_unquoted_match:
+            value = version_unquoted_match.group(1).strip()
+            if value.isdigit():
+                parsed["version_id"] = value
+            else:
+                parsed["version_name"] = value
+
+    return parsed
+
+
+def infer_release_version_lookup(
+    jql: str,
+    issues: Optional[list[dict[str, Any]]] = None,
+) -> dict[str, str]:
+    """Resolve project/version identifiers for Jira version metadata lookup."""
+    parsed = parse_release_jql(jql)
+    version_name = (parsed.get("version_name") or "").strip()
+    version_id = (parsed.get("version_id") or "").strip()
+    if not version_name and not version_id and issues:
+        version_name = _dominant_fix_version(issues)
+    lookup: dict[str, str] = {}
+    project_key = (parsed.get("project_key") or "").strip()
+    if project_key:
+        lookup["project_key"] = project_key
+    if version_id:
+        lookup["version_id"] = version_id
+    if version_name:
+        lookup["version_name"] = version_name
+    return lookup
+
+
+def release_scope_sections(release_jql: str, *, label: Optional[str] = None) -> list[dict[str, Any]]:
+    """Single planned section for a mobile release report."""
+    cleaned = (release_jql or "").strip()
+    parsed = parse_release_jql(cleaned)
+    section_name = (label or "").strip() or parsed.get("version_name") or parsed.get("version_id") or "Текущий релиз"
+    return [
+        {
+            "id": "release",
+            "name": section_name,
+            "jql": cleaned,
+            "kind": "planned",
+            "order": 0,
+        }
+    ]
+
+
+def _dominant_fix_version(issues: list[dict[str, Any]]) -> str:
+    counts: dict[str, int] = {}
+    for issue in issues:
+        for version in issue.get("fix_versions") or []:
+            label = str(version or "").strip()
+            if not label:
+                continue
+            counts[label] = counts.get(label, 0) + 1
+    if not counts:
+        return ""
+    return sorted(counts.items(), key=lambda item: (-item[1], item[0]))[0][0]
+
+
+def _normalize_jira_calendar_date(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    cleaned = str(value).strip()
+    if not cleaned:
+        return None
+    if re.match(r"^\d{4}-\d{2}-\d{2}$", cleaned):
+        return cleaned
+    return cleaned
+
+
+def normalize_version_meta(raw: dict[str, Any], *, project_key: str = "") -> dict[str, Any]:
+    """Normalize Jira version API payload for release report UI."""
+    version_id = str(raw.get("id") or "").strip()
+    name = str(raw.get("name") or "").strip()
+    start_date = _normalize_jira_calendar_date(
+        raw.get("startDate") or raw.get("userStartDate") or raw.get("start_date")
+    )
+    release_date = _normalize_jira_calendar_date(
+        raw.get("releaseDate") or raw.get("userReleaseDate") or raw.get("release_date")
+    )
+    resolved_project_key = (project_key or raw.get("project_key") or "").strip().upper()
+    return {
+        "id": version_id,
+        "name": name,
+        "released": bool(raw.get("released")),
+        "archived": bool(raw.get("archived")),
+        "overdue": bool(raw.get("overdue")),
+        "start_date": start_date,
+        "release_date": release_date,
+        "description": str(raw.get("description") or "").strip(),
+        "project_key": resolved_project_key,
+        "project_id": str(raw.get("projectId") or raw.get("project_id") or "").strip() or None,
+    }
+
+
+def _apply_version_meta(bucket: dict[str, Any], version_meta: Optional[dict[str, Any]]) -> dict[str, Any]:
+    if not version_meta:
+        return bucket
+    bucket["version_meta"] = version_meta
+    if version_meta.get("name"):
+        bucket["version_name"] = version_meta["name"]
+        if bucket.get("slot") == "current":
+            bucket["label"] = version_meta["name"]
+    if version_meta.get("id") and not bucket.get("version_id"):
+        bucket["version_id"] = version_meta["id"]
+    if version_meta.get("project_key") and not bucket.get("project_key"):
+        bucket["project_key"] = version_meta["project_key"]
+    return bucket
+
+
+def _issue_type_breakdown(issues: list[dict[str, Any]]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for issue in issues:
+        label = str(issue.get("issue_type") or "Unknown")
+        counts[label] = counts.get(label, 0) + 1
+    return counts
+
+
+def summarize_release_bucket(
+    *,
+    slot: str,
+    label: str,
+    jql: str,
+    issues: list[dict[str, Any]],
+    version_meta: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
+    """Summarize one release JQL bucket for the release report UI."""
+    parsed = parse_release_jql(jql)
+    dominant_version = _dominant_fix_version(issues)
+    release_label = (
+        (label or "").strip()
+        or dominant_version
+        or parsed.get("version_name")
+        or parsed.get("version_id")
+        or "Релиз"
+    )
+    in_work: list[dict[str, Any]] = []
+    in_test: list[dict[str, Any]] = []
+    done: list[dict[str, Any]] = []
+    open_questions: list[dict[str, Any]] = []
+    for issue in issues:
+        bucket = classify_scope_report_bucket(issue)
+        if bucket == "done":
+            done.append(issue)
+        elif bucket == "in_test":
+            in_test.append(issue)
+        elif bucket == "open_questions":
+            open_questions.append(issue)
+        else:
+            in_work.append(issue)
+
+    return _apply_version_meta(
+        {
+        "slot": slot,
+        "label": release_label,
+        "jql": (jql or "").strip(),
+        "project_key": parsed.get("project_key", ""),
+        "version_id": parsed.get("version_id", ""),
+        "version_name": dominant_version or parsed.get("version_name", ""),
+        "issues": issues,
+        "story_points": _sum_sp(issues),
+        "counts": {
+            "total": len(issues),
+            "in_work": len(in_work),
+            "in_test": len(in_test),
+            "done": len(done),
+            "open_questions": len(open_questions),
+        },
+        "by_status": _status_breakdown(issues),
+        "by_issue_type": _issue_type_breakdown(issues),
+        "in_work": sort_issues_by_jira_priority(in_work),
+        "in_test": sort_issues_by_jira_priority(in_test),
+        "done": sort_done_issues_by_recent_status(done),
+        "open_questions": sort_issues_by_jira_priority(open_questions),
+    },
+        version_meta,
+    )
+
+
+def build_release_context(
+    *,
+    current_jql: str,
+    current_issues: list[dict[str, Any]],
+    previous_jql: str = "",
+    previous_issues: Optional[list[dict[str, Any]]] = None,
+    next_jql: str = "",
+    next_issues: Optional[list[dict[str, Any]]] = None,
+    custom_name: str = "",
+    custom_jql: str = "",
+    custom_issues: Optional[list[dict[str, Any]]] = None,
+    release_queries: Optional[list[dict[str, Any]]] = None,
+    release_issues_by_slot: Optional[dict[str, list[dict[str, Any]]]] = None,
+    version_meta_by_slot: Optional[dict[str, dict[str, Any]]] = None,
+) -> dict[str, Any]:
+    """Build release comparison payload stored on the scope snapshot."""
+    meta_map = version_meta_by_slot or {}
+    current = summarize_release_bucket(
+        slot="current",
+        label="",
+        jql=current_jql,
+        issues=current_issues,
+        version_meta=meta_map.get("current"),
+    )
+    context: dict[str, Any] = {"current": current}
+    if (previous_jql or "").strip():
+        context["previous"] = summarize_release_bucket(
+            slot="previous",
+            label="Предыдущий релиз",
+            jql=previous_jql,
+            issues=previous_issues or [],
+            version_meta=meta_map.get("previous"),
+        )
+    if (next_jql or "").strip():
+        context["next"] = summarize_release_bucket(
+            slot="next",
+            label="Следующий релиз",
+            jql=next_jql,
+            issues=next_issues or [],
+            version_meta=meta_map.get("next"),
+        )
+    if (custom_jql or "").strip():
+        context["custom"] = summarize_release_bucket(
+            slot="custom",
+            label=(custom_name or "").strip() or "Следующий релиз+",
+            jql=custom_jql,
+            issues=custom_issues or [],
+            version_meta=meta_map.get("custom"),
+        )
+    releases: list[dict[str, Any]] = []
+    issues_by_slot = release_issues_by_slot or {}
+    for index, query in enumerate(release_queries or []):
+        if not isinstance(query, dict):
+            continue
+        jql = str(query.get("jql") or "").strip()
+        if not jql:
+            continue
+        slot = str(query.get("id") or "").strip() or f"release-{index + 1}"
+        relation = str(query.get("type") or query.get("relation") or "future").strip().lower()
+        if relation not in {"past", "future"}:
+            relation = "future"
+        label = str(query.get("label") or "").strip() or ("Прошедший релиз" if relation == "past" else "Будущий релиз")
+        bucket = summarize_release_bucket(
+            slot=slot,
+            label=label,
+            jql=jql,
+            issues=issues_by_slot.get(slot) or [],
+            version_meta=meta_map.get(slot),
+        )
+        bucket["relation"] = relation
+        bucket["order"] = index
+        releases.append(bucket)
+    if releases:
+        context["releases"] = releases
+    return context

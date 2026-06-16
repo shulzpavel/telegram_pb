@@ -541,6 +541,72 @@ async def search_scope_issues(
         raise HTTPException(status_code=500, detail=f"Jira scope search failed: {str(e)}")
 
 
+class VersionResponse(BaseModel):
+    id: str = ""
+    name: str = ""
+    released: bool = False
+    archived: bool = False
+    overdue: bool = False
+    start_date: Optional[str] = None
+    release_date: Optional[str] = None
+    description: str = ""
+    project_id: Optional[str] = None
+
+
+def _version_response_from_raw(raw: dict[str, Any], *, fallback_id: str = "") -> VersionResponse:
+    return VersionResponse(
+        id=str(raw.get("id") or fallback_id),
+        name=str(raw.get("name") or ""),
+        released=bool(raw.get("released")),
+        archived=bool(raw.get("archived")),
+        overdue=bool(raw.get("overdue")),
+        start_date=raw.get("startDate") or raw.get("userStartDate"),
+        release_date=raw.get("releaseDate") or raw.get("userReleaseDate"),
+        description=str(raw.get("description") or ""),
+        project_id=str(raw.get("projectId") or "") or None,
+    )
+
+
+@router.get("/version/resolve", response_model=VersionResponse)
+async def resolve_version(
+    project_key: str = "",
+    version_id: str = "",
+    version_name: str = "",
+    client: JiraServiceClient = Depends(get_jira_client),
+) -> VersionResponse:
+    """Resolve Jira version metadata by numeric id or project + version name."""
+    try:
+        raw = await client.resolve_version(
+            project_key=project_key,
+            version_id=version_id,
+            version_name=version_name,
+        )
+        if not raw:
+            raise HTTPException(status_code=404, detail="Version not found")
+        return _version_response_from_raw(raw, fallback_id=version_id)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Jira version resolve failed: {str(e)}")
+
+
+@router.get("/version/{version_id}", response_model=VersionResponse)
+async def get_version(
+    version_id: str,
+    client: JiraServiceClient = Depends(get_jira_client),
+) -> VersionResponse:
+    """Return Jira fix version metadata for release dashboards."""
+    try:
+        raw = await client.get_version(version_id)
+        if not raw:
+            raise HTTPException(status_code=404, detail=f"Version {version_id} not found")
+        return _version_response_from_raw(raw, fallback_id=version_id)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Jira version fetch failed: {str(e)}")
+
+
 @router.get("/issue/{issue_key}/context", response_model=IssueContextResponse)
 async def get_issue_context(
     issue_key: str,

@@ -11,11 +11,14 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, Optional
 
+_STALE_JOB_MESSAGE = "Генерация прервана или зависла — повторите запрос"
+
 import redis.asyncio as aioredis
 
 logger = logging.getLogger(__name__)
 
 AI_JOB_TTL_SECONDS = max(60, int(os.getenv("AI_JOB_TTL_SECONDS", "3600")))
+AI_JOB_STALE_SECONDS = max(120, int(os.getenv("AI_JOB_STALE_SECONDS", "300")))
 
 PHASE_MESSAGES: dict[str, str] = {
     "queued": "В очереди",
@@ -50,6 +53,52 @@ def _deserialize_job(raw: str) -> dict[str, Any]:
     return data
 
 
+def _parse_job_timestamp(value: Any) -> Optional[datetime]:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+def _active_job_age_seconds(job: dict[str, Any]) -> Optional[float]:
+    if job.get("status") not in {"queued", "running"}:
+        return None
+    updated_at = _parse_job_timestamp(job.get("updated_at")) or _parse_job_timestamp(job.get("started_at"))
+    if updated_at is None:
+        return None
+    return max(0.0, (datetime.now(timezone.utc) - updated_at).total_seconds())
+
+
+def is_active_job_stale(job: dict[str, Any]) -> bool:
+    age = _active_job_age_seconds(job)
+    return age is not None and age > AI_JOB_STALE_SECONDS
+
+
+async def fail_job_if_stale(redis: aioredis.Redis, job: dict[str, Any]) -> bool:
+    """Mark orphaned running jobs as failed. Returns True when the job was failed."""
+    if not is_active_job_stale(job):
+        return False
+    job_id = str(job.get("job_id") or "")
+    kind = str(job.get("kind") or "")
+    resource_key = str(job.get("resource_key") or "")
+    if not job_id or not kind or not resource_key:
+        return False
+    logger.warning(
+        "AI job stale job_id=%s kind=%s resource=%s age_seconds=%s",
+        job_id,
+        kind,
+        resource_key,
+        _active_job_age_seconds(job),
+    )
+    await fail_job(redis, job_id, _STALE_JOB_MESSAGE, kind=kind, resource_key=resource_key)
+    return True
+
+
 async def get_job(redis: aioredis.Redis, job_id: str) -> Optional[dict[str, Any]]:
     raw = await redis.get(_job_key(job_id))
     if not raw:
@@ -59,6 +108,15 @@ async def get_job(redis: aioredis.Redis, job_id: str) -> Optional[dict[str, Any]
     except (json.JSONDecodeError, ValueError):
         logger.warning("Corrupt AI job record job_id=%s", job_id)
         return None
+
+
+async def get_job_for_poll(redis: aioredis.Redis, job_id: str) -> Optional[dict[str, Any]]:
+    job = await get_job(redis, job_id)
+    if not job:
+        return None
+    if await fail_job_if_stale(redis, job):
+        job = await get_job(redis, job_id)
+    return job
 
 
 async def _save_job(redis: aioredis.Redis, job_id: str, job: dict[str, Any]) -> None:
@@ -78,7 +136,10 @@ async def get_or_create_job(
     if existing_job_id:
         job = await get_job(redis, existing_job_id)
         if job and job.get("status") in {"queued", "running"}:
-            return existing_job_id, False
+            if await fail_job_if_stale(redis, job):
+                job = None
+            else:
+                return existing_job_id, False
 
     job_id = str(uuid.uuid4())
     now = _now_iso()
@@ -105,7 +166,8 @@ async def update_job(redis: aioredis.Redis, job_id: str, **updates: Any) -> None
     if not job:
         return
     job.update(updates)
-    job["updated_at"] = _now_iso()
+    if "updated_at" not in updates:
+        job["updated_at"] = _now_iso()
     if "phase" in updates and "message" not in updates:
         phase = str(updates["phase"])
         job["message"] = PHASE_MESSAGES.get(phase, job.get("message", ""))

@@ -13,6 +13,7 @@ export function ScopeAiPanel({
   metrics,
   openQuestionsCount = 0,
   autoOpenSignal = 0,
+  analyzing = false,
 }: {
   summary: ScopeAiSummary | null;
   history: ScopeAiHistoryEntry[];
@@ -21,6 +22,7 @@ export function ScopeAiPanel({
   metrics?: ScopeBoardMetrics | null;
   openQuestionsCount?: number;
   autoOpenSignal?: number;
+  analyzing?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const entries = useMemo(() => normalizeAiHistory(summary, history), [summary, history]);
@@ -33,17 +35,45 @@ export function ScopeAiPanel({
     return entries[0];
   }, [entries, selectedHistoryId]);
 
-  if (!activeEntry) return null;
+  useEffect(() => {
+    if (autoOpenSignal > 0 || analyzing) {
+      setOpen(true);
+    }
+  }, [analyzing, autoOpenSignal]);
+
+  if (!activeEntry) {
+    return (
+      <details
+        className="scope-collapsible-card group overflow-hidden rounded-lg bg-surface"
+        open={open || analyzing}
+        onToggle={(event) => setOpen(event.currentTarget.open)}
+      >
+        <summary className="scope-section-header cursor-pointer list-none px-4 py-3 marker:content-none sm:px-5">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <span className="text-base font-semibold text-ink">AI-сводка для бизнеса</span>
+            <span className="scope-print-hide inline-flex items-center gap-2 text-xs font-semibold text-ink">
+              <span className="group-open:hidden">Показать</span>
+              <span className="hidden group-open:inline">Скрыть</span>
+              <span className="scope-section-header-icon inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-transform group-open:rotate-180">
+                <svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4" aria-hidden="true">
+                  <path d="M5.23 7.21a.75.75 0 0 1 1.06.02L10 11.17l3.71-3.94a.75.75 0 1 1 1.08 1.04l-4.25 4.5a.75.75 0 0 1-1.08 0l-4.25-4.5a.75.75 0 0 1 .02-1.06z" />
+                </svg>
+              </span>
+            </span>
+          </div>
+        </summary>
+        <div className="p-4 text-sm text-ink2 sm:p-6 lg:p-7">
+          {analyzing
+            ? "Генерируем AI-сводку по текущему snapshot..."
+            : "Нажмите «AI-анализ» в шапке отчёта, чтобы получить бизнес-сводку."}
+        </div>
+      </details>
+    );
+  }
 
   const isHistorical = Boolean(selectedHistoryId && selectedHistoryId !== entries[0]?.id);
   const generatedLabel = formatAiTime(activeEntry.generated_at);
   const snapshotLabel = formatAiTime(activeEntry.snapshot_refreshed_at);
-
-  useEffect(() => {
-    if (autoOpenSignal > 0) {
-      setOpen(true);
-    }
-  }, [autoOpenSignal]);
 
   return (
     <details

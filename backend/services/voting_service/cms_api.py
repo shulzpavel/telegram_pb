@@ -28,19 +28,24 @@ from app.domain.task import Task
 from app.domain.scope_board import (
     apply_priority_queue_comment,
     apply_priority_queue_reorder,
+    build_release_context,
     build_scope_snapshot,
     compute_scope_metrics,
     compute_scope_metrics_from_sections,
     compute_scope_report,
     compute_scope_report_from_sections,
+    infer_scope_report_type,
+    infer_release_version_lookup,
     is_scope_creep,
     merge_priority_queue,
     merge_scope_issues,
     normalize_scope_issue,
     normalize_scope_sections,
+    normalize_version_meta,
     pause_supplement_jql,
     priority_queue_label,
     priority_queue_milestone_targets,
+    release_scope_sections,
     sync_legacy_jql_from_sections,
 )
 from app.usecases.close_session import CloseSessionUseCase
@@ -299,6 +304,15 @@ class ScopeBoardCreateRequest(BaseModel):
     unplan_jql: str = Field(default="", max_length=4000)
     todo_jql: str = Field(default="", max_length=4000)
     test_jql: str = Field(default="", max_length=4000)
+    previous_release_jql: str = Field(default="", max_length=4000)
+    next_release_jql: str = Field(default="", max_length=4000)
+    custom_release_name: str = Field(default="", max_length=200)
+    custom_release_jql: str = Field(default="", max_length=4000)
+    release_queries: list[dict[str, Any]] = Field(default_factory=list, max_length=50)
+    release_comment: str = Field(default="", max_length=8000)
+    previous_release_comment: str = Field(default="", max_length=8000)
+    next_release_comment: str = Field(default="", max_length=8000)
+    custom_release_comment: str = Field(default="", max_length=8000)
     team_id: Optional[int] = None
 
 
@@ -311,6 +325,22 @@ class ScopeBoardUpdateRequest(BaseModel):
     unplan_jql: str = Field(default="", max_length=4000)
     todo_jql: str = Field(default="", max_length=4000)
     test_jql: str = Field(default="", max_length=4000)
+    previous_release_jql: str = Field(default="", max_length=4000)
+    next_release_jql: str = Field(default="", max_length=4000)
+    custom_release_name: str = Field(default="", max_length=200)
+    custom_release_jql: str = Field(default="", max_length=4000)
+    release_queries: list[dict[str, Any]] = Field(default_factory=list, max_length=50)
+    release_comment: str = Field(default="", max_length=8000)
+    previous_release_comment: str = Field(default="", max_length=8000)
+    next_release_comment: str = Field(default="", max_length=8000)
+    custom_release_comment: str = Field(default="", max_length=8000)
+
+
+class ScopeBoardReleaseCommentsRequest(BaseModel):
+    release_comment: str = Field(default="", max_length=8000)
+    previous_release_comment: str = Field(default="", max_length=8000)
+    next_release_comment: str = Field(default="", max_length=8000)
+    custom_release_comment: str = Field(default="", max_length=8000)
 
 
 class ScopeBoardLayoutRequest(BaseModel):
@@ -1557,6 +1587,146 @@ def _scope_sections_from_request(body: ScopeBoardCreateRequest | ScopeBoardUpdat
     return normalize_scope_sections(None, plan_jql=body.plan_jql, unplan_jql=body.unplan_jql)
 
 
+async def _resolve_scope_report_type(store: Any, team_id: Optional[int]) -> str:
+    if team_id is None:
+        return "monthly"
+    team = await store.get_team(team_id)
+    if not team:
+        return "monthly"
+    return infer_scope_report_type(team.get("slug"), team.get("name"))
+
+
+def _ensure_release_scope_sections(scope_sections: list[dict[str, Any]]) -> None:
+    release_jql = str((scope_sections[0] if scope_sections else {}).get("jql") or "").strip()
+    if not release_jql:
+        raise HTTPException(
+            status_code=400,
+            detail="Укажите JQL релиза, например: project = AIG2 AND fixVersion = 12076",
+        )
+
+
+def _primary_release_jql(scope_sections: list[dict[str, Any]]) -> str:
+    if not scope_sections:
+        return ""
+    return str(scope_sections[0].get("jql") or "").strip()
+
+
+async def _fetch_release_version_meta(
+    client: Any,
+    jql: str,
+    issues: Optional[list[dict[str, Any]]] = None,
+) -> Optional[dict[str, Any]]:
+    lookup = infer_release_version_lookup(jql, issues)
+    version_id = lookup.get("version_id", "")
+    version_name = lookup.get("version_name", "")
+    project_key = lookup.get("project_key", "")
+    if not version_id and not version_name:
+        return None
+    try:
+        raw = await client.resolve_version(
+            project_key=project_key,
+            version_id=version_id,
+            version_name=version_name,
+            force_refresh=True,
+        )
+    except Exception as exc:
+        logger.warning(
+            "release version meta fetch failed project=%s version_id=%s version_name=%s error=%s",
+            project_key,
+            version_id,
+            version_name,
+            exc,
+        )
+        return None
+    if not isinstance(raw, dict):
+        return None
+    return normalize_version_meta(raw, project_key=project_key)
+
+
+async def _fetch_release_version_meta_map(
+    client: Any,
+    jql_by_slot: dict[str, str],
+    issues_by_slot: Optional[dict[str, list[dict[str, Any]]]] = None,
+) -> dict[str, dict[str, Any]]:
+    issues_by_slot = issues_by_slot or {}
+    tasks = {
+        slot: _fetch_release_version_meta(client, jql, issues=issues_by_slot.get(slot))
+        for slot, jql in jql_by_slot.items()
+        if (jql or "").strip()
+    }
+    if not tasks:
+        return {}
+    results = await asyncio.gather(*tasks.values(), return_exceptions=True)
+    meta_map: dict[str, dict[str, Any]] = {}
+    for (slot, _), result in zip(tasks.items(), results, strict=True):
+        if isinstance(result, dict):
+            meta_map[slot] = result
+    return meta_map
+
+
+def _normalize_release_queries(raw: Any) -> list[dict[str, str]]:
+    if not isinstance(raw, list):
+        return []
+    result: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for index, item in enumerate(raw):
+        if not isinstance(item, dict):
+            continue
+        jql = str(item.get("jql") or "").strip()
+        if not jql:
+            continue
+        relation = str(item.get("type") or item.get("relation") or "future").strip().lower()
+        if relation not in {"past", "future"}:
+            relation = "future"
+        item_id = str(item.get("id") or "").strip() or f"release-{index + 1}-{secrets.token_hex(3)}"
+        while item_id in seen:
+            item_id = f"{item_id}-{secrets.token_hex(2)}"
+        seen.add(item_id)
+        label = str(item.get("label") or "").strip()
+        result.append(
+            {
+                "id": item_id[:120],
+                "type": relation,
+                "label": label[:200],
+                "jql": jql[:4000],
+            }
+        )
+    return result
+
+
+def _scope_board_payload_from_request(
+    body: ScopeBoardCreateRequest | ScopeBoardUpdateRequest,
+    *,
+    report_type: str,
+) -> dict[str, Any]:
+    scope_sections = _scope_sections_from_request(body)
+    if report_type == "release":
+        release_jql = _primary_release_jql(scope_sections)
+        scope_sections = release_scope_sections(release_jql, label=scope_sections[0].get("name") if scope_sections else None)
+        _ensure_release_scope_sections(scope_sections)
+    plan_jql, unplan_jql = sync_legacy_jql_from_sections(scope_sections)
+    return {
+        "name": body.name,
+        "month": body.month,
+        "capacity_sp": body.capacity_sp,
+        "plan_jql": plan_jql,
+        "unplan_jql": unplan_jql,
+        "todo_jql": body.todo_jql,
+        "test_jql": body.test_jql,
+        "report_type": report_type,
+        "previous_release_jql": body.previous_release_jql,
+        "next_release_jql": body.next_release_jql,
+        "custom_release_name": body.custom_release_name,
+        "custom_release_jql": body.custom_release_jql,
+        "release_queries": _normalize_release_queries(body.release_queries),
+        "release_comment": body.release_comment,
+        "previous_release_comment": body.previous_release_comment,
+        "next_release_comment": body.next_release_comment,
+        "custom_release_comment": body.custom_release_comment,
+        "scope_sections": scope_sections,
+    }
+
+
 def _scope_fetch_warnings(outcomes: list[_ScopeJqlFetchResult]) -> list[dict[str, Any]]:
     return [
         {"jql": outcome.jql, "truncated": True, "count": len(outcome.issues)}
@@ -1571,6 +1741,10 @@ def _scope_sections_from_board(board: dict[str, Any]) -> list[dict[str, Any]]:
         plan_jql=str(board.get("plan_jql") or ""),
         unplan_jql=str(board.get("unplan_jql") or ""),
     )
+
+
+def _release_queries_from_board(board: dict[str, Any]) -> list[dict[str, str]]:
+    return _normalize_release_queries(board.get("release_queries"))
 
 
 async def _post_jira_issue_comment(issue_key: str, text: str) -> dict[str, Any]:
@@ -1946,19 +2120,13 @@ async def cms_create_scope_board(
             status_code=400,
             detail="Выберите команду — отчёт без команды видят все админы",
         )
-    scope_sections = _scope_sections_from_request(body)
-    plan_jql, unplan_jql = sync_legacy_jql_from_sections(scope_sections)
-    board = await _get_cms_store(request).create_scope_board(
-        name=body.name,
-        month=body.month,
-        capacity_sp=body.capacity_sp,
-        plan_jql=plan_jql,
-        unplan_jql=unplan_jql,
-        todo_jql=body.todo_jql,
-        test_jql=body.test_jql,
-        scope_sections=scope_sections,
+    store = _get_cms_store(request)
+    report_type = await _resolve_scope_report_type(store, resolved_team_id)
+    payload = _scope_board_payload_from_request(body, report_type=report_type)
+    board = await store.create_scope_board(
         created_by=actor.id,
         team_id=resolved_team_id,
+        **payload,
     )
     await _audit(
         request,
@@ -2013,6 +2181,38 @@ async def cms_update_scope_board_layout(
     return board
 
 
+@cms_router.patch("/cms/scope-boards/{board_id}/release-comments")
+@cms_router.patch("/cms/scope-boards/{board_id}/release-comments/")
+async def cms_update_scope_board_release_comments(
+    board_id: int,
+    body: ScopeBoardReleaseCommentsRequest,
+    request: Request,
+    actor: CmsPrincipal = Depends(require_permission(PERM_PLANNER_VIEW)),
+) -> dict:
+    existing = await _get_cms_store(request).get_scope_board(board_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Scope board not found")
+    assert_record_access(actor, existing)
+
+    board = await _get_cms_store(request).update_scope_board_release_comments(
+        board_id,
+        release_comment=body.release_comment,
+        previous_release_comment=body.previous_release_comment,
+        next_release_comment=body.next_release_comment,
+        custom_release_comment=body.custom_release_comment,
+    )
+    if not board:
+        raise HTTPException(status_code=404, detail="Scope board not found")
+    await _audit(
+        request,
+        "cms.scope_board.release_comments_update",
+        actor.username,
+        "ok",
+        {"board_id": board_id},
+    )
+    return board
+
+
 @cms_router.patch("/cms/scope-boards/{board_id}")
 async def cms_update_scope_board(
     board_id: int,
@@ -2024,18 +2224,11 @@ async def cms_update_scope_board(
     if not existing:
         raise HTTPException(status_code=404, detail="Scope board not found")
     assert_record_access(actor, existing)
-    scope_sections = _scope_sections_from_request(body)
-    plan_jql, unplan_jql = sync_legacy_jql_from_sections(scope_sections)
+    report_type = str(existing.get("report_type") or "monthly")
+    payload = _scope_board_payload_from_request(body, report_type=report_type)
     board = await _get_cms_store(request).update_scope_board(
         board_id,
-        name=body.name,
-        month=body.month,
-        capacity_sp=body.capacity_sp,
-        plan_jql=plan_jql,
-        unplan_jql=unplan_jql,
-        todo_jql=body.todo_jql,
-        test_jql=body.test_jql,
-        scope_sections=scope_sections,
+        **payload,
     )
     if not board:
         raise HTTPException(status_code=404, detail="Scope board not found")
@@ -2082,6 +2275,8 @@ async def cms_refresh_scope_board(
     scope_sections = _scope_sections_from_board(existing)
     refreshed_at = datetime.now(timezone.utc).isoformat()
     fetch_outcomes: list[_ScopeJqlFetchResult] = []
+    release_outcomes: dict[str, _ScopeJqlFetchResult] = {}
+    release_version_meta_map: dict[str, dict[str, Any]] = {}
 
     client = JiraServiceHttpClient()
     try:
@@ -2114,6 +2309,33 @@ async def cms_refresh_scope_board(
                     milestone_status_targets=priority_queue_milestone_targets("test"),
                     enrich_changelog=True,
                 )
+            )
+        release_outcomes = {}
+        release_queries = _release_queries_from_board(existing) if existing.get("report_type") == "release" else []
+        if existing.get("report_type") == "release":
+            release_tasks = {
+                query["id"]: _fetch_scope_issues(query["jql"], client, force_refresh=True, enrich_changelog=True)
+                for query in release_queries
+                if (query.get("jql") or "").strip()
+            }
+            if release_tasks:
+                release_results = await asyncio.gather(*release_tasks.values())
+                for (key, _), outcome in zip(release_tasks.items(), release_results, strict=True):
+                    release_outcomes[key] = outcome
+                    fetch_outcomes.append(outcome)
+        if existing.get("report_type") == "release":
+            version_jql_by_slot = {
+                "current": _primary_release_jql(scope_sections),
+            }
+            version_jql_by_slot.update({query["id"]: query["jql"] for query in release_queries})
+            issues_by_slot = {
+                "current": (fetched_sections[0].get("issues") if fetched_sections else []) or [],
+            }
+            issues_by_slot.update({slot: outcome.issues for slot, outcome in release_outcomes.items()})
+            release_version_meta_map = await _fetch_release_version_meta_map(
+                client,
+                version_jql_by_slot,
+                issues_by_slot,
             )
         if queue_tasks:
             queue_results = await asyncio.gather(*queue_tasks)
@@ -2177,6 +2399,22 @@ async def cms_refresh_scope_board(
             refreshed_at=refreshed_at,
         ),
     }
+    if existing.get("report_type") == "release":
+        current_issues = (fetched_sections[0].get("issues") if fetched_sections else []) or []
+        snapshot["release_context"] = build_release_context(
+            current_jql=_primary_release_jql(scope_sections),
+            current_issues=current_issues,
+            previous_jql=existing.get("previous_release_jql") or "",
+            previous_issues=(release_outcomes.get("previous").issues if release_outcomes.get("previous") else []),
+            next_jql=existing.get("next_release_jql") or "",
+            next_issues=(release_outcomes.get("next").issues if release_outcomes.get("next") else []),
+            custom_name=existing.get("custom_release_name") or "",
+            custom_jql=existing.get("custom_release_jql") or "",
+            custom_issues=(release_outcomes.get("custom").issues if release_outcomes.get("custom") else []),
+            release_queries=release_queries,
+            release_issues_by_slot={slot: outcome.issues for slot, outcome in release_outcomes.items()},
+            version_meta_by_slot=release_version_meta_map,
+        )
     board = await _get_cms_store(request).save_scope_board_snapshot(board_id, snapshot)
     if not board:
         raise HTTPException(status_code=404, detail="Scope board not found")
@@ -2787,10 +3025,10 @@ async def cms_scope_analyze_job_status(
         raise HTTPException(status_code=404, detail="Scope board not found")
     assert_record_access(actor, board)
 
-    from services.voting_service.ai_jobs import get_job, job_public_view
+    from services.voting_service.ai_jobs import get_job_for_poll, job_public_view
 
     redis = await _get_redis(request)
-    job = await get_job(redis, job_id)
+    job = await get_job_for_poll(redis, job_id)
     if not job:
         raise HTTPException(status_code=404, detail="AI job not found")
     if job.get("kind") != "scope" or job.get("resource_key") != f"board:{board_id}":

@@ -630,6 +630,10 @@
   body { font-display: swap; }
 }
 
+.scope-print-only {
+  display: none !important;
+}
+
 @media print {
   @page {
     margin: 10mm;
@@ -658,6 +662,10 @@
   body.scope-print-mode .scope-no-print,
   body.scope-print-mode .scope-print-hide {
     display: none !important;
+  }
+
+  body.scope-print-mode .scope-print-only {
+    display: block !important;
   }
 
   body.scope-print-mode .scope-print-cover {

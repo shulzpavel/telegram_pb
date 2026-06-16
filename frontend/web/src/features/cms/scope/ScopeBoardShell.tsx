@@ -33,6 +33,8 @@ import {
   type ScopeBoardRecord,
   type ScopeBoardSnapshot,
   type ScopePriorityQueueKind,
+  type ScopeReleaseQuery,
+  type ScopeReleaseSlot,
 } from "../api/cmsClient";
 import { AI_JOB_POLL_INTERVAL_MS, pollAiJob, SCOPE_AI_POLL_TIMEOUT_MS } from "../../../shared/lib/pollAiJob";
 import type { CmsPrincipal } from "../api/cmsTypes";
@@ -104,6 +106,60 @@ interface ScopeBoardForm {
   scope_sections: ScopeSectionConfig[];
   todo_jql: string;
   test_jql: string;
+  previous_release_jql: string;
+  next_release_jql: string;
+  custom_release_name: string;
+  custom_release_jql: string;
+  release_queries: ScopeReleaseQuery[];
+  release_comment: string;
+  previous_release_comment: string;
+  next_release_comment: string;
+  custom_release_comment: string;
+}
+
+function createReleaseQuery(type: ScopeReleaseQuery["type"] = "future"): ScopeReleaseQuery {
+  const id =
+    typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID()
+      : `release-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  return { id, type, label: "", jql: "" };
+}
+
+function normalizeReleaseQueries(
+  queries: ScopeReleaseQuery[] | null | undefined,
+  legacy?: {
+    previous_release_jql?: string;
+    next_release_jql?: string;
+    custom_release_name?: string;
+    custom_release_jql?: string;
+  },
+): ScopeReleaseQuery[] {
+  const normalized: ScopeReleaseQuery[] = (queries ?? [])
+    .filter((query) => query && typeof query.jql === "string")
+    .map((query, index) => ({
+      id: query.id || `release-${index + 1}`,
+      type: query.type === "past" ? "past" : "future",
+      label: query.label ?? "",
+      jql: query.jql ?? "",
+    }));
+  if (normalized.length > 0) return normalized;
+
+  const legacyQueries: ScopeReleaseQuery[] = [];
+  if (legacy?.previous_release_jql?.trim()) {
+    legacyQueries.push({ id: "previous", type: "past", label: "Предыдущий релиз", jql: legacy.previous_release_jql });
+  }
+  if (legacy?.next_release_jql?.trim()) {
+    legacyQueries.push({ id: "next", type: "future", label: "Следующий релиз", jql: legacy.next_release_jql });
+  }
+  if (legacy?.custom_release_jql?.trim()) {
+    legacyQueries.push({
+      id: "custom",
+      type: "future",
+      label: legacy.custom_release_name?.trim() || "Дополнительный релиз",
+      jql: legacy.custom_release_jql,
+    });
+  }
+  return legacyQueries;
 }
 
 function formatDate(iso: string | null | undefined): string {
@@ -125,6 +181,12 @@ function formatCreated(iso: string | null | undefined): string {
 }
 
 function boardToForm(board: ScopeBoardRecord): ScopeBoardForm {
+  const legacyReleaseQueries = normalizeReleaseQueries(board.release_queries, {
+    previous_release_jql: board.previous_release_jql ?? "",
+    next_release_jql: board.next_release_jql ?? "",
+    custom_release_name: board.custom_release_name ?? "",
+    custom_release_jql: board.custom_release_jql ?? "",
+  });
   return {
     name: board.name,
     month: board.month,
@@ -132,6 +194,15 @@ function boardToForm(board: ScopeBoardRecord): ScopeBoardForm {
     scope_sections: normalizeScopeSectionOrder(resolveScopeSections(board)),
     todo_jql: board.todo_jql ?? "",
     test_jql: board.test_jql ?? "",
+    previous_release_jql: legacyReleaseQueries.length > 0 ? "" : board.previous_release_jql ?? "",
+    next_release_jql: legacyReleaseQueries.length > 0 ? "" : board.next_release_jql ?? "",
+    custom_release_name: legacyReleaseQueries.length > 0 ? "" : board.custom_release_name ?? "",
+    custom_release_jql: legacyReleaseQueries.length > 0 ? "" : board.custom_release_jql ?? "",
+    release_queries: legacyReleaseQueries,
+    release_comment: board.release_comment ?? "",
+    previous_release_comment: board.previous_release_comment ?? "",
+    next_release_comment: board.next_release_comment ?? "",
+    custom_release_comment: board.custom_release_comment ?? "",
   };
 }
 
@@ -143,6 +214,15 @@ function defaultForm(): ScopeBoardForm {
     scope_sections: defaultScopeSections(),
     todo_jql: "",
     test_jql: "",
+    previous_release_jql: "",
+    next_release_jql: "",
+    custom_release_name: "",
+    custom_release_jql: "",
+    release_queries: [],
+    release_comment: "",
+    previous_release_comment: "",
+    next_release_comment: "",
+    custom_release_comment: "",
   };
 }
 
@@ -157,6 +237,12 @@ function sumIssueSp(issues: ScopeBoardIssue[]): number {
     const sp = issue.story_points;
     return sum + (typeof sp === "number" && sp > 0 ? sp : 0);
   }, 0);
+}
+
+function isReleaseTemplateTeam(team: { slug?: string; name?: string } | null | undefined): boolean {
+  if (!team) return false;
+  const haystack = `${team.slug ?? ""} ${team.name ?? ""}`.toLowerCase();
+  return haystack.includes("ios") || haystack.includes("android") || haystack.includes("igaming");
 }
 
 function hasRoleAttribution(issue: ScopeBoardIssue, role: "front" | "back"): boolean {
@@ -481,6 +567,15 @@ interface ScopeBoardPayload {
   scope_sections: ScopeSectionConfig[];
   todo_jql: string;
   test_jql: string;
+  previous_release_jql: string;
+  next_release_jql: string;
+  custom_release_name: string;
+  custom_release_jql: string;
+  release_queries: ScopeReleaseQuery[];
+  release_comment: string;
+  previous_release_comment: string;
+  next_release_comment: string;
+  custom_release_comment: string;
 }
 
 function validateScopeForm(form: ScopeBoardForm): { error: string } | { payload: ScopeBoardPayload } {
@@ -506,8 +601,108 @@ function validateScopeForm(form: ScopeBoardForm): { error: string } | { payload:
       scope_sections: normalizeScopeSectionOrder(form.scope_sections),
       todo_jql: form.todo_jql.trim(),
       test_jql: form.test_jql.trim(),
+      previous_release_jql: form.previous_release_jql.trim(),
+      next_release_jql: form.next_release_jql.trim(),
+      custom_release_name: form.custom_release_name.trim(),
+      custom_release_jql: form.custom_release_jql.trim(),
+      release_queries: form.release_queries
+        .map((query) => ({
+          id: query.id,
+          type: query.type,
+          label: (query.label ?? "").trim(),
+          jql: query.jql.trim(),
+        }))
+        .filter((query) => query.jql.length > 0),
+      release_comment: form.release_comment.trim(),
+      previous_release_comment: form.previous_release_comment.trim(),
+      next_release_comment: form.next_release_comment.trim(),
+      custom_release_comment: form.custom_release_comment.trim(),
     },
   };
+}
+
+function ReleaseQueriesEditor({
+  queries,
+  disabled,
+  onChange,
+}: {
+  queries: ScopeReleaseQuery[];
+  disabled: boolean;
+  onChange: (queries: ScopeReleaseQuery[]) => void;
+}) {
+  function updateQuery(index: number, patch: Partial<ScopeReleaseQuery>) {
+    onChange(queries.map((query, currentIndex) => (currentIndex === index ? { ...query, ...patch } : query)));
+  }
+
+  function addQuery() {
+    onChange([...queries, createReleaseQuery("future")]);
+  }
+
+  function removeQuery(index: number) {
+    onChange(queries.filter((_, currentIndex) => currentIndex !== index));
+  }
+
+  return (
+    <div className="space-y-3 rounded-2xl border border-line bg-bg/60 p-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p className="text-sm font-semibold text-ink">Дополнительные релизы</p>
+          <p className="mt-1 text-xs text-ink3">
+            Прошедшие релизы появятся над текущим, будущие — после текущего.
+          </p>
+        </div>
+        <Button size="sm" variant="ghost" disabled={disabled} onClick={addQuery}>
+          + Добавить запрос
+        </Button>
+      </div>
+
+      {queries.length > 0 ? (
+        <div className="space-y-3">
+          {queries.map((query, index) => (
+            <div key={query.id} className="rounded-xl border border-line bg-surface p-3">
+              <div className="grid gap-3 md:grid-cols-[180px_minmax(0,1fr)_auto]">
+                <SelectField
+                  label="Тип релиза"
+                  value={query.type}
+                  disabled={disabled}
+                  onChange={(event) => updateQuery(index, { type: event.target.value === "past" ? "past" : "future" })}
+                >
+                  <option value="past">Прошедший релиз</option>
+                  <option value="future">Будущий релиз</option>
+                </SelectField>
+                <TextField
+                  label="Название (необязательно)"
+                  value={query.label ?? ""}
+                  disabled={disabled}
+                  placeholder={query.type === "past" ? "Например: 0.689" : "Например: 0.691"}
+                  onChange={(event) => updateQuery(index, { label: event.target.value })}
+                />
+                <div className="flex items-end">
+                  <Button size="sm" variant="ghost" disabled={disabled} onClick={() => removeQuery(index)}>
+                    Удалить
+                  </Button>
+                </div>
+              </div>
+              <div className="mt-3">
+                <TextareaField
+                  label="JQL"
+                  rows={2}
+                  value={query.jql}
+                  disabled={disabled}
+                  placeholder="project = AIG2 AND fixVersion = 12076"
+                  onChange={(event) => updateQuery(index, { jql: event.target.value })}
+                />
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="rounded-xl bg-line2/40 px-4 py-5 text-center text-sm text-ink3">
+          Дополнительных релизов пока нет. Текущий релиз задаётся JQL выше.
+        </p>
+      )}
+    </div>
+  );
 }
 
 function ScopeBoardEditorPage({
@@ -525,6 +720,10 @@ function ScopeBoardEditorPage({
   const boardId = mode === "edit" ? Number(boardIdParam) : null;
   const { teams } = useCmsTeams(principal);
   const [teamId, setTeamId] = useTeamIdState(teams, mode === "create");
+  const selectedTeam = useMemo(
+    () => teams.find((t) => t.id === (typeof teamId === "number" ? teamId : -1)) ?? null,
+    [teams, teamId]
+  );
 
   const [loading, setLoading] = useState(mode === "edit");
   const [saving, setSaving] = useState(false);
@@ -543,6 +742,12 @@ function ScopeBoardEditorPage({
   const [layoutDragging, setLayoutDragging] = useState(false);
   const printRootRef = useRef<HTMLDivElement>(null);
   const aiReportRef = useRef<HTMLDivElement>(null);
+
+  const inferredReportType: "monthly" | "release" = useMemo(() => {
+    if (mode === "edit") return (board?.report_type ?? "monthly") as "monthly" | "release";
+    return isReleaseTemplateTeam(selectedTeam) ? "release" : "monthly";
+  }, [board?.report_type, mode, selectedTeam]);
+  const isReleaseTemplate = inferredReportType === "release";
 
   const dirty = useMemo(() => JSON.stringify(form) !== JSON.stringify(savedForm), [form, savedForm]);
   const unsavedGuard = useUnsavedChangesGuard({ when: dirty && canManage });
@@ -576,6 +781,31 @@ function ScopeBoardEditorPage({
   useEffect(() => {
     setLayoutOrder(mergeScopeLayoutOrder(board?.layout_order));
   }, [board?.layout_order]);
+
+  useEffect(() => {
+    if (mode !== "create") return;
+    setForm((current) => {
+      if (isReleaseTemplate) {
+        const currentReleaseJql = current.scope_sections?.[0]?.jql ?? "";
+        return {
+          ...current,
+          scope_sections: [
+            {
+              id: "release",
+              name: "Текущий релиз",
+              kind: "planned",
+              order: 0,
+              jql: currentReleaseJql,
+            },
+          ],
+        };
+      }
+      return {
+        ...current,
+        scope_sections: defaultScopeSections(),
+      };
+    });
+  }, [mode, isReleaseTemplate]);
 
   const persistBoardConfig = useCallback(async (): Promise<ScopeBoardRecord | null> => {
     if (mode !== "edit" || boardId === null || Number.isNaN(boardId) || !canManage) {
@@ -750,6 +980,42 @@ function ScopeBoardEditorPage({
     [boardId, toast]
   );
 
+  const saveReleaseComment = useCallback(
+    async (slot: ScopeReleaseSlot, text: string) => {
+      if (boardId === null || Number.isNaN(boardId)) return;
+      const trimmed = text.trim();
+      const payload = {
+        release_comment: board?.release_comment ?? form.release_comment,
+        previous_release_comment: board?.previous_release_comment ?? form.previous_release_comment,
+        next_release_comment: board?.next_release_comment ?? form.next_release_comment,
+        custom_release_comment: board?.custom_release_comment ?? form.custom_release_comment,
+      };
+      if (slot === "current") payload.release_comment = trimmed;
+      if (slot === "previous") payload.previous_release_comment = trimmed;
+      if (slot === "next") payload.next_release_comment = trimmed;
+      if (slot === "custom") payload.custom_release_comment = trimmed;
+
+      const record = await cmsScopeApi.updateReleaseComments(boardId, payload);
+      setBoard(record);
+      const nextForm = boardToForm(record);
+      setForm(nextForm);
+      setSavedForm(nextForm);
+      toast.success("Комментарий сохранён");
+    },
+    [
+      board?.custom_release_comment,
+      board?.next_release_comment,
+      board?.previous_release_comment,
+      board?.release_comment,
+      boardId,
+      form.custom_release_comment,
+      form.next_release_comment,
+      form.previous_release_comment,
+      form.release_comment,
+      toast,
+    ]
+  );
+
   const addTodoItem = useCallback(
     async (text: string) => {
       if (boardId === null || Number.isNaN(boardId)) return;
@@ -855,11 +1121,13 @@ function ScopeBoardEditorPage({
 
   const visibleBlockKeys = useMemo((): ScopeLayoutBlockKey[] => {
     if (mode !== "edit" || !snapshot || !metrics) return [];
-    const keys: ScopeLayoutBlockKey[] = ["topItems", "capacity", "roleWorkload", "planInsights"];
-    if (aiSummary || aiSummaryHistory.length > 0) keys.push("aiSummary");
-    keys.push("report", "priorityQueues", "activity", "snapshotSections", "settings");
+    const keys: ScopeLayoutBlockKey[] = ["topItems", "capacity"];
+    if (!isReleaseTemplate) {
+      keys.push("roleWorkload", "planInsights");
+    }
+    keys.push("aiSummary", "report", "priorityQueues", "activity", "snapshotSections", "settings");
     return keys;
-  }, [aiSummary, aiSummaryHistory.length, metrics, mode, snapshot]);
+  }, [isReleaseTemplate, metrics, mode, snapshot]);
 
   const visibleLayoutOrder = useMemo(
     () => mergeScopeLayoutOrder(layoutOrder, visibleBlockKeys),
@@ -938,6 +1206,7 @@ function ScopeBoardEditorPage({
               metrics={metrics}
               openQuestionsCount={resolveOpenQuestions(snapshot).length}
               autoOpenSignal={aiPanelOpenSignal}
+              analyzing={analyzing}
             />
           </div>
         );
@@ -947,6 +1216,14 @@ function ScopeBoardEditorPage({
             snapshot={snapshot}
             canManage={canManage}
             showTechnicalFields
+            isReleaseReport={isReleaseTemplate}
+            releaseComments={{
+              current: board?.release_comment ?? form.release_comment,
+              previous: board?.previous_release_comment ?? form.previous_release_comment,
+              next: board?.next_release_comment ?? form.next_release_comment,
+              custom: board?.custom_release_comment ?? form.custom_release_comment,
+            }}
+            onSaveReleaseComment={saveReleaseComment}
             onAddQuestion={addManualQuestion}
             onResolveQuestion={resolveQuestion}
           />
@@ -1044,11 +1321,41 @@ function ScopeBoardEditorPage({
                   onChange={(event) => setForm((current) => ({ ...current, capacity_sp: event.target.value }))}
                 />
               </div>
-              <ScopeSectionEditor
-                sections={form.scope_sections}
-                disabled={!canManage}
-                onChange={(scope_sections) => setForm((current) => ({ ...current, scope_sections }))}
-              />
+              {isReleaseTemplate ? (
+                <div className="space-y-5">
+                  <TextareaField
+                    label="Введите релиз JQL"
+                    rows={3}
+                    value={form.scope_sections?.[0]?.jql ?? ""}
+                    disabled={!canManage}
+                    onChange={(event) =>
+                      setForm((current) => ({
+                        ...current,
+                        scope_sections: [
+                          {
+                            id: "release",
+                            name: "Текущий релиз",
+                            kind: "planned",
+                            order: 0,
+                            jql: event.target.value,
+                          },
+                        ],
+                      }))
+                    }
+                  />
+                  <ReleaseQueriesEditor
+                    queries={form.release_queries}
+                    disabled={!canManage}
+                    onChange={(release_queries) => setForm((current) => ({ ...current, release_queries }))}
+                  />
+                </div>
+              ) : (
+                <ScopeSectionEditor
+                  sections={form.scope_sections}
+                  disabled={!canManage}
+                  onChange={(scope_sections) => setForm((current) => ({ ...current, scope_sections }))}
+                />
+              )}
               <TextareaField
                 label="Задачи к выполнению — JQL"
                 rows={3}
@@ -1247,11 +1554,41 @@ function ScopeBoardEditorPage({
               </span>
             </summary>
             <div className="space-y-5 p-4 sm:p-6 lg:p-7">
-              <ScopeSectionEditor
-                sections={form.scope_sections}
-                disabled={!canManage}
-                onChange={(scope_sections) => setForm((current) => ({ ...current, scope_sections }))}
-              />
+              {isReleaseTemplate ? (
+                <div className="space-y-5">
+                  <TextareaField
+                    label="Введите релиз JQL"
+                    rows={3}
+                    value={form.scope_sections?.[0]?.jql ?? ""}
+                    disabled={!canManage}
+                    onChange={(event) =>
+                      setForm((current) => ({
+                        ...current,
+                        scope_sections: [
+                          {
+                            id: "release",
+                            name: "Текущий релиз",
+                            kind: "planned",
+                            order: 0,
+                            jql: event.target.value,
+                          },
+                        ],
+                      }))
+                    }
+                  />
+                  <ReleaseQueriesEditor
+                    queries={form.release_queries}
+                    disabled={!canManage}
+                    onChange={(release_queries) => setForm((current) => ({ ...current, release_queries }))}
+                  />
+                </div>
+              ) : (
+                <ScopeSectionEditor
+                  sections={form.scope_sections}
+                  disabled={!canManage}
+                  onChange={(scope_sections) => setForm((current) => ({ ...current, scope_sections }))}
+                />
+              )}
               <TextareaField
                 label="Задачи к выполнению — JQL"
                 rows={3}

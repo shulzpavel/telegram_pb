@@ -172,6 +172,16 @@ def _scope_board_row(row: asyncpg.Record) -> dict[str, Any]:
         "unplan_jql": row["unplan_jql"],
         "todo_jql": row["todo_jql"],
         "test_jql": row["test_jql"],
+        "report_type": row["report_type"] if "report_type" in row.keys() else "monthly",
+        "previous_release_jql": row["previous_release_jql"] if "previous_release_jql" in row.keys() else "",
+        "next_release_jql": row["next_release_jql"] if "next_release_jql" in row.keys() else "",
+        "custom_release_name": row["custom_release_name"] if "custom_release_name" in row.keys() else "",
+        "custom_release_jql": row["custom_release_jql"] if "custom_release_jql" in row.keys() else "",
+        "release_queries": _decode_jsonb(row["release_queries"]) if "release_queries" in row.keys() and row["release_queries"] is not None else [],
+        "release_comment": row["release_comment"] if "release_comment" in row.keys() else "",
+        "previous_release_comment": row["previous_release_comment"] if "previous_release_comment" in row.keys() else "",
+        "next_release_comment": row["next_release_comment"] if "next_release_comment" in row.keys() else "",
+        "custom_release_comment": row["custom_release_comment"] if "custom_release_comment" in row.keys() else "",
         "scope_sections": _decode_jsonb(row["scope_sections"]) if "scope_sections" in row.keys() and row["scope_sections"] is not None else None,
         "snapshot": _decode_jsonb(row["snapshot"]) if row["snapshot"] is not None else None,
         "ai_summary": _decode_jsonb(row["ai_summary"]) if "ai_summary" in row.keys() and row["ai_summary"] is not None else None,
@@ -701,6 +711,26 @@ class PostgresCmsStore:
                 ADD COLUMN IF NOT EXISTS ai_summary_history JSONB NOT NULL DEFAULT '[]'::jsonb;
             ALTER TABLE cms_scope_boards
                 ADD COLUMN IF NOT EXISTS layout_order JSONB NOT NULL DEFAULT '[]'::jsonb;
+            ALTER TABLE cms_scope_boards
+                ADD COLUMN IF NOT EXISTS report_type TEXT NOT NULL DEFAULT 'monthly';
+            ALTER TABLE cms_scope_boards
+                ADD COLUMN IF NOT EXISTS previous_release_jql TEXT NOT NULL DEFAULT '';
+            ALTER TABLE cms_scope_boards
+                ADD COLUMN IF NOT EXISTS next_release_jql TEXT NOT NULL DEFAULT '';
+            ALTER TABLE cms_scope_boards
+                ADD COLUMN IF NOT EXISTS custom_release_name TEXT NOT NULL DEFAULT '';
+            ALTER TABLE cms_scope_boards
+                ADD COLUMN IF NOT EXISTS custom_release_jql TEXT NOT NULL DEFAULT '';
+            ALTER TABLE cms_scope_boards
+                ADD COLUMN IF NOT EXISTS release_queries JSONB NOT NULL DEFAULT '[]'::jsonb;
+            ALTER TABLE cms_scope_boards
+                ADD COLUMN IF NOT EXISTS release_comment TEXT NOT NULL DEFAULT '';
+            ALTER TABLE cms_scope_boards
+                ADD COLUMN IF NOT EXISTS previous_release_comment TEXT NOT NULL DEFAULT '';
+            ALTER TABLE cms_scope_boards
+                ADD COLUMN IF NOT EXISTS next_release_comment TEXT NOT NULL DEFAULT '';
+            ALTER TABLE cms_scope_boards
+                ADD COLUMN IF NOT EXISTS custom_release_comment TEXT NOT NULL DEFAULT '';
             CREATE INDEX IF NOT EXISTS idx_cms_scope_boards_updated
                 ON cms_scope_boards(updated_at DESC, id DESC);
 
@@ -1947,7 +1977,11 @@ class PostgresCmsStore:
 
     _SCOPE_BOARD_SELECT = """
         SELECT b.id, b.name, b.month, b.capacity_sp, b.plan_jql, b.unplan_jql,
-               b.todo_jql, b.test_jql, b.scope_sections, b.snapshot,
+               b.todo_jql, b.test_jql, b.report_type, b.previous_release_jql,
+               b.next_release_jql, b.custom_release_name, b.custom_release_jql,
+               b.release_queries,
+               b.release_comment, b.previous_release_comment, b.next_release_comment, b.custom_release_comment,
+               b.scope_sections, b.snapshot,
                b.ai_summary, b.ai_summary_history, b.layout_order,
                b.created_by, b.created_at, b.updated_at, b.team_id,
                t.name AS team_name, t.slug AS team_slug,
@@ -2004,16 +2038,30 @@ class PostgresCmsStore:
         unplan_jql: str,
         todo_jql: str = "",
         test_jql: str = "",
+        report_type: str = "monthly",
+        previous_release_jql: str = "",
+        next_release_jql: str = "",
+        custom_release_name: str = "",
+        custom_release_jql: str = "",
+        release_queries: Optional[list[dict[str, Any]]] = None,
+        release_comment: str = "",
+        previous_release_comment: str = "",
+        next_release_comment: str = "",
+        custom_release_comment: str = "",
         scope_sections: Optional[list[dict[str, Any]]] = None,
-        created_by: Optional[int],
+        created_by: Optional[int] = None,
         team_id: Optional[int] = None,
     ) -> dict[str, Any]:
         async with self.pool.acquire() as conn:
             row = await conn.fetchrow(
                 """
                 INSERT INTO cms_scope_boards
-                    (name, month, capacity_sp, plan_jql, unplan_jql, todo_jql, test_jql, scope_sections, created_by, team_id)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10)
+                    (name, month, capacity_sp, plan_jql, unplan_jql, todo_jql, test_jql,
+                     report_type, previous_release_jql, next_release_jql, custom_release_name, custom_release_jql,
+                     release_queries,
+                     release_comment, previous_release_comment, next_release_comment, custom_release_comment,
+                     scope_sections, created_by, team_id)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb, $14, $15, $16, $17, $18::jsonb, $19, $20)
                 RETURNING id
                 """,
                 name.strip(),
@@ -2023,6 +2071,16 @@ class PostgresCmsStore:
                 unplan_jql.strip(),
                 todo_jql.strip(),
                 test_jql.strip(),
+                report_type.strip() or "monthly",
+                previous_release_jql.strip(),
+                next_release_jql.strip(),
+                custom_release_name.strip(),
+                custom_release_jql.strip(),
+                json.dumps(release_queries or []),
+                release_comment.strip(),
+                previous_release_comment.strip(),
+                next_release_comment.strip(),
+                custom_release_comment.strip(),
                 json.dumps(scope_sections) if scope_sections is not None else None,
                 created_by,
                 team_id,
@@ -2042,6 +2100,16 @@ class PostgresCmsStore:
         unplan_jql: str,
         todo_jql: str = "",
         test_jql: str = "",
+        report_type: str = "monthly",
+        previous_release_jql: str = "",
+        next_release_jql: str = "",
+        custom_release_name: str = "",
+        custom_release_jql: str = "",
+        release_queries: Optional[list[dict[str, Any]]] = None,
+        release_comment: str = "",
+        previous_release_comment: str = "",
+        next_release_comment: str = "",
+        custom_release_comment: str = "",
         scope_sections: Optional[list[dict[str, Any]]] = None,
     ) -> Optional[dict[str, Any]]:
         async with self.pool.acquire() as conn:
@@ -2055,7 +2123,17 @@ class PostgresCmsStore:
                     unplan_jql = $6,
                     todo_jql = $7,
                     test_jql = $8,
-                    scope_sections = $9::jsonb,
+                    report_type = $9,
+                    previous_release_jql = $10,
+                    next_release_jql = $11,
+                    custom_release_name = $12,
+                    custom_release_jql = $13,
+                    release_queries = $14::jsonb,
+                    release_comment = $15,
+                    previous_release_comment = $16,
+                    next_release_comment = $17,
+                    custom_release_comment = $18,
+                    scope_sections = $19::jsonb,
                     updated_at = NOW()
                 WHERE id = $1
                 RETURNING id
@@ -2068,7 +2146,48 @@ class PostgresCmsStore:
                 unplan_jql.strip(),
                 todo_jql.strip(),
                 test_jql.strip(),
+                report_type.strip() or "monthly",
+                previous_release_jql.strip(),
+                next_release_jql.strip(),
+                custom_release_name.strip(),
+                custom_release_jql.strip(),
+                json.dumps(release_queries or []),
+                release_comment.strip(),
+                previous_release_comment.strip(),
+                next_release_comment.strip(),
+                custom_release_comment.strip(),
                 json.dumps(scope_sections) if scope_sections is not None else None,
+            )
+        if not updated:
+            return None
+        return await self.get_scope_board(board_id)
+
+    async def update_scope_board_release_comments(
+        self,
+        board_id: int,
+        *,
+        release_comment: str = "",
+        previous_release_comment: str = "",
+        next_release_comment: str = "",
+        custom_release_comment: str = "",
+    ) -> Optional[dict[str, Any]]:
+        async with self.pool.acquire() as conn:
+            updated = await conn.fetchrow(
+                """
+                UPDATE cms_scope_boards
+                SET release_comment = $2,
+                    previous_release_comment = $3,
+                    next_release_comment = $4,
+                    custom_release_comment = $5,
+                    updated_at = NOW()
+                WHERE id = $1
+                RETURNING id
+                """,
+                board_id,
+                release_comment.strip(),
+                previous_release_comment.strip(),
+                next_release_comment.strip(),
+                custom_release_comment.strip(),
             )
         if not updated:
             return None
