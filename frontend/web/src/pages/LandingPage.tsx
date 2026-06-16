@@ -75,24 +75,24 @@ export default function LandingPage() {
         </div>
       </AutoHideAppHeader>
 
-      <section className="flex flex-1 px-4 py-5 pb-safe-5 lg:px-6">
-        <div className="mx-auto flex w-full max-w-7xl flex-col justify-center gap-5">
-          <motion.div {...enter} className="grid gap-4 lg:grid-cols-[minmax(0,0.95fr)_minmax(320px,0.55fr)] lg:items-end">
+      <section className="flex flex-1 px-4 py-10 pb-safe-8 sm:py-14 lg:px-8 lg:py-16">
+        <div className="mx-auto flex w-full max-w-7xl flex-col justify-center gap-8 lg:gap-10">
+          <motion.div {...enter} className="grid gap-6 lg:grid-cols-[minmax(0,0.95fr)_minmax(320px,0.55fr)] lg:items-end">
             <div>
               <Badge tone="info">Общая ссылка для команды</Badge>
-              <h1 className="mt-3 max-w-3xl text-balance text-3xl font-bold leading-tight tracking-tight sm:text-5xl sm:leading-[1.05]">
+              <h1 className="mt-5 max-w-3xl text-balance text-3xl font-bold leading-tight tracking-tight sm:text-5xl sm:leading-[1.05]">
                 Планирование, poker и ретро в одном месте
               </h1>
-              <p className="mt-3 max-w-2xl text-base leading-7 text-ink2 sm:text-lg">
+              <p className="mt-5 max-w-2xl text-base leading-8 text-ink2 sm:text-lg">
                 Начните с калькулятора capacity, проведите planning session и закройте цикл ретроспективой с анонимными карточками.
               </p>
             </div>
-            <div className="rounded-2xl border border-blue/20 bg-blue/10 p-4 text-sm leading-6 text-ink2 shadow-card">
+            <div className="rounded-2xl border border-blue/20 bg-blue/10 p-5 text-sm leading-7 text-ink2 shadow-card sm:p-6">
               Уже есть invite-ссылка? Откройте её напрямую — ссылки на сессии и ретро ведут сразу на нужный экран команды.
             </div>
           </motion.div>
 
-          <div className="grid gap-3 lg:grid-cols-3">
+          <div className="grid gap-5 lg:grid-cols-3">
             {ACTIONS.map((action, index) => (
               <motion.div
                 key={action.id}
@@ -107,7 +107,7 @@ export default function LandingPage() {
               >
                 <Surface
                   className={[
-                    "group flex h-full flex-col overflow-hidden p-4 transition-transform duration-200 hover:-translate-y-0.5 hover:shadow-card sm:p-5",
+                    "group flex h-full flex-col overflow-hidden p-5 transition-transform duration-200 hover:-translate-y-0.5 hover:shadow-card sm:p-6",
                     action.cta.variant === "primary" ? "border-blue/30 bg-blue/5" : "",
                   ].join(" ")}
                 >
@@ -124,15 +124,15 @@ export default function LandingPage() {
                     </span>
                   </div>
 
-                  <p className="mt-3 text-sm leading-6 text-ink2">{action.description}</p>
+                  <p className="mt-4 text-sm leading-7 text-ink2">{action.description}</p>
 
-                  <div className="mt-4 flex flex-wrap gap-2">
+                  <div className="mt-5 flex flex-wrap gap-2">
                     {action.details.map((detail) => (
                       <DetailChip key={detail} label={detail} />
                     ))}
                   </div>
 
-                  <div className="mt-auto pt-5">
+                  <div className="mt-auto pt-7">
                     <Link to={action.cta.to} className="block">
                       <Button variant={action.cta.variant} size="lg" className="w-full">
                         {action.cta.label}
@@ -160,11 +160,11 @@ export default function LandingPage() {
                   transition: { duration: 0.28, delay: 0.18, ease: [0.2, 0, 0, 1] as const },
                 })}
           >
-            <Surface className="p-3 sm:p-4">
-              <div className="grid gap-3 lg:grid-cols-[0.8fr_1fr_1fr_1fr] lg:items-center">
+            <Surface className="p-5 sm:p-6">
+              <div className="grid gap-4 lg:grid-cols-[0.8fr_1fr_1fr_1fr] lg:items-center">
                 <div>
                   <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue">Как это работает</p>
-                  <h2 className="mt-1 text-lg font-bold text-ink">Рабочий порядок</h2>
+                  <h2 className="mt-2 text-lg font-bold text-ink">Рабочий порядок</h2>
                 </div>
                 <HubStep title="Калькулятор">
                   Зафиксируйте состав команды, absences и velocity перед тем, как брать объём в спринт.
@@ -176,7 +176,7 @@ export default function LandingPage() {
                   Соберите карточки по секциям, сгруппируйте темы и сохраните action items после обсуждения.
                 </HubStep>
               </div>
-              <p className="mt-3 border-t border-line pt-3 text-sm leading-6 text-ink2">
+              <p className="mt-5 border-t border-line pt-5 text-sm leading-7 text-ink2">
                 Сначала оцените capacity команды, затем проведите planning poker по задачам и после спринта соберите ретро.
                 Для быстрых проверок есть mock demo: голосование и ретро открываются без подготовки данных.
               </p>
@@ -186,7 +186,7 @@ export default function LandingPage() {
       </section>
 
       <footer className="shrink-0 border-t border-line/70 bg-surface/50 pb-safe backdrop-blur-md">
-        <div className="mx-auto flex max-w-5xl flex-col gap-3 px-4 py-4 text-xs text-ink3 sm:flex-row sm:items-center sm:justify-between lg:px-6">
+        <div className="mx-auto flex max-w-7xl flex-col gap-3 px-4 py-5 text-xs text-ink3 sm:flex-row sm:items-center sm:justify-between lg:px-8">
           <p>Planning Poker для capacity planning, оценки задач и командных ретро.</p>
           <nav aria-label="Служебные ссылки" className="flex flex-wrap gap-4">
             <Link to="/cms" className="font-semibold text-ink2 hover:text-blue">CMS</Link>
@@ -213,9 +213,9 @@ function DetailChip({ label }: { label: string }) {
 
 function HubStep({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="rounded-xl border border-line bg-line2/70 p-3">
+    <div className="rounded-xl border border-line bg-line2/70 p-4">
       <p className="text-xs font-bold uppercase tracking-wide text-ink3">{title}</p>
-      <p className="mt-1 text-sm leading-6 text-ink2">{children}</p>
+      <p className="mt-2 text-sm leading-7 text-ink2">{children}</p>
     </div>
   );
 }
