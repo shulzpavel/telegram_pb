@@ -141,7 +141,6 @@ export function DropdownField({
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [activeValue, setActiveValue] = useState<string | null>(value || null);
-  const [spacerHeight, setSpacerHeight] = useState(0);
   const [popoverLayout, setPopoverLayout] = useState<{ left: number; top: number; width: number } | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
@@ -172,13 +171,11 @@ export function DropdownField({
     }
 
     setPopoverLayout({ left, top: triggerRect.bottom + 8, width });
-    setSpacerHeight(popover.offsetHeight + 8);
   }, []);
 
   useEffect(() => {
     if (!open) {
       setQuery("");
-      setSpacerHeight(0);
       setPopoverLayout(null);
       return;
     }
@@ -195,7 +192,6 @@ export function DropdownField({
       } else if (initialActive) {
         optionRefs.current.get(initialActive)?.focus();
       }
-      popoverRef.current?.scrollIntoView({ behavior: "smooth", block: "end", inline: "nearest" });
     });
 
     window.addEventListener("resize", layoutPopover);
@@ -378,7 +374,6 @@ export function DropdownField({
           </div>
         </div>
       ) : null}
-      {open ? <div aria-hidden="true" style={{ height: spacerHeight }} /> : null}
       <FieldMessage id={descriptionId} error={error} hint={hint} reserveSpace={reserveMessageSpace} />
     </div>
   );
