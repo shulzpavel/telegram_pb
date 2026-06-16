@@ -18,6 +18,17 @@ logger = logging.getLogger(__name__)
 PhaseSetter = Callable[[str], Awaitable[None]]
 
 
+def _slim_scope_board_for_job(board: dict[str, Any]) -> dict[str, Any]:
+    """Keep async job payloads small — the full Jira snapshot is not needed for polling."""
+    snapshot = board.get("snapshot") if isinstance(board.get("snapshot"), dict) else {}
+    return {
+        "id": board.get("id"),
+        "ai_summary": board.get("ai_summary"),
+        "ai_summary_history": board.get("ai_summary_history") or [],
+        "snapshot": {"refreshed_at": snapshot.get("refreshed_at")},
+    }
+
+
 def _background_request(app) -> SimpleNamespace:
     """Minimal request-like object for shared helpers used from background jobs."""
     return SimpleNamespace(app=app, headers={}, client=None)
@@ -46,14 +57,24 @@ async def run_scope_ai_job(
         snapshot_refreshed_at = snapshot.get("refreshed_at") if isinstance(snapshot, dict) else None
         cached = find_cached_scope_summary(board, snapshot_refreshed_at)
         if cached:
-            return {"ai_summary": cached, "board": board, "cached": True}
+            return {"ai_summary": cached, "board": _slim_scope_board_for_job(board), "cached": True}
 
         if http_session is None:
             raise LlmScopeError("AI is not configured", status_code=503)
 
         await set_phase("calling_llm")
+
+        async def notify_repair(message: str) -> None:
+            from services.voting_service.ai_jobs import update_job
+
+            await update_job(
+                redis,
+                job_id,
+                message=f"Повторная генерация: {message[:160]}",
+            )
+
         try:
-            summary = await generate_scope_analysis(http_session, board)
+            summary = await generate_scope_analysis(http_session, board, on_repair=notify_repair)
         except LlmScopeError:
             raise
 
@@ -73,7 +94,7 @@ async def run_scope_ai_job(
             actor_username,
             summary.get("health"),
         )
-        return {"ai_summary": summary, "board": updated, "cached": False}
+        return {"ai_summary": summary, "board": _slim_scope_board_for_job(updated), "cached": False}
 
     await run_phased_job(
         redis,

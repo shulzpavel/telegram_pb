@@ -155,6 +155,17 @@ class JiraServiceHttpClient(JiraClient):
             return {field_id: False for field_id in fields}
         return {str(field_id): bool(ok) for field_id, ok in results.items()}
 
+    async def update_due_date(self, issue_key: str, due_date: str) -> bool:
+        """Update Jira due date via Jira Service."""
+        url = f"{self.base_url}/api/v1/issue/{issue_key}/due-date"
+        session = await self._get_session()
+        async with session.put(url, json={"issue_key": issue_key, "due_date": due_date}) as resp:
+            if resp.status != 200:
+                body = (await resp.text())[:500]
+                raise RuntimeError(f"Jira Service returned status {resp.status}: {body}")
+            data = await resp.json()
+        return bool(data.get("success")) if isinstance(data, dict) else False
+
     async def add_issue_comment(self, issue_key: str, text: str) -> dict[str, Any]:
         """Append a comment through Jira Service."""
         url = f"{self.base_url}/api/v1/issue/{issue_key}/comment"
@@ -240,6 +251,7 @@ class JiraServiceHttpClient(JiraClient):
                     "status": issue.get("status") or {},
                     "issue_type": {"name": issue.get("issue_type") or ""},
                     "labels": issue.get("labels") or [],
+                    "epic_labels": issue.get("epic_labels") or [],
                     "created": issue.get("created"),
                     "updated": issue.get("updated"),
                     "status_changed_at": issue.get("status_changed_at"),
@@ -250,6 +262,7 @@ class JiraServiceHttpClient(JiraClient):
                     "resolution_date": issue.get("resolution_date"),
                     "parent_key": issue.get("parent_key"),
                     "epic_key": issue.get("epic_key"),
+                    "linked_epic_key": issue.get("linked_epic_key"),
                     "priority": issue.get("priority"),
                     "assignee": issue.get("assignee"),
                     "developer": issue.get("developer"),

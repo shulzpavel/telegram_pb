@@ -24,7 +24,7 @@ import {
   type ScopeBoardSnapshot,
   type ScopePriorityQueueKind,
 } from "../api/cmsClient";
-import { pollAiJob } from "../../../shared/lib/pollAiJob";
+import { AI_JOB_POLL_INTERVAL_MS, pollAiJob, SCOPE_AI_POLL_TIMEOUT_MS } from "../../../shared/lib/pollAiJob";
 import type { CmsPrincipal } from "../api/cmsTypes";
 import {
   HelpCallout,
@@ -639,7 +639,14 @@ function ScopeBoardEditorPage({
     try {
       const started = await cmsScopeApi.startAnalyze(boardId);
       const applyResult = (result: ScopeAiAnalyzeResult) => {
-        setBoard(result.board);
+        setBoard((prev) => {
+          if (!prev) return result.board;
+          return {
+            ...prev,
+            ai_summary: result.board.ai_summary ?? result.ai_summary,
+            ai_summary_history: result.board.ai_summary_history ?? prev.ai_summary_history,
+          };
+        });
         setAiSummary(result.ai_summary);
         setAiSummaryHistory(result.board.ai_summary_history ?? []);
         setSelectedAiHistoryId(null);
@@ -663,7 +670,8 @@ function ScopeBoardEditorPage({
       const result = await pollAiJob<ScopeAiAnalyzeResult>(
         () => cmsScopeApi.getAnalyzeJob(boardId, jobId),
         {
-          intervalMs: 1200,
+          intervalMs: AI_JOB_POLL_INTERVAL_MS,
+          timeoutMs: SCOPE_AI_POLL_TIMEOUT_MS,
           onProgress: (job) => setAiProgress(job.message ?? "AI готовит сводку..."),
         }
       );
@@ -766,6 +774,16 @@ function ScopeBoardEditorPage({
     [boardId, toast]
   );
 
+  const updateQueueDueDate = useCallback(
+    async (queue: ScopePriorityQueueKind, issueKey: string, dueDate: string) => {
+      if (boardId === null || Number.isNaN(boardId)) return;
+      const record = await cmsScopeApi.updateQueueIssueDueDate(boardId, queue, issueKey, dueDate);
+      setBoard(record);
+      toast.success("Срок исполнения сохранён в Jira");
+    },
+    [boardId, toast]
+  );
+
   async function handleSave() {
     const validated = validateScopeForm(form);
     if ("error" in validated) {
@@ -817,7 +835,7 @@ function ScopeBoardEditorPage({
   }
 
   return (
-    <section className="scope-board-shell space-y-5">
+    <section className="scope-board-shell min-w-0 space-y-5">
       <SectionHeader
         title={mode === "create" ? "Новый отчёт месяца" : board?.name ?? "Отчёт месяца"}
         description={
@@ -975,6 +993,7 @@ function ScopeBoardEditorPage({
                 canManage={canManage}
                 onReorderQueue={reorderQueue}
                 onAddQueueComment={addQueueComment}
+                onUpdateQueueDueDate={updateQueueDueDate}
               />
               <ScopeActivityFeed snapshot={snapshot} />
 

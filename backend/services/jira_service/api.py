@@ -72,6 +72,7 @@ class ScopeIssueResponse(BaseModel):
     status: ScopeIssueStatus = Field(default_factory=ScopeIssueStatus)
     issue_type: str = ""
     labels: list[str] = Field(default_factory=list)
+    epic_labels: list[str] = Field(default_factory=list)
     created: Optional[str] = None
     updated: Optional[str] = None
     status_changed_at: Optional[str] = None
@@ -82,6 +83,7 @@ class ScopeIssueResponse(BaseModel):
     resolution_date: Optional[str] = None
     parent_key: Optional[str] = None
     epic_key: Optional[str] = None
+    linked_epic_key: Optional[str] = None
     priority: str = ""
     assignee: str = ""
     developer: str = ""
@@ -173,6 +175,19 @@ class UpdateSPFieldsResponse(BaseModel):
     success: bool
     issue_key: str
     results: Dict[str, bool]
+
+
+class UpdateDueDateRequest(BaseModel):
+    """Request model for updating Jira due date."""
+
+    issue_key: str
+    due_date: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
+
+
+class UpdateDueDateResponse(BaseModel):
+    success: bool
+    issue_key: str
+    due_date: str
 
 
 class AddCommentRequest(BaseModel):
@@ -382,6 +397,7 @@ def _scope_issue_responses(issues: list[dict]) -> list[ScopeIssueResponse]:
                 ),
                 issue_type=str((issue.get("issue_type") or {}).get("name") or issue.get("issue_type") or ""),
                 labels=[str(label) for label in (issue.get("labels") or []) if label],
+                epic_labels=[str(label) for label in (issue.get("epic_labels") or []) if label],
                 created=issue.get("created"),
                 updated=issue.get("updated"),
                 status_changed_at=issue.get("status_changed_at"),
@@ -392,6 +408,7 @@ def _scope_issue_responses(issues: list[dict]) -> list[ScopeIssueResponse]:
                 resolution_date=issue.get("resolution_date"),
                 parent_key=issue.get("parent_key"),
                 epic_key=issue.get("epic_key"),
+                linked_epic_key=issue.get("linked_epic_key"),
                 priority=str(issue.get("priority") or ""),
                 assignee=str(issue.get("assignee") or ""),
                 developer=str(issue.get("developer") or ""),
@@ -631,6 +648,20 @@ async def update_story_points_fields(
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to update story point fields: {str(e)}")
+
+
+@router.put("/issue/{issue_key}/due-date", response_model=UpdateDueDateResponse)
+async def update_due_date(
+    issue_key: str,
+    body: UpdateDueDateRequest,
+    client: JiraServiceClient = Depends(get_jira_client),
+) -> UpdateDueDateResponse:
+    """Update Jira due date for an issue."""
+    try:
+        success = await client.update_due_date(issue_key, body.due_date)
+        return UpdateDueDateResponse(success=success, issue_key=issue_key, due_date=body.due_date)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to update due date: {str(e)}")
 
 
 @router.post("/issue/{issue_key}/comment", response_model=AddCommentResponse)

@@ -317,6 +317,10 @@ class ScopeIssueCommentRequest(BaseModel):
     text: str = Field(min_length=1, max_length=4000)
 
 
+class ScopeIssueDueDateRequest(BaseModel):
+    due_date: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
+
+
 class ScopeManualQuestionRequest(BaseModel):
     text: str = Field(min_length=1, max_length=1000)
 
@@ -1532,6 +1536,16 @@ async def _post_jira_issue_comment(issue_key: str, text: str) -> dict[str, Any]:
         await client.close()
 
 
+async def _put_jira_issue_due_date(issue_key: str, due_date: str) -> bool:
+    from app.adapters.jira_service_client import JiraServiceHttpClient
+
+    client = JiraServiceHttpClient()
+    try:
+        return await client.update_due_date(issue_key, due_date)
+    finally:
+        await client.close()
+
+
 def _scope_snapshot_has_issue(snapshot: dict[str, Any], issue_key: str) -> bool:
     target = issue_key.upper()
     for section in snapshot.get("sections") or []:
@@ -1543,6 +1557,35 @@ def _scope_snapshot_has_issue(snapshot: dict[str, Any], issue_key: str) -> bool:
             if str(issue.get("key") or "").upper() == target:
                 return True
     return False
+
+
+def _scope_snapshot_with_due_date(snapshot: dict[str, Any], *, issue_key: str, due_date: str) -> dict[str, Any]:
+    updated = copy.deepcopy(snapshot or {})
+    target = issue_key.upper()
+
+    for section in updated.get("sections") or []:
+        for issue in section.get("issues") or []:
+            if str(issue.get("key") or "").upper() == target:
+                issue["due_date"] = due_date
+
+    for section_name in ("plan_issues", "unplan_issues"):
+        for issue in updated.get(section_name) or []:
+            if str(issue.get("key") or "").upper() == target:
+                issue["due_date"] = due_date
+
+    queues = dict(updated.get("priority_queues") or {})
+    for queue_name, queue in queues.items():
+        next_queue = dict(queue or {})
+        next_issues = []
+        for issue in next_queue.get("issues") or []:
+            next_issue = dict(issue)
+            if str(next_issue.get("key") or "").upper() == target:
+                next_issue["due_date"] = due_date
+            next_issues.append(next_issue)
+        next_queue["issues"] = next_issues
+        queues[queue_name] = next_queue
+    updated["priority_queues"] = queues
+    return updated
 
 
 def _scope_snapshot_has_queue_issue(snapshot: dict[str, Any], issue_key: str, queue_kind: str) -> bool:
@@ -2520,6 +2563,52 @@ async def cms_add_scope_queue_issue_comment(
         actor.username,
         "ok",
         {"board_id": board_id, "queue": kind, "issue_key": issue_key},
+    )
+    return board
+
+
+@cms_router.put("/cms/scope-boards/{board_id}/queues/{queue_kind}/issues/{issue_key}/due-date")
+async def cms_update_scope_queue_issue_due_date(
+    board_id: int,
+    queue_kind: str,
+    issue_key: str,
+    body: ScopeIssueDueDateRequest,
+    request: Request,
+    actor: CmsPrincipal = Depends(require_permission(PERM_PLANNER_VIEW)),
+) -> dict:
+    kind = _parse_priority_queue_kind(queue_kind)
+    existing = await _get_cms_store(request).get_scope_board(board_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Scope board not found")
+    assert_record_access(actor, existing)
+
+    snapshot = existing.get("snapshot") or {}
+    if not _scope_snapshot_has_queue_issue(snapshot, issue_key, kind):
+        raise HTTPException(status_code=404, detail="Issue not found in queue")
+
+    try:
+        datetime.strptime(body.due_date, "%Y-%m-%d")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid due date") from exc
+
+    try:
+        saved = await _put_jira_issue_due_date(issue_key, body.due_date)
+    except Exception as exc:
+        logger.warning("scope queue due date Jira update failed key=%s error=%s", issue_key, exc)
+        raise HTTPException(status_code=502, detail="Срок исполнения не сохранён в Jira") from exc
+    if not saved:
+        raise HTTPException(status_code=502, detail="Срок исполнения не сохранён в Jira")
+
+    next_snapshot = _scope_snapshot_with_due_date(snapshot, issue_key=issue_key, due_date=body.due_date)
+    board = await _get_cms_store(request).save_scope_board_snapshot(board_id, next_snapshot)
+    if not board:
+        raise HTTPException(status_code=404, detail="Scope board not found")
+    await _audit(
+        request,
+        "cms.scope_board.queue_due_date_update",
+        actor.username,
+        "ok",
+        {"board_id": board_id, "queue": kind, "issue_key": issue_key, "due_date": body.due_date},
     )
     return board
 

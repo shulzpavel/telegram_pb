@@ -11,7 +11,7 @@ import os
 import json
 import logging
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Any, Awaitable, Callable, Optional
 
 import aiohttp
 
@@ -817,7 +817,12 @@ def _parse_and_validate(raw_text: str) -> dict[str, Any]:
     return _validate_scope_payload(payload)
 
 
-async def generate_scope_analysis(http_session: aiohttp.ClientSession, board: dict[str, Any]) -> dict[str, Any]:
+async def generate_scope_analysis(
+    http_session: aiohttp.ClientSession,
+    board: dict[str, Any],
+    *,
+    on_repair: Optional[Callable[[str], Awaitable[None]]] = None,
+) -> dict[str, Any]:
     """Generate and validate scope board analysis via Anthropic (strict)."""
     context = build_scope_analysis_context(board)
     open_questions = _collect_open_questions(board.get("snapshot") or {})
@@ -828,6 +833,8 @@ async def generate_scope_analysis(http_session: aiohttp.ClientSession, board: di
         return result
     except LlmScopeError as exc:
         logger.warning("scope analysis failed validation; retrying once: %s", exc.message)
+        if on_repair:
+            await on_repair(exc.message)
         retry_raw = await _call_anthropic(http_session, context, repair_error=exc.message)
         result = _parse_and_validate(retry_raw)
         _check_open_questions_assessment(result["open_questions_assessment"], open_questions)

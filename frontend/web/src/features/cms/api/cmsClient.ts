@@ -386,6 +386,7 @@ export interface ScopeBoardIssue {
   status_category: string;
   issue_type: string;
   labels: string[];
+  epic_labels?: string[];
   created?: string | null;
   updated?: string | null;
   status_changed_at?: string | null;
@@ -396,6 +397,7 @@ export interface ScopeBoardIssue {
   resolution_date?: string | null;
   parent_key?: string | null;
   epic_key?: string | null;
+  linked_epic_key?: string | null;
   priority?: string;
   assignee?: string;
   developer?: string;
@@ -846,6 +848,11 @@ export const cmsScopeApi = {
     cmsFetch<ScopeBoardRecord>(`/scope-boards/${boardId}/queues/${queue}/issues/${encodeURIComponent(issueKey)}/comment`, {
       method: "POST",
       body: JSON.stringify({ text }),
+    }),
+  updateQueueIssueDueDate: (boardId: number, queue: ScopePriorityQueueKind, issueKey: string, dueDate: string) =>
+    cmsFetch<ScopeBoardRecord>(`/scope-boards/${boardId}/queues/${queue}/issues/${encodeURIComponent(issueKey)}/due-date`, {
+      method: "PUT",
+      body: JSON.stringify({ due_date: dueDate }),
     }),
   analyze: (boardId: number, init?: { signal?: AbortSignal }) =>
     cmsFetch<{ ai_summary: ScopeAiSummary; board: ScopeBoardRecord }>(`/scope-boards/${boardId}/analyze`, {

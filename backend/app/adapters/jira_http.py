@@ -49,6 +49,14 @@ def _plan_status_field_id() -> str:
     return os.getenv("JIRA_PLAN_STATUS_FIELD", "customfield_13045").strip()
 
 
+def _due_date_field_id() -> str:
+    return os.getenv("JIRA_DUE_DATE_FIELD", "duedate").strip()
+
+
+def _due_date_fallback_field_id() -> str:
+    return os.getenv("JIRA_DUE_DATE_FALLBACK_FIELD", "customfield_10624").strip()
+
+
 def _jira_custom_field_values(raw: Any) -> list[str]:
     if raw is None:
         return []
@@ -348,6 +356,7 @@ class JiraHttpClient(JiraClient):
         "resolutiondate",
         "statuscategorychangedate",
         "parent",
+        "issuelinks",
         "customfield_10013",  # Epic Link
         "customfield_10018",  # Sprint
         "customfield_10001",  # Team
@@ -357,6 +366,7 @@ class JiraHttpClient(JiraClient):
         "customfield_10020",  # Request Type
         "customfield_10100",  # Checklist Progress %
         "customfield_10030",  # Story point estimate
+        "customfield_10624",  # Due date fallback / "Срок исполнения"
         "customfield_11242",  # Story points (alt)
         "customfield_11407",  # Story Points_ plan
         "customfield_11408",  # Story Points_ fact
@@ -377,7 +387,13 @@ class JiraHttpClient(JiraClient):
         from config import JIRA_SP_BACK_FIELD, JIRA_SP_FRONT_FIELD, JIRA_SP_QA_FIELD
 
         fields = [*self._SCOPE_SEARCH_FIELDS, self.story_points_field, "key"]
-        for field_id in (_plan_status_field_id(), _plan_change_reason_field_id(), "customfield_13401"):
+        for field_id in (
+            _plan_status_field_id(),
+            _plan_change_reason_field_id(),
+            _due_date_field_id(),
+            _due_date_fallback_field_id(),
+            "customfield_13401",
+        ):
             if field_id and field_id not in fields:
                 fields.append(field_id)
         for field_id in (JIRA_SP_FRONT_FIELD, JIRA_SP_BACK_FIELD, JIRA_SP_QA_FIELD):
@@ -447,6 +463,47 @@ class JiraHttpClient(JiraClient):
                 }
         return {"issues": [], "maxResults": max_results, "truncated": False}
 
+    async def _fetch_issue_labels_by_key(self, keys: list[str]) -> dict[str, list[str]]:
+        unique_keys = sorted({key.strip() for key in keys if key and key.strip()})
+        if not unique_keys:
+            return {}
+
+        labels_by_key: dict[str, list[str]] = {}
+        for key in unique_keys:
+            result = await self._make_request(
+                "GET",
+                f"issue/{quote(key, safe='')}?fields=labels",
+                api_versions=["3", "2"],
+            )
+            fields = result.get("fields") if isinstance(result, dict) and isinstance(result.get("fields"), dict) else {}
+            labels_by_key[key] = [str(label) for label in (fields.get("labels") or []) if label]
+        return labels_by_key
+
+    @staticmethod
+    def _scope_child_of_epic_key(fields: dict[str, Any]) -> str:
+        links = fields.get("issuelinks")
+        if not isinstance(links, list):
+            return ""
+        for link in links:
+            if not isinstance(link, dict):
+                continue
+            link_type = link.get("type") if isinstance(link.get("type"), dict) else {}
+            candidates = (
+                ("outward", link.get("outwardIssue")),
+                ("inward", link.get("inwardIssue")),
+            )
+            for direction, linked_issue in candidates:
+                relation = str(link_type.get(direction) or "").strip().lower()
+                if "child of" not in relation or not isinstance(linked_issue, dict):
+                    continue
+                linked_fields = linked_issue.get("fields") if isinstance(linked_issue.get("fields"), dict) else {}
+                linked_type = linked_fields.get("issuetype") if isinstance(linked_fields.get("issuetype"), dict) else {}
+                type_name = str(linked_type.get("name") or "").strip().lower()
+                if type_name and type_name not in {"epic", "эпик"}:
+                    continue
+                return str(linked_issue.get("key") or "")
+        return ""
+
     async def _hydrate_legacy_issue_rows(
         self,
         issues: List[Dict[str, Any]],
@@ -462,7 +519,12 @@ class JiraHttpClient(JiraClient):
             issue_id = issue.get("id")
             if not issue_id:
                 continue
-            detail = await self._make_request("GET", f"issue/{issue_id}", api_versions=["3", "2"])
+            fields = quote(",".join(self._scope_search_field_ids()), safe=",")
+            detail = await self._make_request(
+                "GET",
+                f"issue/{issue_id}?fields={fields}",
+                api_versions=["3", "2"],
+            )
             if detail:
                 detailed.append(detail)
         return detailed
@@ -521,6 +583,8 @@ class JiraHttpClient(JiraClient):
 
         from config import JIRA_SP_BACK_FIELD, JIRA_SP_FRONT_FIELD, JIRA_SP_QA_FIELD
 
+        linked_epic_key = self._scope_child_of_epic_key(fields)
+
         return {
             "key": issue_key,
             "summary": summary,
@@ -544,11 +608,12 @@ class JiraHttpClient(JiraClient):
             "created": fields.get("created"),
             "updated": fields.get("updated"),
             "status_changed_at": fields.get("statuscategorychangedate"),
-            "due_date": fields.get("duedate"),
+            "due_date": fields.get("duedate") or fields.get(_due_date_field_id()) or fields.get(_due_date_fallback_field_id()),
             "resolution": resolution_field.get("name") or "",
             "resolution_date": fields.get("resolutiondate"),
             "parent_key": parent_field.get("key") or "",
             "epic_key": fields.get("customfield_10013") or "",
+            "linked_epic_key": linked_epic_key,
             "priority": priority_field.get("name") or "",
             "assignee": assignee_field.get("displayName") or "",
             "reporter": reporter_field.get("displayName") or "",
@@ -815,6 +880,15 @@ class JiraHttpClient(JiraClient):
                 if (parsed := self._scope_issue_from_raw(issue))
             ]
             if issues:
+                epic_labels = await self._fetch_issue_labels_by_key(
+                    [
+                        str(issue.get("linked_epic_key") or issue.get("epic_key") or issue.get("parent_key") or "")
+                        for issue in issues
+                    ]
+                )
+                for issue in issues:
+                    epic_key = str(issue.get("linked_epic_key") or issue.get("epic_key") or issue.get("parent_key") or "")
+                    issue["epic_labels"] = epic_labels.get(epic_key, [])
                 subtasks_by_parent = await self._fetch_subtasks_by_parent([str(issue.get("key") or "") for issue in issues])
                 for issue in issues:
                     issue["_subtasks"] = subtasks_by_parent.get(str(issue.get("key") or ""), [])
@@ -959,6 +1033,13 @@ class JiraHttpClient(JiraClient):
             result = await self._make_request("PUT", f"issue/{issue_key}", payload, api_versions=["3", "2"])
             results[field_id] = result is not None
         return results
+
+    async def update_due_date(self, issue_key: str, due_date: str) -> bool:
+        """Update Jira due date field with an ISO calendar date."""
+        field_id = _due_date_field_id()
+        payload = {"fields": {field_id: due_date}}
+        result = await self._make_request("PUT", f"issue/{issue_key}", payload, api_versions=["3", "2"])
+        return result is not None
 
     async def add_issue_comment(self, issue_key: str, text: str) -> Optional[Dict[str, Any]]:
         """Append a plain-text comment to a Jira issue."""

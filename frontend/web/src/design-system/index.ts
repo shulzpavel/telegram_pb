@@ -28,3 +28,4 @@ export { DeferredFallback, RouteTransition } from "./RouteTransition";
 export { AiIntelligenceSurface, AiSparkleIcon, AiSparklePill } from "./AiIntelligenceSurface";
 export { AiSparkleButton } from "./AiSparkleButton";
 export { AiGenerationProgress } from "./AiGenerationProgress";
+export { DatePickerPopover } from "./DatePickerPopover";
