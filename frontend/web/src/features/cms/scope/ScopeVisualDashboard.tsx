@@ -212,7 +212,7 @@ function DataQualityDetailsBlock({ details }: { details: ScopeDataQualityDetails
           </svg>
         </span>
       </summary>
-      <div className="grid gap-4 pt-4 text-sm lg:grid-cols-2">
+      <div className="grid gap-4 px-4 pb-4 pt-4 text-sm sm:px-5 sm:pb-5 lg:grid-cols-2">
         <QualityIssueList
           title="Без SP"
           emptyText="Все задачи оценены."

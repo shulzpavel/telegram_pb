@@ -313,6 +313,53 @@ class ScopeBoardUpdateRequest(BaseModel):
     test_jql: str = Field(default="", max_length=4000)
 
 
+class ScopeBoardLayoutRequest(BaseModel):
+    layout_order: list[str] = Field(min_length=1, max_length=20)
+
+
+SCOPE_LAYOUT_BLOCK_KEYS = frozenset({
+    "topItems",
+    "capacity",
+    "roleWorkload",
+    "planInsights",
+    "aiSummary",
+    "report",
+    "priorityQueues",
+    "activity",
+    "snapshotSections",
+    "settings",
+})
+
+DEFAULT_SCOPE_LAYOUT_ORDER = [
+    "topItems",
+    "capacity",
+    "roleWorkload",
+    "planInsights",
+    "aiSummary",
+    "report",
+    "priorityQueues",
+    "activity",
+    "snapshotSections",
+    "settings",
+]
+
+
+def _normalize_scope_layout_order(layout_order: list[str]) -> list[str]:
+    cleaned: list[str] = []
+    seen: set[str] = set()
+    for item in layout_order:
+        key = str(item).strip()
+        if not key or key not in SCOPE_LAYOUT_BLOCK_KEYS or key in seen:
+            continue
+        cleaned.append(key)
+        seen.add(key)
+    for key in DEFAULT_SCOPE_LAYOUT_ORDER:
+        if key not in seen:
+            cleaned.append(key)
+            seen.add(key)
+    return cleaned
+
+
 class ScopeIssueCommentRequest(BaseModel):
     text: str = Field(min_length=1, max_length=4000)
 
@@ -1933,6 +1980,36 @@ async def cms_get_scope_board(
     if not board:
         raise HTTPException(status_code=404, detail="Scope board not found")
     assert_record_access(actor, board)
+    return board
+
+
+@cms_router.patch("/cms/scope-boards/{board_id}/layout")
+@cms_router.patch("/cms/scope-boards/{board_id}/layout/")
+async def cms_update_scope_board_layout(
+    board_id: int,
+    body: ScopeBoardLayoutRequest,
+    request: Request,
+    actor: CmsPrincipal = Depends(require_permission(PERM_PLANNER_VIEW)),
+) -> dict:
+    existing = await _get_cms_store(request).get_scope_board(board_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Scope board not found")
+    assert_record_access(actor, existing)
+
+    normalized = _normalize_scope_layout_order(body.layout_order)
+    try:
+        board = await _get_cms_store(request).update_scope_board_layout(board_id, normalized)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not board:
+        raise HTTPException(status_code=404, detail="Scope board not found")
+    await _audit(
+        request,
+        "cms.scope_board.layout_update",
+        actor.username,
+        "ok",
+        {"board_id": board_id},
+    )
     return board
 
 

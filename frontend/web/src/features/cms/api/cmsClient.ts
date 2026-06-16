@@ -754,6 +754,7 @@ export interface ScopeBoardRecord {
   snapshot: ScopeBoardSnapshot | null;
   ai_summary: ScopeAiSummary | null;
   ai_summary_history?: ScopeAiHistoryEntry[];
+  layout_order?: string[];
   team_id: number | null;
   team: { id: number; slug?: string; name?: string } | null;
   created_by: number | null;
@@ -796,6 +797,11 @@ export const cmsScopeApi = {
     cmsFetch<ScopeBoardRecord>(`/scope-boards/${boardId}`, {
       method: "PATCH",
       body: JSON.stringify(body),
+    }),
+  updateLayout: (boardId: number, layoutOrder: string[]) =>
+    cmsFetch<ScopeBoardRecord>(`/scope-boards/${boardId}/layout`, {
+      method: "PATCH",
+      body: JSON.stringify({ layout_order: layoutOrder }),
     }),
   refresh: (boardId: number) =>
     cmsFetch<ScopeBoardRecord>(`/scope-boards/${boardId}/refresh`, {

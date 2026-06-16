@@ -176,6 +176,7 @@ def _scope_board_row(row: asyncpg.Record) -> dict[str, Any]:
         "snapshot": _decode_jsonb(row["snapshot"]) if row["snapshot"] is not None else None,
         "ai_summary": _decode_jsonb(row["ai_summary"]) if "ai_summary" in row.keys() and row["ai_summary"] is not None else None,
         "ai_summary_history": _decode_jsonb(row["ai_summary_history"]) if "ai_summary_history" in row.keys() and row["ai_summary_history"] is not None else [],
+        "layout_order": _decode_jsonb(row["layout_order"]) if "layout_order" in row.keys() and row["layout_order"] is not None else [],
         "created_by": int(row["created_by"]) if row["created_by"] is not None else None,
         "created_by_username": row["created_by_username"] if "created_by_username" in row.keys() else None,
         "created_by_display_name": row["created_by_display_name"] if "created_by_display_name" in row.keys() else None,
@@ -698,6 +699,8 @@ class PostgresCmsStore:
                 ADD COLUMN IF NOT EXISTS ai_summary JSONB;
             ALTER TABLE cms_scope_boards
                 ADD COLUMN IF NOT EXISTS ai_summary_history JSONB NOT NULL DEFAULT '[]'::jsonb;
+            ALTER TABLE cms_scope_boards
+                ADD COLUMN IF NOT EXISTS layout_order JSONB NOT NULL DEFAULT '[]'::jsonb;
             CREATE INDEX IF NOT EXISTS idx_cms_scope_boards_updated
                 ON cms_scope_boards(updated_at DESC, id DESC);
 
@@ -1945,7 +1948,7 @@ class PostgresCmsStore:
     _SCOPE_BOARD_SELECT = """
         SELECT b.id, b.name, b.month, b.capacity_sp, b.plan_jql, b.unplan_jql,
                b.todo_jql, b.test_jql, b.scope_sections, b.snapshot,
-               b.ai_summary, b.ai_summary_history,
+               b.ai_summary, b.ai_summary_history, b.layout_order,
                b.created_by, b.created_at, b.updated_at, b.team_id,
                t.name AS team_name, t.slug AS team_slug,
                a.username AS created_by_username,
@@ -2066,6 +2069,36 @@ class PostgresCmsStore:
                 todo_jql.strip(),
                 test_jql.strip(),
                 json.dumps(scope_sections) if scope_sections is not None else None,
+            )
+        if not updated:
+            return None
+        return await self.get_scope_board(board_id)
+
+    async def update_scope_board_layout(
+        self,
+        board_id: int,
+        layout_order: list[str],
+    ) -> Optional[dict[str, Any]]:
+        if not isinstance(layout_order, list):
+            raise ValueError("layout_order must be a list")
+        cleaned: list[str] = []
+        for item in layout_order:
+            if not isinstance(item, str):
+                raise ValueError("layout_order items must be strings")
+            key = item.strip()
+            if not key:
+                raise ValueError("layout_order items must be non-empty strings")
+            cleaned.append(key)
+        async with self.pool.acquire() as conn:
+            updated = await conn.fetchrow(
+                """
+                UPDATE cms_scope_boards
+                SET layout_order = $2::jsonb, updated_at = NOW()
+                WHERE id = $1
+                RETURNING id
+                """,
+                board_id,
+                json.dumps(cleaned),
             )
         if not updated:
             return None

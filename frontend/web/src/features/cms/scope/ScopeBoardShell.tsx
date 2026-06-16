@@ -1,6 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Navigate, Route, Routes, useNavigate, useParams } from "react-router-dom";
 import {
+  DndContext,
+  KeyboardSensor,
+  PointerSensor,
+  closestCenter,
+  type DragEndEvent,
+  useSensor,
+  useSensors,
+} from "@dnd-kit/core";
+import { SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy } from "@dnd-kit/sortable";
+import {
   Alert,
   AiGenerationProgress,
   AiSparkleButton,
@@ -63,6 +73,13 @@ import { ScopeSectionEditor } from "./ScopeSectionEditor";
 import { ScopeAssigneeCharts } from "./ScopeAssigneeCharts";
 import { ScopePlanInsights, planChangeReasonLabel } from "./scopePlanInsights";
 import { ScopeVisualDashboard, type ScopeDataQualityDetails, type ScopeReportSummary } from "./ScopeVisualDashboard";
+import { SortableScopeBlock } from "./SortableScopeBlock";
+import {
+  DEFAULT_SCOPE_LAYOUT_ORDER,
+  mergeScopeLayoutOrder,
+  reorderScopeLayoutOrder,
+  type ScopeLayoutBlockKey,
+} from "./scopeLayoutOrder";
 import {
   defaultScopeSections,
   normalizeScopeSectionOrder,
@@ -522,6 +539,8 @@ function ScopeBoardEditorPage({
   const [aiPanelOpenSignal, setAiPanelOpenSignal] = useState(0);
   const [form, setForm] = useState<ScopeBoardForm>(defaultForm);
   const [savedForm, setSavedForm] = useState<ScopeBoardForm>(defaultForm);
+  const [layoutOrder, setLayoutOrder] = useState<ScopeLayoutBlockKey[]>(DEFAULT_SCOPE_LAYOUT_ORDER);
+  const [layoutDragging, setLayoutDragging] = useState(false);
   const printRootRef = useRef<HTMLDivElement>(null);
   const aiReportRef = useRef<HTMLDivElement>(null);
 
@@ -553,6 +572,10 @@ function ScopeBoardEditorPage({
       void loadBoard();
     }
   }, [loadBoard, mode]);
+
+  useEffect(() => {
+    setLayoutOrder(mergeScopeLayoutOrder(board?.layout_order));
+  }, [board?.layout_order]);
 
   const persistBoardConfig = useCallback(async (): Promise<ScopeBoardRecord | null> => {
     if (mode !== "edit" || boardId === null || Number.isNaN(boardId) || !canManage) {
@@ -830,6 +853,224 @@ function ScopeBoardEditorPage({
     ? new Date(snapshot.refreshed_at).toLocaleString("ru-RU", { dateStyle: "short", timeStyle: "short" })
     : null;
 
+  const visibleBlockKeys = useMemo((): ScopeLayoutBlockKey[] => {
+    if (mode !== "edit" || !snapshot || !metrics) return [];
+    const keys: ScopeLayoutBlockKey[] = ["topItems", "capacity", "roleWorkload", "planInsights"];
+    if (aiSummary || aiSummaryHistory.length > 0) keys.push("aiSummary");
+    keys.push("report", "priorityQueues", "activity", "snapshotSections", "settings");
+    return keys;
+  }, [aiSummary, aiSummaryHistory.length, metrics, mode, snapshot]);
+
+  const visibleLayoutOrder = useMemo(
+    () => mergeScopeLayoutOrder(layoutOrder, visibleBlockKeys),
+    [layoutOrder, visibleBlockKeys],
+  );
+
+  const layoutSensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+
+  const handleLayoutDragEnd = useCallback(
+    async (event: DragEndEvent) => {
+      setLayoutDragging(false);
+      if (!canManage || boardId === null || Number.isNaN(boardId)) return;
+      const { active, over } = event;
+      if (!over || active.id === over.id) return;
+
+      const previousOrder = layoutOrder;
+      const nextOrder = reorderScopeLayoutOrder(
+        layoutOrder,
+        visibleBlockKeys,
+        String(active.id),
+        String(over.id),
+      );
+      setLayoutOrder(nextOrder);
+      setBoard((current) => (current ? { ...current, layout_order: nextOrder } : current));
+
+      try {
+        const updated = await cmsScopeApi.updateLayout(boardId, nextOrder);
+        setBoard(updated);
+        setLayoutOrder(mergeScopeLayoutOrder(updated.layout_order));
+      } catch (err) {
+        setLayoutOrder(previousOrder);
+        setBoard((current) => (current ? { ...current, layout_order: previousOrder } : current));
+        toast.error(err instanceof Error ? err.message : "Не удалось сохранить порядок блоков.");
+      }
+    },
+    [boardId, canManage, layoutOrder, toast, visibleBlockKeys],
+  );
+
+  function renderScopeLayoutBlock(key: ScopeLayoutBlockKey) {
+    if (!snapshot || !metrics) return null;
+
+    switch (key) {
+      case "topItems":
+        return (
+          <ScopeTopItemsSection
+            snapshot={snapshot}
+            canManage={canManage}
+            onAddItem={addTopItem}
+            onRemoveItem={removeTopItem}
+          />
+        );
+      case "capacity":
+        return (
+          <ScopeVisualDashboard
+            metrics={metrics}
+            reportSummary={reportSummary ?? undefined}
+            dataQualityDetails={dataQualityDetails ?? undefined}
+          />
+        );
+      case "roleWorkload":
+        return <ScopeAssigneeCharts metrics={metrics} />;
+      case "planInsights":
+        return <ScopePlanInsights metrics={metrics} />;
+      case "aiSummary":
+        return (
+          <div ref={aiReportRef} className="scroll-mt-24 space-y-3">
+            {analyzing && aiProgress ? <AiGenerationProgress message={aiProgress} /> : null}
+            <ScopeAiPanel
+              summary={aiSummary}
+              history={aiSummaryHistory}
+              selectedHistoryId={selectedAiHistoryId}
+              onSelectHistory={setSelectedAiHistoryId}
+              metrics={metrics}
+              openQuestionsCount={resolveOpenQuestions(snapshot).length}
+              autoOpenSignal={aiPanelOpenSignal}
+            />
+          </div>
+        );
+      case "report":
+        return (
+          <ScopeReportSection
+            snapshot={snapshot}
+            canManage={canManage}
+            showTechnicalFields
+            onAddQuestion={addManualQuestion}
+            onResolveQuestion={resolveQuestion}
+          />
+        );
+      case "priorityQueues":
+        return (
+          <ScopePriorityQueuesSection
+            snapshot={snapshot}
+            todoJql={board?.todo_jql ?? form.todo_jql}
+            testJql={board?.test_jql ?? form.test_jql}
+            canManage={canManage}
+            onReorderQueue={reorderQueue}
+            onAddQueueComment={addQueueComment}
+            onUpdateQueueDueDate={updateQueueDueDate}
+          />
+        );
+      case "activity":
+        return <ScopeActivityFeed snapshot={snapshot} />;
+      case "snapshotSections":
+        return (
+          <div className="space-y-4">
+            {metrics.plan_count + metrics.unplan_count === 0 ? (
+              <Alert tone="warning" title="Jira вернул 0 задач">
+                Проверьте JQL в настройках.
+              </Alert>
+            ) : null}
+            {resolveSnapshotSections(snapshot).map((section) => {
+              const sectionMetrics = metrics.sections?.find((item) => item.id === section.id);
+              return (
+                <details key={section.id} className="scope-collapsible-card group overflow-hidden rounded-lg bg-surface">
+                  <summary className="scope-section-header flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 marker:content-none sm:px-5">
+                    <div>
+                      <p className="text-base font-semibold text-ink">
+                        {section.name} · {sectionMetrics?.count ?? section.issues.length} задач
+                      </p>
+                      {sectionMetrics?.by_status && Object.keys(sectionMetrics.by_status).length > 0 ? (
+                        <p className="scope-section-header-subtitle mt-1 text-sm">
+                          {Object.entries(sectionMetrics.by_status)
+                            .map(([status, count]) => `${status}: ${count}`)
+                            .join(" · ")}
+                        </p>
+                      ) : null}
+                      <p className="scope-section-header-subtitle mt-1 text-xs">
+                        Полный список задач, полученный по JQL-фильтру. На его основе собираются метрики и отчёт.
+                      </p>
+                    </div>
+                    <span className="scope-section-header-icon inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-transform group-open:rotate-180">
+                      <svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4" aria-hidden="true">
+                        <path d="M5.23 7.21a.75.75 0 0 1 1.06.02L10 11.17l3.71-3.94a.75.75 0 1 1 1.08 1.04l-4.25 4.5a.75.75 0 0 1-1.08 0l-4.25-4.5a.75.75 0 0 1 .02-1.06z" />
+                      </svg>
+                    </span>
+                  </summary>
+                  <ScopeTasksSection
+                    title={section.name}
+                    issues={section.issues}
+                    byStatus={sectionMetrics?.by_status ?? {}}
+                    showTechnicalFields
+                    embedded
+                  />
+                </details>
+              );
+            })}
+          </div>
+        );
+      case "settings":
+        return (
+          <details className="scope-collapsible-card scope-no-print group overflow-hidden rounded-lg bg-surface">
+            <summary className="scope-section-header flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-sm font-semibold text-ink marker:content-none sm:px-5">
+              <span>⚙ Настройки и JQL</span>
+              <span className="scope-section-header-icon inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-transform group-open:rotate-180">
+                <svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4" aria-hidden="true">
+                  <path d="M5.23 7.21a.75.75 0 0 1 1.06.02L10 11.17l3.71-3.94a.75.75 0 1 1 1.08 1.04l-4.25 4.5a.75.75 0 0 1-1.08 0l-4.25-4.5a.75.75 0 0 1 .02-1.06z" />
+                </svg>
+              </span>
+            </summary>
+            <div className="space-y-5 p-4 sm:p-6 lg:p-7">
+              <div className="grid gap-4 md:grid-cols-2">
+                <TextField
+                  label="Название"
+                  value={form.name}
+                  disabled={!canManage}
+                  onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
+                />
+                <TextField
+                  label="Месяц (YYYY-MM)"
+                  value={form.month}
+                  disabled={!canManage}
+                  onChange={(event) => setForm((current) => ({ ...current, month: event.target.value }))}
+                />
+                <TextField
+                  label="Capacity (SP)"
+                  inputMode="decimal"
+                  value={form.capacity_sp}
+                  disabled={!canManage}
+                  onChange={(event) => setForm((current) => ({ ...current, capacity_sp: event.target.value }))}
+                />
+              </div>
+              <ScopeSectionEditor
+                sections={form.scope_sections}
+                disabled={!canManage}
+                onChange={(scope_sections) => setForm((current) => ({ ...current, scope_sections }))}
+              />
+              <TextareaField
+                label="Задачи к выполнению — JQL"
+                rows={3}
+                value={form.todo_jql}
+                disabled={!canManage}
+                onChange={(event) => setForm((current) => ({ ...current, todo_jql: event.target.value }))}
+              />
+              <TextareaField
+                label="Задачи к тестированию — JQL"
+                rows={3}
+                value={form.test_jql}
+                disabled={!canManage}
+                onChange={(event) => setForm((current) => ({ ...current, test_jql: event.target.value }))}
+              />
+            </div>
+          </details>
+        );
+      default:
+        return null;
+    }
+  }
+
   if (mode === "edit" && (boardId === null || Number.isNaN(boardId))) {
     return <Navigate to=".." replace />;
   }
@@ -940,126 +1181,72 @@ function ScopeBoardEditorPage({
           ) : null}
 
           {mode === "edit" && snapshot && metrics ? (
-            <div ref={printRootRef} className="scope-report-print-root space-y-5">
-              <div className="scope-print-cover hidden">
-                <h1 className="text-xl font-bold text-ink">{board?.name ?? "Отчёт месяца"}</h1>
-                <p className="mt-1 text-sm text-ink3">
-                  {board ? (
-                    <>
-                      Месяц {formatScopeDisplayMonth(board.month)}
-                      {snapshotRefreshedLabel ? ` · Snapshot Jira: ${snapshotRefreshedLabel}` : null}
-                    </>
-                  ) : null}
-                </p>
-              </div>
-              <ScopeTopItemsSection
-                snapshot={snapshot}
-                canManage={canManage}
-                onAddItem={addTopItem}
-                onRemoveItem={removeTopItem}
-              />
-              <ScopeVisualDashboard
-                metrics={metrics}
-                reportSummary={reportSummary ?? undefined}
-                dataQualityDetails={dataQualityDetails ?? undefined}
-              />
-              <ScopeAssigneeCharts metrics={metrics} />
-              <ScopePlanInsights metrics={metrics} />
-              <div ref={aiReportRef} className="scroll-mt-24 space-y-3">
-                {analyzing && aiProgress ? <AiGenerationProgress message={aiProgress} /> : null}
-                {(aiSummary || aiSummaryHistory.length > 0) ? (
-                  <ScopeAiPanel
-                    summary={aiSummary}
-                    history={aiSummaryHistory}
-                    selectedHistoryId={selectedAiHistoryId}
-                    onSelectHistory={setSelectedAiHistoryId}
-                    metrics={metrics}
-                    openQuestionsCount={resolveOpenQuestions(snapshot).length}
-                    autoOpenSignal={aiPanelOpenSignal}
-                  />
+            canManage ? (
+              <DndContext
+                sensors={layoutSensors}
+                collisionDetection={closestCenter}
+                onDragStart={() => setLayoutDragging(true)}
+                onDragEnd={(event) => void handleLayoutDragEnd(event)}
+                onDragCancel={() => setLayoutDragging(false)}
+              >
+                {layoutDragging ? (
+                  <div className="scope-no-print pointer-events-none fixed inset-0 z-20 bg-bg/10 backdrop-blur-[2px]" />
                 ) : null}
+                <div ref={printRootRef} className="scope-report-print-root space-y-5">
+                  <div className="scope-print-cover hidden">
+                    <h1 className="text-xl font-bold text-ink">{board?.name ?? "Отчёт месяца"}</h1>
+                    <p className="mt-1 text-sm text-ink3">
+                      {board ? (
+                        <>
+                          Месяц {formatScopeDisplayMonth(board.month)}
+                          {snapshotRefreshedLabel ? ` · Snapshot Jira: ${snapshotRefreshedLabel}` : null}
+                        </>
+                      ) : null}
+                    </p>
+                  </div>
+                  <SortableContext items={visibleLayoutOrder} strategy={verticalListSortingStrategy}>
+                    {visibleLayoutOrder.map((key) => (
+                      <SortableScopeBlock key={key} id={key} canDrag>
+                        {renderScopeLayoutBlock(key)}
+                      </SortableScopeBlock>
+                    ))}
+                  </SortableContext>
+                </div>
+              </DndContext>
+            ) : (
+              <div ref={printRootRef} className="scope-report-print-root space-y-5">
+                <div className="scope-print-cover hidden">
+                  <h1 className="text-xl font-bold text-ink">{board?.name ?? "Отчёт месяца"}</h1>
+                  <p className="mt-1 text-sm text-ink3">
+                    {board ? (
+                      <>
+                        Месяц {formatScopeDisplayMonth(board.month)}
+                        {snapshotRefreshedLabel ? ` · Snapshot Jira: ${snapshotRefreshedLabel}` : null}
+                      </>
+                    ) : null}
+                  </p>
+                </div>
+                {visibleLayoutOrder.map((key) => (
+                  <div key={key}>{renderScopeLayoutBlock(key)}</div>
+                ))}
               </div>
-              <ScopeReportSection
-                snapshot={snapshot}
-                canManage={canManage}
-                showTechnicalFields
-                onAddQuestion={addManualQuestion}
-                onResolveQuestion={resolveQuestion}
-              />
-              <ScopePriorityQueuesSection
-                snapshot={snapshot}
-                todoJql={board?.todo_jql ?? form.todo_jql}
-                testJql={board?.test_jql ?? form.test_jql}
-                canManage={canManage}
-                onReorderQueue={reorderQueue}
-                onAddQueueComment={addQueueComment}
-                onUpdateQueueDueDate={updateQueueDueDate}
-              />
-              <ScopeActivityFeed snapshot={snapshot} />
-
-              <div className="space-y-3">
-                {metrics.plan_count + metrics.unplan_count === 0 ? (
-                  <Alert tone="warning" title="Jira вернул 0 задач">
-                    Проверьте JQL в настройках.
-                  </Alert>
-                ) : null}
-                {resolveSnapshotSections(snapshot).map((section) => {
-                  const sectionMetrics = metrics.sections?.find((item) => item.id === section.id);
-                  return (
-                    <details key={section.id} className="rounded-lg border border-line bg-surface">
-                      <summary className="cursor-pointer list-none px-4 py-3 text-sm font-semibold text-ink marker:content-none sm:px-5">
-                        {section.name} · {sectionMetrics?.count ?? section.issues.length} задач
-                        {sectionMetrics?.by_status && Object.keys(sectionMetrics.by_status).length > 0 ? (
-                          <span className="mt-1 block text-xs font-normal text-ink3">
-                            {Object.entries(sectionMetrics.by_status)
-                              .map(([status, count]) => `${status}: ${count}`)
-                              .join(" · ")}
-                          </span>
-                        ) : null}
-                      </summary>
-                      <ScopeTasksSection
-                        title={section.name}
-                        issues={section.issues}
-                        byStatus={sectionMetrics?.by_status ?? {}}
-                        showTechnicalFields
-                        embedded
-                      />
-                    </details>
-                  );
-                })}
-              </div>
-            </div>
+            )
           ) : null}
 
-          <details className="scope-no-print group rounded-lg border border-line bg-surface" open={mode === "create"}>
-            <summary className="cursor-pointer list-none px-4 py-3 text-sm font-semibold text-ink marker:content-none sm:px-5">
-              <span className="group-open:hidden">⚙ Настройки и JQL</span>
-              <span className="hidden group-open:inline">⚙ Настройки и JQL</span>
+          {mode === "create" ? (
+            <details className="scope-collapsible-card scope-no-print group overflow-hidden rounded-lg bg-surface" open>
+            <summary className="scope-section-header flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-sm font-semibold text-ink marker:content-none sm:px-5">
+              <span>
+                <span className="group-open:hidden">⚙ Настройки и JQL</span>
+                <span className="hidden group-open:inline">⚙ Настройки и JQL</span>
+              </span>
+              <span className="scope-section-header-icon inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-transform group-open:rotate-180">
+                <svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4" aria-hidden="true">
+                  <path d="M5.23 7.21a.75.75 0 0 1 1.06.02L10 11.17l3.71-3.94a.75.75 0 1 1 1.08 1.04l-4.25 4.5a.75.75 0 0 1-1.08 0l-4.25-4.5a.75.75 0 0 1 .02-1.06z" />
+                </svg>
+              </span>
             </summary>
-            <div className="space-y-4 border-t border-line px-4 py-4 sm:px-5">
-              {mode === "edit" ? (
-                <div className="grid gap-4 md:grid-cols-2">
-                  <TextField
-                    label="Название"
-                    value={form.name}
-                    disabled={!canManage}
-                    onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
-                  />
-                  <TextField
-                    label="Месяц (YYYY-MM)"
-                    value={form.month}
-                    disabled={!canManage}
-                    onChange={(event) => setForm((current) => ({ ...current, month: event.target.value }))}
-                  />
-                  <TextField
-                    label="Capacity (SP)"
-                    inputMode="decimal"
-                    value={form.capacity_sp}
-                    disabled={!canManage}
-                    onChange={(event) => setForm((current) => ({ ...current, capacity_sp: event.target.value }))}
-                  />
-                </div>
-              ) : null}
+            <div className="space-y-5 p-4 sm:p-6 lg:p-7">
               <ScopeSectionEditor
                 sections={form.scope_sections}
                 disabled={!canManage}
@@ -1081,6 +1268,7 @@ function ScopeBoardEditorPage({
               />
             </div>
           </details>
+          ) : null}
 
           {mode === "edit" && !metrics ? (
             <EmptyState
@@ -1127,7 +1315,7 @@ function ScopeTasksSection({
       <p className="px-4 py-6 text-sm text-ink3 sm:px-5">Нет задач по JQL.</p>
     ) : (
       <>
-        <div className="space-y-3 p-4 lg:hidden">
+        <div className="space-y-3 p-4 sm:p-5 lg:hidden">
           {visibleItems.map((issue) => (
             <MobileRecordCard
               key={issue.key}
@@ -1162,46 +1350,46 @@ function ScopeTasksSection({
           ))}
         </div>
 
-        <div className="hidden overflow-x-auto lg:block">
-          <table className="w-full min-w-[980px] table-auto text-sm">
-            <thead className="bg-line2 text-xs uppercase text-ink3">
+        <div className="hidden overflow-x-auto p-4 sm:p-5 lg:block">
+          <table className="w-full min-w-[980px] border-separate border-spacing-y-2 text-sm">
+            <thead className="text-xs uppercase text-ink3">
               <tr>
-                <th className="px-3 py-2 text-left font-bold">Key</th>
-                <th className="px-3 py-2 text-left font-bold">Summary</th>
-                <th className="px-3 py-2 text-left font-bold">SP</th>
-                <th className="px-3 py-2 text-left font-bold">Status</th>
-                <th className="px-3 py-2 text-left font-bold">Priority</th>
-                <th className="px-3 py-2 text-left font-bold">Owner</th>
-                <th className="px-3 py-2 text-left font-bold">Epic / Sprint</th>
-                {showTechnicalFields ? <th className="px-3 py-2 text-left font-bold">Технические сигналы</th> : null}
-                {showTechnicalFields ? <th className="px-3 py-2 text-left font-bold">Добавлено после плана</th> : null}
+                <th className="px-3 pb-2 text-left font-bold">Key</th>
+                <th className="px-3 pb-2 text-left font-bold">Summary</th>
+                <th className="px-3 pb-2 text-left font-bold">SP</th>
+                <th className="px-3 pb-2 text-left font-bold">Status</th>
+                <th className="px-3 pb-2 text-left font-bold">Priority</th>
+                <th className="px-3 pb-2 text-left font-bold">Owner</th>
+                <th className="px-3 pb-2 text-left font-bold">Epic / Sprint</th>
+                {showTechnicalFields ? <th className="px-3 pb-2 text-left font-bold">Технические сигналы</th> : null}
+                {showTechnicalFields ? <th className="px-3 pb-2 text-left font-bold">Добавлено после плана</th> : null}
               </tr>
             </thead>
             <tbody>
               {visibleItems.map((issue) => (
-                <tr key={issue.key} className="border-t border-line">
-                  <td className="px-3 py-2 align-top">
+                <tr key={issue.key} className="bg-bg/70">
+                  <td className="rounded-l-xl px-3 py-3 align-top">
                     <IssueLink issue={issue} />
                   </td>
-                  <td className="px-3 py-2 align-top text-ink2">{issue.summary}</td>
-                  <td className="px-3 py-2 align-top text-ink2">{formatScopeSp(issue.story_points)}</td>
-                  <td className="px-3 py-2 align-top text-ink2">{issue.status || "—"}</td>
-                  <td className="px-3 py-2 align-top text-ink2">
+                  <td className="px-3 py-3 align-top text-ink2">{issue.summary}</td>
+                  <td className="px-3 py-3 align-top text-ink2">{formatScopeSp(issue.story_points)}</td>
+                  <td className="px-3 py-3 align-top text-ink2">{issue.status || "—"}</td>
+                  <td className="px-3 py-3 align-top text-ink2">
                     {[issue.priority, issue.severity || issue.final_priority].filter(Boolean).join(" · ") || "—"}
                   </td>
-                  <td className="px-3 py-2 align-top text-ink2">{issue.assignee || "—"}</td>
-                  <td className="px-3 py-2 align-top text-ink2">
+                  <td className="px-3 py-3 align-top text-ink2">{issue.assignee || "—"}</td>
+                  <td className="px-3 py-3 align-top text-ink2">
                     {[issue.epic_key || issue.parent_key, issue.sprint].filter(Boolean).join(" · ") || "—"}
                   </td>
                   {showTechnicalFields ? (
-                    <td className="px-3 py-2 align-top text-ink2">
+                    <td className="px-3 py-3 align-top text-ink2">
                       {[issue.domain, issue.plan_status, planChangeReasonLabel(issue), issue.request_type]
                         .filter(Boolean)
                         .join(" · ") || issue.issue_type || "—"}
                     </td>
                   ) : null}
                   {showTechnicalFields ? (
-                    <td className="px-3 py-2 align-top text-ink2">{issue.scope_creep ? "Да" : "—"}</td>
+                    <td className="rounded-r-xl px-3 py-3 align-top text-ink2">{issue.scope_creep ? "Да" : "—"}</td>
                   ) : null}
                 </tr>
               ))}

@@ -47,26 +47,31 @@ export function ScopeAiPanel({
 
   return (
     <details
-      className="group rounded-lg border border-line bg-surface"
+      className="scope-collapsible-card group overflow-hidden rounded-lg bg-surface"
       open={open}
       onToggle={(event) => setOpen(event.currentTarget.open)}
     >
-      <summary className="cursor-pointer list-none px-4 py-3 marker:content-none sm:px-5">
+      <summary className="scope-section-header cursor-pointer list-none px-4 py-3 marker:content-none sm:px-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-sm font-semibold text-ink">AI-сводка для бизнеса</span>
+            <span className="text-base font-semibold text-ink">AI-сводка для бизнеса</span>
             <Badge tone={HEALTH_TONE[activeEntry.health]}>{HEALTH_LABELS[activeEntry.health]}</Badge>
-            {generatedLabel ? <span className="text-xs text-ink3">{generatedLabel}</span> : null}
+            {generatedLabel ? <span className="scope-section-header-subtitle text-sm">{generatedLabel}</span> : null}
           </div>
-          <span className="text-xs font-medium text-ink3 scope-print-hide">
+          <span className="scope-print-hide inline-flex items-center gap-2 text-xs font-semibold text-ink">
             <span className="group-open:hidden">Показать</span>
             <span className="hidden group-open:inline">Скрыть</span>
+            <span className="scope-section-header-icon inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-transform group-open:rotate-180">
+              <svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4" aria-hidden="true">
+                <path d="M5.23 7.21a.75.75 0 0 1 1.06.02L10 11.17l3.71-3.94a.75.75 0 1 1 1.08 1.04l-4.25 4.5a.75.75 0 0 1-1.08 0l-4.25-4.5a.75.75 0 0 1 .02-1.06z" />
+              </svg>
+            </span>
           </span>
         </div>
       </summary>
 
-      <div className="border-t border-line p-4 sm:p-5">
-        <div className="scope-ai-panel-grid grid gap-4 xl:grid-cols-[minmax(0,1fr)_280px]">
+      <div className="p-4 sm:p-6 lg:p-7">
+        <div className="scope-ai-panel-grid grid gap-5 xl:grid-cols-[minmax(0,1fr)_320px]">
             <ScopeAiView
               key={activeEntry.id}
               summary={activeEntry.analysis}
@@ -78,7 +83,7 @@ export function ScopeAiPanel({
             />
 
             {entries.length > 1 ? (
-              <aside className="scope-ai-history-aside rounded-lg border border-line bg-surface p-3 xl:sticky xl:top-4 xl:self-start">
+              <aside className="scope-ai-history-aside rounded-2xl bg-bg/70 p-4 xl:sticky xl:top-4 xl:self-start">
                 <div className="mb-3 flex items-center justify-between gap-2">
                   <h4 className="text-sm font-semibold text-ink">История AI</h4>
                   <span className="text-xs text-ink3">{entries.length}</span>
@@ -98,10 +103,10 @@ export function ScopeAiPanel({
                           type="button"
                           onClick={() => onSelectHistory(entry.id === entries[0]?.id ? null : entry.id)}
                           className={cn(
-                            "w-full rounded-lg border px-3 py-2 text-left transition-colors",
+                            "w-full rounded-xl px-3 py-3 text-left transition-colors",
                             isActive
-                              ? "border-blue/30 bg-blue/[0.08]"
-                              : "border-line bg-bg hover:border-line2 hover:bg-line2/40"
+                              ? "bg-blue/[0.08]"
+                              : "bg-surface/80 hover:bg-line2/40"
                           )}
                         >
                           <div className="flex items-center justify-between gap-2">

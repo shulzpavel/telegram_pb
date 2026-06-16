@@ -1,5 +1,4 @@
 import { useMemo } from "react";
-import { Surface } from "../../../design-system";
 import type { ScopeBoardSnapshot, ScopeRefreshEvent, ScopeRefreshLogEntry } from "../api/cmsClient";
 import { useIncrementalList } from "./scopeListPaging";
 import { ScopeIncrementalFooter } from "./ScopeIncrementalFooter";
@@ -15,24 +14,24 @@ function formatFeedTime(iso: string): string {
 function eventTone(type: string): string {
   switch (type) {
     case "added":
-      return "border-l-blue bg-blue/5";
+      return "bg-blue/5";
     case "removed":
-      return "border-l-ink3 bg-line2/40";
+      return "bg-line2/40";
     case "sp_changed":
-      return "border-l-amber bg-amber/5";
+      return "bg-amber/5";
     case "summary":
-      return "border-l-emerald-500 bg-emerald-500/5";
+      return "bg-emerald-500/5";
     case "baseline":
-      return "border-l-ink3 bg-line2/30";
+      return "bg-line2/30";
     default:
-      return "border-l-line bg-surface";
+      return "bg-surface";
   }
 }
 
 function EventRow({ event }: { event: ScopeRefreshEvent }) {
   const when = event.at ? formatFeedTime(event.at) : null;
   return (
-    <li className={`rounded-md border-l-4 px-3 py-2 text-sm ${eventTone(event.type)}`}>
+    <li className={`rounded-xl px-4 py-3 text-sm ${eventTone(event.type)}`}>
       <div className="flex flex-wrap items-center gap-2">
         <p className="text-ink2">{event.message}</p>
         {when ? <span className="text-xs text-ink3">{when}</span> : null}
@@ -98,34 +97,43 @@ export function ScopeActivityFeed({ snapshot }: { snapshot: ScopeBoardSnapshot }
   }
 
   return (
-    <Surface className="space-y-4 p-4 sm:p-5">
-      <div className="flex items-center justify-between gap-2">
-        <h3 className="text-sm font-bold text-ink">Что изменилось</h3>
-        <span className="text-xs text-ink3">Обновлено {formatFeedTime(snapshot.refreshed_at)}</span>
+    <details className="scope-collapsible-card group overflow-hidden rounded-lg bg-surface">
+      <summary className="scope-section-header flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 marker:content-none sm:px-5">
+        <div>
+          <h3 className="text-base font-semibold text-ink">Что изменилось</h3>
+          <p className="scope-section-header-subtitle mt-1 text-sm">Обновлено {formatFeedTime(snapshot.refreshed_at)}</p>
+        </div>
+        <span className="scope-section-header-icon inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-transform group-open:rotate-180">
+          <svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4" aria-hidden="true">
+            <path d="M5.23 7.21a.75.75 0 0 1 1.06.02L10 11.17l3.71-3.94a.75.75 0 1 1 1.08 1.04l-4.25 4.5a.75.75 0 0 1-1.08 0l-4.25-4.5a.75.75 0 0 1 .02-1.06z" />
+          </svg>
+        </span>
+      </summary>
+
+      <div className="space-y-5 p-4 sm:p-6 lg:p-7">
+        {latestEvents.length > 0 ? <PaginatedEventList events={latestEvents} /> : null}
+
+        {historyEntries.length > 0 ? (
+          <details className="group rounded-2xl bg-bg/70 p-4">
+            <summary className="cursor-pointer list-none text-sm font-semibold text-ink marker:content-none">
+              <span className="group-open:hidden">История обновлений ({historyEntries.length})</span>
+              <span className="hidden group-open:inline">Скрыть историю</span>
+            </summary>
+            <ul className="mt-3 space-y-3">
+              {visibleHistory.map((entry) => (
+                <HistoryLogEntry key={entry.at} entry={entry} />
+              ))}
+            </ul>
+            <ScopeIncrementalFooter
+              loadedCount={loadedHistoryCount}
+              total={historyTotal}
+              hasMore={hasMoreHistory}
+              onMore={loadMoreHistory}
+              itemNoun="обновлений"
+            />
+          </details>
+        ) : null}
       </div>
-
-      {latestEvents.length > 0 ? <PaginatedEventList events={latestEvents} /> : null}
-
-      {historyEntries.length > 0 ? (
-        <details className="group">
-          <summary className="cursor-pointer text-xs font-semibold text-blue marker:content-none">
-            <span className="group-open:hidden">История обновлений ({historyEntries.length})</span>
-            <span className="hidden group-open:inline">Скрыть историю</span>
-          </summary>
-          <ul className="mt-3 space-y-3">
-            {visibleHistory.map((entry) => (
-              <HistoryLogEntry key={entry.at} entry={entry} />
-            ))}
-          </ul>
-          <ScopeIncrementalFooter
-            loadedCount={loadedHistoryCount}
-            total={historyTotal}
-            hasMore={hasMoreHistory}
-            onMore={loadMoreHistory}
-            itemNoun="обновлений"
-          />
-        </details>
-      ) : null}
-    </Surface>
+    </details>
   );
 }

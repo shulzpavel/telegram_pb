@@ -163,7 +163,8 @@ export function ScopeFloatingTodo({
   if (!open) {
     return (
       <div className="scope-no-print fixed bottom-5 right-5 z-40 hidden md:block">
-        <Button variant="secondary" onClick={() => setOpen(true)}>
+        <Button variant="secondary" className="shadow-pop" onClick={() => setOpen(true)}>
+          <span className="inline-flex h-2 w-2 rounded-full bg-amber" aria-hidden="true" />
           Мини todo
           {activeCount > 0 ? <Badge tone="warning">{activeCount}</Badge> : null}
         </Button>
@@ -173,25 +174,29 @@ export function ScopeFloatingTodo({
 
   return (
     <Surface
-      className="scope-no-print fixed z-40 hidden max-h-[min(70vh,420px)] overflow-hidden p-0 md:block"
+      className="scope-no-print fixed z-40 hidden max-h-[min(70vh,420px)] overflow-hidden border-transparent bg-surface/95 p-0 shadow-pop backdrop-blur md:block"
       style={panelStyle}
       aria-label="Мини todo"
     >
       <div
-        className="flex cursor-move touch-none items-center justify-between gap-3 border-b border-line bg-line2/60 px-3 py-2"
+        className="scope-section-header flex cursor-move touch-none items-center justify-between gap-3 px-4 py-3"
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
         onPointerCancel={handlePointerUp}
       >
-        <div>
-          <p className="text-sm font-semibold text-ink">Мини todo</p>
-          <p className="text-xs text-ink3">{activeCount} активных · сохраняется в отчёте</p>
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="inline-flex h-2 w-2 rounded-full bg-amber" aria-hidden="true" />
+            <p className="text-sm font-semibold text-ink">Мини todo</p>
+            {activeCount > 0 ? <Badge tone="warning">{activeCount}</Badge> : null}
+          </div>
+          <p className="scope-section-header-subtitle mt-1 text-xs">Короткие действия по ходу отчёта</p>
         </div>
         <Button
           size="sm"
           variant="ghost"
-          className="cursor-pointer"
+          className="cursor-pointer text-xs"
           onPointerDown={(event) => event.stopPropagation()}
           onClick={() => setOpen(false)}
         >
@@ -199,8 +204,8 @@ export function ScopeFloatingTodo({
         </Button>
       </div>
 
-      <div className="space-y-3 p-3">
-        <div className="flex gap-2">
+      <div className="space-y-4 p-4">
+        <div className="flex gap-2 rounded-xl bg-bg/70 p-2">
           <TextField
             aria-label="Новая todo задача"
             placeholder="Что записать?"
@@ -221,13 +226,13 @@ export function ScopeFloatingTodo({
         {error ? <p className="rounded-md border border-red/20 bg-red/5 px-2 py-1.5 text-xs text-red">{error}</p> : null}
 
         {items.length === 0 ? (
-          <p className="rounded-lg border border-dashed border-line px-3 py-6 text-center text-sm text-ink3">
+          <p className="rounded-xl border border-dashed border-line bg-bg/50 px-3 py-7 text-center text-sm text-ink3">
             Запишите короткие действия по ходу отчёта.
           </p>
         ) : (
-          <ul className="max-h-64 space-y-1.5 overflow-y-auto pr-1">
+          <ul className="max-h-64 space-y-2 overflow-y-auto pr-1">
             {items.map((item) => (
-              <li key={item.id} className="flex items-start gap-1 rounded-lg border border-line bg-bg pr-1">
+              <li key={item.id} className="flex items-start gap-1 rounded-xl bg-bg/70 px-2 py-1.5">
                 <CheckboxField
                   className="min-w-0 flex-1 hover:bg-transparent"
                   checked={item.done}
@@ -242,7 +247,7 @@ export function ScopeFloatingTodo({
                 <Button
                   size="sm"
                   variant="ghost"
-                  className="mt-1 min-h-8 px-2 text-xs"
+                  className="mt-0.5 min-h-8 px-2 text-xs text-ink3 hover:text-red"
                   disabled={pendingIds.has(item.id)}
                   onClick={() => void removeItem(item.id)}
                 >
