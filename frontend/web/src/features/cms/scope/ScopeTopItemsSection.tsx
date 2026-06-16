@@ -45,22 +45,27 @@ export function ScopeTopItemsSection({
   }
 
   return (
-    <details className="group rounded-lg border border-line bg-surface">
-      <summary className="cursor-pointer list-none px-4 py-3 marker:content-none sm:px-5">
+    <details className="group overflow-hidden rounded-2xl">
+      <summary className="cursor-pointer list-none rounded-2xl bg-blue/[0.07] px-4 py-3 marker:content-none sm:px-5 group-open:rounded-b-none">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-sm font-semibold text-ink">Топ-10 вопросов и задач</span>
+            <span className="text-sm font-semibold text-blue">Топ-10 вопросов и задач</span>
             <Badge tone={items.length > 0 ? "info" : "neutral"}>{items.length}/{MAX_TOP_ITEMS}</Badge>
           </div>
-          <span className="text-xs font-medium text-ink3">
+          <span className="inline-flex items-center gap-2 text-xs font-semibold text-blue">
             <span className="group-open:hidden">Показать</span>
             <span className="hidden group-open:inline">Скрыть</span>
+            <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-blue/15 transition-transform group-open:rotate-180">
+              <svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4" aria-hidden="true">
+                <path d="M5.23 7.21a.75.75 0 0 1 1.06.02L10 11.17l3.71-3.94a.75.75 0 1 1 1.08 1.04l-4.25 4.5a.75.75 0 0 1-1.08 0l-4.25-4.5a.75.75 0 0 1 .02-1.06z" />
+              </svg>
+            </span>
           </span>
         </div>
       </summary>
 
-      <div className="space-y-4 border-t border-line px-4 py-4 sm:px-5 sm:py-5">
-        <div className="rounded-lg border border-blue/20 bg-blue/[0.05] px-4 py-3">
+      <div className="space-y-4 pt-4">
+        <div className="rounded-2xl bg-blue/[0.05] px-4 py-3">
           <p className="text-sm font-medium text-ink">Если отчёт будет огромный</p>
           <p className="mt-1 text-sm text-ink2">
             Оставьте здесь только главное для бизнеса: ключевые вопросы, риски и задачи, которые нужно обсудить на
@@ -69,7 +74,7 @@ export function ScopeTopItemsSection({
         </div>
 
         {items.length > 0 ? (
-          <ol className="space-y-2">
+          <ol className="space-y-3">
             {items.map((item, index) => (
               <TopItemCard
                 key={item.id}
@@ -82,13 +87,13 @@ export function ScopeTopItemsSection({
             ))}
           </ol>
         ) : (
-          <p className="rounded-lg border border-dashed border-line bg-bg px-4 py-6 text-center text-sm text-ink3">
+          <p className="rounded-2xl bg-line2/40 px-4 py-6 text-center text-sm text-ink3">
             Пока нет пунктов — добавьте первый вопрос или задачу для бизнеса.
           </p>
         )}
 
         {canManage ? (
-          <div className="rounded-lg border border-line bg-bg px-3 py-3">
+          <div className="rounded-2xl bg-bg/70 px-3 py-3">
             <TextareaField
               label="Новый пункт"
               rows={2}
@@ -130,7 +135,7 @@ function TopItemCard({
   const author = item.created_by?.trim();
 
   return (
-    <li className="flex gap-3 rounded-lg border border-line bg-bg px-3 py-3 sm:px-4">
+    <li className="flex gap-3 rounded-2xl bg-bg/70 px-3 py-3 sm:px-4">
       <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-blue/10 text-sm font-bold text-blue">
         {index}
       </span>
