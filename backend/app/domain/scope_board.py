@@ -163,11 +163,12 @@ _GITLAB_ROLE_SOURCES = {
     "subtask_gitlab_api_commit",
 }
 _GITLAB_API_SOURCES = {"gitlab_api_mr", "gitlab_api_commit", "subtask_gitlab_api_mr", "subtask_gitlab_api_commit"}
+_JIRA_FIELD_SOURCES = {"jira_field"}
 _ESTIMATED_ROLE_SOURCES = {"changelog_dev", "testing_comment"}
-_QA_ROLE_SOURCES = {"changelog", "current", "testing_comment"}
+_QA_ROLE_SOURCES = {"changelog", "current", "testing_comment"} | _JIRA_FIELD_SOURCES
 _TRUSTED_ROLE_SOURCES = {
-    "front": _GITLAB_ROLE_SOURCES | _ESTIMATED_ROLE_SOURCES,
-    "back": _GITLAB_ROLE_SOURCES | _ESTIMATED_ROLE_SOURCES,
+    "front": _GITLAB_ROLE_SOURCES | _ESTIMATED_ROLE_SOURCES | _JIRA_FIELD_SOURCES,
+    "back": _GITLAB_ROLE_SOURCES | _ESTIMATED_ROLE_SOURCES | _JIRA_FIELD_SOURCES,
     "qa": _QA_ROLE_SOURCES,
 }
 _UNATTRIBUTED_ROLE = "Не атрибутировано"
@@ -264,6 +265,8 @@ def _prefer_display_name(current: str, candidate: str) -> str:
 
 
 def _issue_unresolved_reason(issue: dict[str, Any], role: str) -> str:
+    if _issue_has_role_attribution(issue, role):
+        return ""
     for item in issue.get("role_evidence") or []:
         if not isinstance(item, dict):
             continue
@@ -461,7 +464,7 @@ def _role_coverage(issues: list[dict[str, Any]]) -> dict[str, dict[str, int]]:
             source = _role_source(payload)
             if tier == "confirmed":
                 confirmed += 1
-                if role == "qa" and source in {"changelog", "current"}:
+                if role == "qa" and source in {"changelog", "current", "jira_field"}:
                     confirmed_jira_qa += 1
                 elif role in {"front", "back"} and (
                     _role_source_is_gitlab_api(source)

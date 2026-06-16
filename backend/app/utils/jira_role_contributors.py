@@ -22,12 +22,13 @@ _SUBTASK_GITLAB_SOURCES = {
     "subtask_gitlab_api_commit",
 }
 _CONFIRMED_SOURCES = _PARENT_GITLAB_SOURCES | _SUBTASK_GITLAB_SOURCES
+_JIRA_FIELD_SOURCES = {"jira_field"}
 _ESTIMATED_SOURCES = {"changelog_dev", "testing_comment"}
 _ENGINEERING_SOURCES = _CONFIRMED_SOURCES | _ESTIMATED_SOURCES
-_QA_SOURCES = {"changelog", "current", "testing_comment"}
+_QA_SOURCES = {"changelog", "current", "testing_comment"} | _JIRA_FIELD_SOURCES
 _TRUSTED_ROLE_SOURCES = {
-    "front": _ENGINEERING_SOURCES,
-    "back": _ENGINEERING_SOURCES,
+    "front": _ENGINEERING_SOURCES | _JIRA_FIELD_SOURCES,
+    "back": _ENGINEERING_SOURCES | _JIRA_FIELD_SOURCES,
     "qa": _QA_SOURCES,
 }
 _ENGINEERING_LABELS = {"frontend", "backend"}
@@ -69,7 +70,7 @@ def person_bucket_key(name: str) -> str:
 
 def attribution_tier(source: str) -> str:
     normalized = _norm(source)
-    if normalized in _CONFIRMED_SOURCES:
+    if normalized in _CONFIRMED_SOURCES or normalized in _JIRA_FIELD_SOURCES:
         return "confirmed"
     if normalized in _ESTIMATED_SOURCES:
         return "estimated"
@@ -273,6 +274,7 @@ def merge_role_contributors(
     *,
     from_comments: Optional[dict[str, dict[str, str]]] = None,
     from_gitlab_api: Optional[dict[str, dict[str, str]]] = None,
+    from_jira_fields: Optional[dict[str, dict[str, str]]] = None,
     subtask_workload_items: Optional[list[dict[str, str]]] = None,
     labels: Optional[list[str]] = None,
     developer: str = "",
@@ -319,6 +321,13 @@ def merge_role_contributors(
         name, _count = subtask_counts[role].most_common(1)[0]
         source = subtask_best_source.get((role, name)) or _summary_source_for_subtasks(workload_items, role)
         merged[role] = {"name": name, "source": source}
+
+    for role, payload in (from_jira_fields or {}).items():
+        if role not in {"front", "back", "qa"} or role in merged:
+            continue
+        name = _norm(payload.get("name"))
+        if name:
+            merged[role] = {"name": name, "source": "jira_field"}
 
     for role, payload in build_changelog_dev_fallback(
         labels=labels,

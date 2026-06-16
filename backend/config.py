@@ -28,6 +28,12 @@ JIRA_SP_TEST_FIELD = os.getenv("JIRA_SP_TEST_FIELD", "").strip()
 JIRA_SP_FRONT_FIELD = os.getenv("JIRA_SP_FRONT_FIELD", "").strip()
 JIRA_SP_BACK_FIELD = os.getenv("JIRA_SP_BACK_FIELD", "").strip()
 JIRA_SP_QA_FIELD = os.getenv("JIRA_SP_QA_FIELD", "").strip()
+JIRA_FRONT_ASSIGNEE_FIELD = os.getenv("JIRA_FRONT_ASSIGNEE_FIELD", os.getenv("JIRA_FRONT_FIELD", "")).strip()
+JIRA_BACK_ASSIGNEE_FIELD = os.getenv("JIRA_BACK_ASSIGNEE_FIELD", os.getenv("JIRA_BACK_FIELD", "")).strip()
+JIRA_QA_ASSIGNEE_FIELD = os.getenv(
+    "JIRA_QA_ASSIGNEE_FIELD",
+    os.getenv("JIRA_TESTER_FIELD", os.getenv("JIRA_TEST_ASSIGNEE_FIELD", "")),
+).strip()
 JIRA_PLAN_STATUS_FIELD = os.getenv("JIRA_PLAN_STATUS_FIELD", "customfield_13045").strip()
 JIRA_PLAN_CHANGE_REASON_FIELD = os.getenv("JIRA_PLAN_CHANGE_REASON_FIELD", "customfield_13047").strip()
 JIRA_DEV_STATUS_KEYWORDS = os.getenv(

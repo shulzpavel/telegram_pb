@@ -19,6 +19,9 @@ services:
       - JIRA_SP_FRONT_FIELD=${JIRA_SP_FRONT_FIELD:-}
       - JIRA_SP_BACK_FIELD=${JIRA_SP_BACK_FIELD:-}
       - JIRA_SP_QA_FIELD=${JIRA_SP_QA_FIELD:-}
+      - JIRA_FRONT_ASSIGNEE_FIELD=${JIRA_FRONT_ASSIGNEE_FIELD:-}
+      - JIRA_BACK_ASSIGNEE_FIELD=${JIRA_BACK_ASSIGNEE_FIELD:-}
+      - JIRA_QA_ASSIGNEE_FIELD=${JIRA_QA_ASSIGNEE_FIELD:-}
       - JIRA_DEMO_FALLBACK=${JIRA_DEMO_FALLBACK:-false}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8001/health"]

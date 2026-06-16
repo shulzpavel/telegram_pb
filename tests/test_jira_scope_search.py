@@ -48,6 +48,59 @@ def test_scope_issue_from_raw_parses_plan_fields():
     assert issue["plan_change_reason"] == "Срочный запрос от бизнеса"
 
 
+def test_scope_issue_from_raw_reads_role_assignee_fields(monkeypatch):
+    import config
+
+    monkeypatch.setattr(config, "JIRA_FRONT_ASSIGNEE_FIELD", "customfield_201")
+    monkeypatch.setattr(config, "JIRA_BACK_ASSIGNEE_FIELD", "customfield_202")
+    monkeypatch.setattr(config, "JIRA_QA_ASSIGNEE_FIELD", "customfield_203")
+    client = _client()
+    issue = client._scope_issue_from_raw(
+        {
+            "key": "FLEX-1",
+            "fields": {
+                "summary": "Task",
+                "status": {"name": "В работе", "statusCategory": {"key": "indeterminate"}},
+                "issuetype": {"name": "Story"},
+                "customfield_201": {"displayName": "Front Dev"},
+                "customfield_202": [{"displayName": "Back Dev"}],
+                "customfield_203": {"displayName": "QA Person"},
+            },
+        }
+    )
+
+    assert issue["role_contributors_from_jira_fields"] == {
+        "front": {"name": "Front Dev", "source": "jira_field"},
+        "back": {"name": "Back Dev", "source": "jira_field"},
+        "qa": {"name": "QA Person", "source": "jira_field"},
+    }
+
+
+def test_finalize_scope_issue_roles_trusts_jira_qa_field():
+    client = _client()
+    enriched = client._finalize_scope_issue_roles(
+        {
+            "key": "FLEX-1",
+            "status": "В работе",
+            "assignee": "Developer",
+            "story_points": 3,
+            "role_contributors_from_jira_fields": {
+                "qa": {"name": "QA Person", "source": "jira_field"},
+            },
+        },
+        histories=[],
+    )
+
+    assert enriched["role_contributors"]["qa"] == {
+        "name": "QA Person",
+        "source": "jira_field",
+    }
+    assert not any(
+        item.get("role") == "qa" and item.get("unresolved_reason") == "unresolved_no_qa_transition"
+        for item in enriched["role_evidence"]
+    )
+
+
 def test_finalize_scope_issue_roles_uses_assignee_for_done_without_changelog():
     client = _client()
     enriched = client._finalize_scope_issue_roles(

@@ -568,6 +568,39 @@ def test_role_metrics_ignore_untrusted_label_fallback():
     }
 
 
+def test_role_metrics_trust_jira_field_contributors():
+    issue = normalize_scope_issue(
+        {
+            **_issue("P-1", 3),
+            "role_contributors": {"qa": {"name": "QA Person", "source": "jira_field"}},
+            "role_evidence": [
+                {
+                    "role": "qa",
+                    "unresolved_reason": "unresolved_no_qa_transition",
+                    "confidence": "unresolved",
+                }
+            ],
+        }
+    )
+    metrics = compute_scope_metrics_from_sections(
+        80,
+        [{"id": "core", "name": "Plan", "kind": "planned", "order": 0, "issues": [issue]}],
+        "2026-06",
+    )
+
+    assert metrics["plan_by_role"]["qa"][0]["developer"] == "QA Person"
+    assert metrics["plan_role_coverage"]["qa"] == {
+        "attributed": 1,
+        "total": 1,
+        "confirmed": 1,
+        "estimated": 0,
+        "unattributed": 0,
+        "confirmed_jira_qa": 1,
+        "unresolved_no_qa_transition": 0,
+    }
+    assert "role_unresolved" not in metrics["plan_by_role"]["qa"][0]["issues"][0]
+
+
 def test_role_metrics_add_unattributed_bucket_for_labeled_front_work():
     issue = normalize_scope_issue(
         {

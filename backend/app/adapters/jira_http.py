@@ -75,6 +75,27 @@ def _jira_custom_field_values(raw: Any) -> list[str]:
     return [cleaned] if cleaned else []
 
 
+def _jira_user_field_names(raw: Any) -> list[str]:
+    if raw is None:
+        return []
+    if isinstance(raw, str):
+        cleaned = raw.strip()
+        return [cleaned] if cleaned else []
+    if isinstance(raw, dict):
+        for key in ("displayName", "name", "value"):
+            value = str(raw.get(key) or "").strip()
+            if value:
+                return [value]
+        return []
+    if isinstance(raw, list):
+        names: list[str] = []
+        for item in raw:
+            names.extend(_jira_user_field_names(item))
+        return names
+    cleaned = str(raw).strip()
+    return [cleaned] if cleaned else []
+
+
 def _normalise_base_url(value: str) -> str:
     return (value or "").strip().rstrip("/")
 
@@ -384,7 +405,14 @@ class JiraHttpClient(JiraClient):
     ]
 
     def _scope_search_field_ids(self) -> list[str]:
-        from config import JIRA_SP_BACK_FIELD, JIRA_SP_FRONT_FIELD, JIRA_SP_QA_FIELD
+        from config import (
+            JIRA_BACK_ASSIGNEE_FIELD,
+            JIRA_FRONT_ASSIGNEE_FIELD,
+            JIRA_QA_ASSIGNEE_FIELD,
+            JIRA_SP_BACK_FIELD,
+            JIRA_SP_FRONT_FIELD,
+            JIRA_SP_QA_FIELD,
+        )
 
         fields = [*self._SCOPE_SEARCH_FIELDS, self.story_points_field, "key"]
         for field_id in (
@@ -397,6 +425,9 @@ class JiraHttpClient(JiraClient):
             if field_id and field_id not in fields:
                 fields.append(field_id)
         for field_id in (JIRA_SP_FRONT_FIELD, JIRA_SP_BACK_FIELD, JIRA_SP_QA_FIELD):
+            if field_id and field_id not in fields:
+                fields.append(field_id)
+        for field_id in (JIRA_FRONT_ASSIGNEE_FIELD, JIRA_BACK_ASSIGNEE_FIELD, JIRA_QA_ASSIGNEE_FIELD):
             if field_id and field_id not in fields:
                 fields.append(field_id)
         return fields
@@ -504,6 +535,23 @@ class JiraHttpClient(JiraClient):
                 return str(linked_issue.get("key") or "")
         return ""
 
+    @staticmethod
+    def _role_contributors_from_jira_fields(fields: dict[str, Any]) -> dict[str, dict[str, str]]:
+        from config import JIRA_BACK_ASSIGNEE_FIELD, JIRA_FRONT_ASSIGNEE_FIELD, JIRA_QA_ASSIGNEE_FIELD
+
+        contributors: dict[str, dict[str, str]] = {}
+        for role, field_id in (
+            ("front", JIRA_FRONT_ASSIGNEE_FIELD),
+            ("back", JIRA_BACK_ASSIGNEE_FIELD),
+            ("qa", JIRA_QA_ASSIGNEE_FIELD),
+        ):
+            if not field_id:
+                continue
+            names = _jira_user_field_names(fields.get(field_id))
+            if names:
+                contributors[role] = {"name": names[0], "source": "jira_field"}
+        return contributors
+
     async def _hydrate_legacy_issue_rows(
         self,
         issues: List[Dict[str, Any]],
@@ -580,6 +628,7 @@ class JiraHttpClient(JiraClient):
         last_comment = self._extract_last_comment(comment_field)
         comments = comment_field.get("comments") if isinstance(comment_field, dict) else []
         role_from_comments = infer_role_contributors_from_comments(comments if isinstance(comments, list) else [])
+        role_from_jira_fields = self._role_contributors_from_jira_fields(fields)
 
         from config import JIRA_SP_BACK_FIELD, JIRA_SP_FRONT_FIELD, JIRA_SP_QA_FIELD
 
@@ -635,6 +684,7 @@ class JiraHttpClient(JiraClient):
             else "",
             "checklist_progress": fields.get("customfield_10100"),
             "role_contributors_from_comments": role_from_comments,
+            "role_contributors_from_jira_fields": role_from_jira_fields,
             "_comments": comments if isinstance(comments, list) else [],
             **last_comment,
         }
@@ -817,6 +867,9 @@ class JiraHttpClient(JiraClient):
             from_comments=enriched.get("role_contributors_from_comments")
             if isinstance(enriched.get("role_contributors_from_comments"), dict)
             else {},
+            from_jira_fields=enriched.get("role_contributors_from_jira_fields")
+            if isinstance(enriched.get("role_contributors_from_jira_fields"), dict)
+            else {},
             from_gitlab_api=from_gitlab_api,
             subtask_workload_items=workload_items_input,
             labels=enriched.get("labels") if isinstance(enriched.get("labels"), list) else [],
@@ -853,6 +906,7 @@ class JiraHttpClient(JiraClient):
         enriched["role_evidence"] = role_evidence
 
         enriched.pop("_subtasks", None)
+        enriched.pop("role_contributors_from_jira_fields", None)
         enriched.pop("_comments", None)
         enriched.pop("_gitlab_raw", None)
         enriched.pop("role_contributors_from_comments", None)
