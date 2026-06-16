@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { Alert, Badge, Button, EmptyState, SelectField, TextField } from "../../../design-system";
+import { Alert, Badge, Button, DropdownField, EmptyState, TextField } from "../../../design-system";
 import type { AuditEvent } from "../api/cmsTypes";
 import {
   DataTable,
@@ -242,17 +242,18 @@ export default function AuditEventsPage() {
           value={actorFilter}
           onChange={(event) => setActorFilter(event.target.value)}
         />
-        <SelectField
+        <DropdownField
           className="xl:col-span-2"
           aria-label="Статус"
           label="Статус"
           value={status}
-          onChange={(event) => setStatus(event.target.value)}
-        >
-          <option value="">Все статусы</option>
-          <option value="ok">Успех</option>
-          <option value="failed">Ошибка</option>
-        </SelectField>
+          options={[
+            { value: "", label: "Все статусы" },
+            { value: "ok", label: "Успех" },
+            { value: "failed", label: "Ошибка" },
+          ]}
+          onChange={setStatus}
+        />
         <div className="grid grid-cols-2 gap-2 md:col-span-2 xl:col-span-6">
           <TextField
             aria-label="Начало периода"

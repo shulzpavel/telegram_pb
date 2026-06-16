@@ -1,4 +1,4 @@
-import { Badge, Button, SelectField, TextField, TextareaField } from "../../../design-system";
+import { Badge, Button, DropdownField, TextField, TextareaField } from "../../../design-system";
 import type { ScopeSectionConfig, ScopeSectionKind } from "../api/cmsClient";
 import {
   createScopeSection,
@@ -82,15 +82,16 @@ export function ScopeSectionEditor({
               disabled={disabled}
               onChange={(event) => updateSection(index, { name: event.target.value })}
             />
-            <SelectField
+            <DropdownField
               label="Тип для буфера"
               value={section.kind}
+              options={[
+                { value: "planned", label: "Плановая" },
+                { value: "unplanned", label: "Внеплановая" },
+              ]}
               disabled={disabled}
-              onChange={(event) => updateSection(index, { kind: event.target.value as ScopeSectionKind })}
-            >
-              <option value="planned">Плановая</option>
-              <option value="unplanned">Внеплановая</option>
-            </SelectField>
+              onChange={(value) => updateSection(index, { kind: value as ScopeSectionKind })}
+            />
           </div>
           <TextareaField
             className="mt-3"

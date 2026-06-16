@@ -7,8 +7,8 @@ import {
   Badge,
   Button,
   ConfirmDialog,
+  DropdownField,
   EmptyState,
-  SelectField,
   Spinner,
   Surface,
   TextField,
@@ -144,14 +144,15 @@ function RetroListPage({ principal, canManage }: { principal: CmsPrincipal; canM
       {principal.is_superuser ? (
         <Toolbar>
           <TeamFilter teams={teams} value={teamFilter} onChange={setTeamFilter} />
-          <SelectField
+          <DropdownField
             aria-label="Сортировка ретро"
             value={teamSort ? "team" : "updated"}
-            onChange={(event) => setTeamSort(event.target.value === "team")}
-          >
-            <option value="updated">По дате обновления</option>
-            <option value="team">По команде</option>
-          </SelectField>
+            options={[
+              { value: "updated", label: "По дате обновления" },
+              { value: "team", label: "По команде" },
+            ]}
+            onChange={(value) => setTeamSort(value === "team")}
+          />
         </Toolbar>
       ) : null}
       <DataTable
@@ -458,18 +459,19 @@ function RetroConfigForm({
           onChange={(e) => setVotesPerPerson(Number(e.target.value) || 1)}
           hint="Сколько голосов раздаёт каждый при приоритизации"
         />
-        <SelectField
+        <DropdownField
           label="Таймер секции по умолчанию"
           value={String(timerMinutes)}
-          onChange={(e) => setTimerMinutes(Number(e.target.value))}
+          options={[
+            { value: "0", label: "Без таймера" },
+            { value: "3", label: "3 минуты" },
+            { value: "5", label: "5 минут" },
+            { value: "7", label: "7 минут" },
+            { value: "10", label: "10 минут" },
+          ]}
+          onChange={(value) => setTimerMinutes(Number(value))}
           hint="Мягкий ориентир, переход всегда за вами"
-        >
-          <option value="0">Без таймера</option>
-          <option value="3">3 минуты</option>
-          <option value="5">5 минут</option>
-          <option value="7">7 минут</option>
-          <option value="10">10 минут</option>
-        </SelectField>
+        />
       </div>
 
       <div className="flex gap-2">

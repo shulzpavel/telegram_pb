@@ -17,8 +17,8 @@ import {
   Badge,
   Button,
   ConfirmDialog,
+  DropdownField,
   EmptyState,
-  SelectField,
   Spinner,
   Surface,
   TextField,
@@ -390,14 +390,15 @@ function ScopeBoardListPage({ principal, canManage }: { principal: CmsPrincipal;
       {principal.is_superuser ? (
         <Toolbar>
           <TeamFilter teams={teams} value={teamFilter} onChange={setTeamFilter} />
-          <SelectField
+          <DropdownField
             aria-label="Сортировка boards"
             value={teamSort ? "team" : "updated"}
-            onChange={(event) => setTeamSort(event.target.value === "team")}
-          >
-            <option value="updated">По дате обновления</option>
-            <option value="team">По команде</option>
-          </SelectField>
+            options={[
+              { value: "updated", label: "По дате обновления" },
+              { value: "team", label: "По команде" },
+            ]}
+            onChange={(value) => setTeamSort(value === "team")}
+          />
         </Toolbar>
       ) : null}
 
@@ -642,6 +643,11 @@ function ReleaseQueriesEditor({
     onChange(queries.filter((_, currentIndex) => currentIndex !== index));
   }
 
+  const releaseTypeOptions = [
+    { value: "past", label: "Прошедший релиз", hint: "Покажем над текущим релизом" },
+    { value: "future", label: "Будущий релиз", hint: "Покажем после текущего релиза" },
+  ];
+
   return (
     <div className="space-y-3 rounded-2xl border border-line bg-bg/60 p-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -661,15 +667,13 @@ function ReleaseQueriesEditor({
           {queries.map((query, index) => (
             <div key={query.id} className="rounded-xl border border-line bg-surface p-3">
               <div className="grid gap-3 md:grid-cols-[180px_minmax(0,1fr)_auto]">
-                <SelectField
+                <DropdownField
                   label="Тип релиза"
                   value={query.type}
+                  options={releaseTypeOptions}
                   disabled={disabled}
-                  onChange={(event) => updateQuery(index, { type: event.target.value === "past" ? "past" : "future" })}
-                >
-                  <option value="past">Прошедший релиз</option>
-                  <option value="future">Будущий релиз</option>
-                </SelectField>
+                  onChange={(value) => updateQuery(index, { type: value === "past" ? "past" : "future" })}
+                />
                 <TextField
                   label="Название (необязательно)"
                   value={query.label ?? ""}

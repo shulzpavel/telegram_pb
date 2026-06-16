@@ -43,7 +43,7 @@ import {
   useTeamIdState,
 } from "../components/TeamSelect";
 import { useCmsTeams } from "../hooks/useCmsTeams";
-import { Alert, Badge, BottomSheet, Button, ConfirmDialog, EmptyState, ScrollArea, SelectField, Surface, TextField } from "../../../design-system";
+import { Alert, Badge, BottomSheet, Button, ConfirmDialog, DropdownField, EmptyState, ScrollArea, Surface, TextField } from "../../../design-system";
 import {
   CompactList,
   DataTable,
@@ -214,28 +214,30 @@ export default function SessionsPage({ principal, canManageTasks, canManageSessi
           value={q}
           onChange={(event) => setQ(event.target.value)}
         />
-        <SelectField
+        <DropdownField
           className="md:max-w-[200px]"
           aria-label="Статус сессии"
           value={active}
-          onChange={(event) => setActive(event.target.value)}
-        >
-          <option value="">Все статусы</option>
-          <option value="true">Идут сейчас</option>
-          <option value="false">Завершены / не запущены</option>
-        </SelectField>
+          options={[
+            { value: "", label: "Все статусы" },
+            { value: "true", label: "Идут сейчас" },
+            { value: "false", label: "Завершены / не запущены" },
+          ]}
+          onChange={setActive}
+        />
         {principal.is_superuser ? (
           <>
             <TeamFilter teams={teams} value={teamFilter} onChange={setTeamFilter} />
-            <SelectField
+            <DropdownField
               className="md:max-w-[220px]"
               aria-label="Сортировка"
               value={teamSort ? "team" : "updated"}
-              onChange={(event) => setTeamSort(event.target.value === "team")}
-            >
-              <option value="updated">По дате обновления</option>
-              <option value="team">По команде</option>
-            </SelectField>
+              options={[
+                { value: "updated", label: "По дате обновления" },
+                { value: "team", label: "По команде" },
+              ]}
+              onChange={(value) => setTeamSort(value === "team")}
+            />
           </>
         ) : null}
         <Button variant="ghost" size="sm" className="whitespace-nowrap" onClick={list.reload}>Обновить</Button>
@@ -1058,16 +1060,17 @@ function TaskQueueEditor({
             value={search}
             onChange={(event) => onSearchChange(event.target.value)}
           />
-          <SelectField
+          <DropdownField
             aria-label="Раздел очереди"
             value={bucket}
-            onChange={(event) => onBucketChange(event.target.value)}
-          >
-            <option value="tasks_queue">Очередь</option>
-            <option value="history">История</option>
-            <option value="last_batch">Последняя пачка</option>
-            <option value="">Все разделы</option>
-          </SelectField>
+            options={[
+              { value: "tasks_queue", label: "Очередь" },
+              { value: "history", label: "История" },
+              { value: "last_batch", label: "Последняя пачка" },
+              { value: "", label: "Все разделы" },
+            ]}
+            onChange={onBucketChange}
+          />
         </div>
       </div>
 

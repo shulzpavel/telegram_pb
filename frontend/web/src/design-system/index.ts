@@ -29,3 +29,4 @@ export { AiIntelligenceSurface, AiSparkleIcon, AiSparklePill } from "./AiIntelli
 export { AiSparkleButton } from "./AiSparkleButton";
 export { AiGenerationProgress } from "./AiGenerationProgress";
 export { DatePickerPopover } from "./DatePickerPopover";
+export { DropdownField, type DropdownOption } from "./DropdownField";

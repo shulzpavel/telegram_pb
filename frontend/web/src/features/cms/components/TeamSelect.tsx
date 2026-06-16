@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { SelectField } from "../../../design-system";
+import { DropdownField } from "../../../design-system";
 import type { CmsTeam } from "../api/cmsTypes";
 import { teamDisplayLabel } from "./TeamBadge";
 
@@ -63,23 +63,19 @@ export function TeamSelect({
   }
 
   return (
-    <SelectField
+    <DropdownField
       label={label}
       className={compact ? "max-w-sm" : undefined}
       value={value === "" ? "" : String(value)}
+      options={options}
       required={required}
       disabled={disabled || loading || teams.length === 0}
-      onChange={(event) => {
-        const next = event.target.value;
+      searchable={teams.length > 8}
+      searchPlaceholder="Поиск команды..."
+      onChange={(next) => {
         onChange(next === "" ? "" : Number(next));
       }}
-    >
-      {options.map((option) => (
-        <option key={option.value || "empty"} value={option.value}>
-          {option.label}
-        </option>
-      ))}
-    </SelectField>
+    />
   );
 }
 

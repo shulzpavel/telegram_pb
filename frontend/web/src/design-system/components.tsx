@@ -1,4 +1,4 @@
-import { forwardRef, type ButtonHTMLAttributes, type CSSProperties, type FocusEvent, type HTMLAttributes, type InputHTMLAttributes, type ReactNode, type Ref, type SelectHTMLAttributes, type TextareaHTMLAttributes, useEffect, useId, useRef } from "react";
+import { forwardRef, type ButtonHTMLAttributes, type CSSProperties, type FocusEvent, type HTMLAttributes, type InputHTMLAttributes, type ReactNode, type Ref, type TextareaHTMLAttributes, useEffect, useId, useRef } from "react";
 import { findPreferredFocusTarget, keepFocusedFieldVisible, useMobileKeyboardInset } from "./mobileKeyboard";
 import { cn } from "./utils";
 
@@ -234,81 +234,6 @@ export function TextareaField({
       />
       <FieldMessage id={descriptionId} error={error} hint={hint} reserveSpace={reserveMessageSpace} />
     </div>
-  );
-}
-
-export function SelectField({
-  label,
-  hint,
-  error,
-  className,
-  id,
-  children,
-  reserveMessageSpace = true,
-  ...props
-}: SelectHTMLAttributes<HTMLSelectElement> & {
-  label?: ReactNode;
-  hint?: ReactNode;
-  error?: string | null;
-  reserveMessageSpace?: boolean;
-}) {
-  const generatedId = useId();
-  const inputId = id ?? generatedId;
-  const descriptionId = `${inputId}-description`;
-  return (
-    <div className={cn("space-y-1.5", className)}>
-      {label ? <FieldLabel htmlFor={inputId}>{label}</FieldLabel> : null}
-      {/* `appearance-none` strips the native arrow on every platform —
-          we render an explicit chevron so users always know this is a
-          dropdown, not a plain text input. The native `<select>` still
-          opens its OS picker on iOS/Android (best mobile UX), our SVG
-          just provides the visual affordance. */}
-      <div
-        className={cn(
-          "group relative rounded-lg",
-          "focus-within:ring-2 focus-within:ring-blue/20 focus-within:ring-offset-2 focus-within:ring-offset-canvas",
-        )}
-      >
-        <select
-          id={inputId}
-          className={cn(
-            inputClassName,
-            "cursor-pointer appearance-none pr-12",
-            "bg-surface",
-            "hover:border-blue/50 hover:shadow-card",
-            "focus:ring-0 focus:ring-offset-0",
-            "disabled:cursor-not-allowed",
-            error ? "border-red focus:border-red" : "",
-          )}
-          aria-invalid={Boolean(error) || undefined}
-          aria-describedby={hint || error ? descriptionId : undefined}
-          {...props}
-        >
-          {children}
-        </select>
-        <span className="pointer-events-none absolute right-2 top-1/2 inline-flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md border border-line bg-surface text-ink3 transition-colors group-hover:border-blue/40 group-hover:text-blue">
-          <ChevronDownIcon className="h-4 w-4" />
-        </span>
-      </div>
-      <FieldMessage id={descriptionId} error={error} hint={hint} reserveSpace={reserveMessageSpace} />
-    </div>
-  );
-}
-
-function ChevronDownIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      viewBox="0 0 20 20"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={1.8}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-      aria-hidden="true"
-    >
-      <path d="M5.5 8L10 12.5L14.5 8" />
-    </svg>
   );
 }
 

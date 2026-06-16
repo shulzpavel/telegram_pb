@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Button, EmptyState, SelectField } from "../../../design-system";
+import { Button, DropdownField, EmptyState } from "../../../design-system";
 import type { WebParticipantItem } from "../api/cmsTypes";
 import { DataTable, MobileRecordCard, MobileRecordField, Toolbar } from "../components/CmsPrimitives";
 import { useCmsList } from "../hooks/useCmsList";
@@ -13,11 +13,17 @@ export default function WebParticipantsPage() {
   return (
     <section className="space-y-4">
       <Toolbar>
-        <SelectField className="md:max-w-[180px]" aria-label="Web participant status" value={active} onChange={(event) => setActive(event.target.value)}>
-          <option value="">All web users</option>
-          <option value="true">Active</option>
-          <option value="false">Expired</option>
-        </SelectField>
+        <DropdownField
+          className="md:max-w-[180px]"
+          aria-label="Web participant status"
+          value={active}
+          options={[
+            { value: "", label: "All web users" },
+            { value: "true", label: "Active" },
+            { value: "false", label: "Expired" },
+          ]}
+          onChange={setActive}
+        />
         <Button variant="ghost" size="sm" className="whitespace-nowrap" onClick={list.reload}>Обновить</Button>
       </Toolbar>
       <DataTable

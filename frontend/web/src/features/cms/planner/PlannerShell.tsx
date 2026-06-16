@@ -5,8 +5,8 @@ import {
   Badge,
   Button,
   ConfirmDialog,
+  DropdownField,
   EmptyState,
-  SelectField,
   Spinner,
   TextField,
   TextareaField,
@@ -150,14 +150,15 @@ function PlannerListPage({ principal, canManage }: { principal: CmsPrincipal; ca
       {principal.is_superuser ? (
         <Toolbar>
           <TeamFilter teams={teams} value={teamFilter} onChange={setTeamFilter} />
-          <SelectField
+          <DropdownField
             aria-label="Сортировка планов"
             value={teamSort ? "team" : "updated"}
-            onChange={(event) => setTeamSort(event.target.value === "team")}
-          >
-            <option value="updated">По дате обновления</option>
-            <option value="team">По команде</option>
-          </SelectField>
+            options={[
+              { value: "updated", label: "По дате обновления" },
+              { value: "team", label: "По команде" },
+            ]}
+            onChange={(value) => setTeamSort(value === "team")}
+          />
         </Toolbar>
       ) : null}
 
@@ -1066,19 +1067,14 @@ function PlannerForm({
                 disabled={disabled}
                 reserveMessageSpace={false}
               />
-              <SelectField
+              <DropdownField
                 label={index === 0 ? "Трек" : undefined}
                 value={role.trackId}
-                onChange={(event) => setRole(index, { trackId: event.target.value })}
+                options={inputs.tracks.map((track) => ({ value: track.id, label: track.label }))}
+                onChange={(value) => setRole(index, { trackId: value })}
                 disabled={disabled}
                 reserveMessageSpace={false}
-              >
-                {inputs.tracks.map((track) => (
-                  <option key={track.id} value={track.id}>
-                    {track.label}
-                  </option>
-                ))}
-              </SelectField>
+              />
               <NumberCell
                 label={index === 0 ? "Человек" : undefined}
                 value={role.headcount}

@@ -1,4 +1,4 @@
-import { SelectField } from "../../../design-system";
+import { DropdownField } from "../../../design-system";
 import type { CmsTeam } from "../api/cmsTypes";
 
 interface TeamFilterProps {
@@ -9,22 +9,23 @@ interface TeamFilterProps {
 }
 
 export function TeamFilter({ teams, value, onChange, disabled }: TeamFilterProps) {
+  const options = [
+    { value: "", label: "Все команды" },
+    { value: "legacy", label: "Без команды (legacy)" },
+    ...teams.map((team) => ({ value: String(team.id), label: team.name })),
+  ];
+
   return (
-    <SelectField
+    <DropdownField
       aria-label="Команда"
       className="md:max-w-[220px]"
       value={value}
+      options={options}
       disabled={disabled}
-      onChange={(event) => onChange(event.target.value)}
-    >
-      <option value="">Все команды</option>
-      <option value="legacy">Без команды (legacy)</option>
-      {teams.map((team) => (
-        <option key={team.id} value={String(team.id)}>
-          {team.name}
-        </option>
-      ))}
-    </SelectField>
+      searchable={teams.length > 8}
+      searchPlaceholder="Поиск команды..."
+      onChange={onChange}
+    />
   );
 }
 

@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Alert, Button, ConfirmDialog, EmptyState, SelectField, TextField } from "../../../design-system";
+import { Alert, Button, ConfirmDialog, DropdownField, EmptyState, TextField } from "../../../design-system";
 import { cmsUsersApi } from "../api/cmsClient";
 import type { CmsPrincipal, UserItem } from "../api/cmsTypes";
 import { CMS_PERMISSIONS, hasPermission } from "../navigation";
@@ -72,17 +72,18 @@ export default function UsersPage({ principal }: { principal: CmsPrincipal }) {
           value={q}
           onChange={(event) => setQ(event.target.value)}
         />
-        <SelectField
+        <DropdownField
           className="md:max-w-[200px]"
           aria-label="Роль участника"
           value={role}
-          onChange={(event) => setRole(event.target.value)}
-        >
-          <option value="">Все роли</option>
-          <option value="participant">Participant</option>
-          <option value="lead">Lead</option>
-          <option value="admin">Admin</option>
-        </SelectField>
+          options={[
+            { value: "", label: "Все роли" },
+            { value: "participant", label: "Participant" },
+            { value: "lead", label: "Lead" },
+            { value: "admin", label: "Admin" },
+          ]}
+          onChange={setRole}
+        />
         <Button variant="ghost" size="sm" className="whitespace-nowrap" onClick={list.reload}>Обновить</Button>
       </Toolbar>
       <DataTable

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { Badge, Button, EmptyState, SelectField, TextField } from "../../../design-system";
+import { Badge, Button, DropdownField, EmptyState, TextField } from "../../../design-system";
 import type { CmsAdmin, CmsRoleRef } from "../api/cmsTypes";
 import {
   DataTable,
@@ -123,29 +123,29 @@ export default function UsersListPage() {
           value={qInput}
           onChange={(event) => setQInput(event.target.value)}
         />
-        <SelectField
+        <DropdownField
           className="md:max-w-[200px]"
           aria-label="Статус"
           value={activeParam}
-          onChange={(event) => setParam("active", event.target.value)}
-        >
-          <option value="">Все статусы</option>
-          <option value="true">Активные</option>
-          <option value="false">Отключённые</option>
-        </SelectField>
-        <SelectField
+          options={[
+            { value: "", label: "Все статусы" },
+            { value: "true", label: "Активные" },
+            { value: "false", label: "Отключённые" },
+          ]}
+          onChange={(value) => setParam("active", value)}
+        />
+        <DropdownField
           className="md:max-w-[220px]"
           aria-label="Роль"
           value={roleIdParam}
-          onChange={(event) => setParam("role_id", event.target.value)}
-        >
-          <option value="">Все роли</option>
-          {roles.map((role) => (
-            <option key={role.id} value={role.id}>
-              {role.name}
-            </option>
-          ))}
-        </SelectField>
+          options={[
+            { value: "", label: "Все роли" },
+            ...roles.map((role) => ({ value: String(role.id), label: role.name })),
+          ]}
+          searchable={roles.length > 8}
+          searchPlaceholder="Поиск роли..."
+          onChange={(value) => setParam("role_id", value)}
+        />
         {activeFiltersCount > 0 ? (
           <Button variant="ghost" onClick={clearFilters}>
             Сбросить фильтры
