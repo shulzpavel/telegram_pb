@@ -4,7 +4,6 @@ export const CMS_PERMISSIONS = {
   overview: "cms.overview.view",
   sessions: "cms.sessions.view",
   users: "cms.users.view",
-  tokens: "cms.tokens.view",
   events: "cms.events.view",
   access: "cms.access.view",
   accessManage: "cms.access.manage",
@@ -58,7 +57,7 @@ export const cmsTabs: CmsTab[] = [
   {
     key: "overview",
     label: "Сводка",
-    description: "Ключевые цифры по сессиям, участникам и invite-ссылкам.",
+    description: "Ключевые цифры по сессиям, участникам и активности.",
     permission: CMS_PERMISSIONS.overview,
     path: "/cms",
     routePath: "",
@@ -107,15 +106,6 @@ export const cmsTabs: CmsTab[] = [
     permission: CMS_PERMISSIONS.users,
     path: "/cms/users",
     routePath: "users",
-    group: "operations",
-  },
-  {
-    key: "tokens",
-    label: "Invite-ссылки",
-    description: "Активные и истёкшие приглашения. Здесь можно отозвать ссылку.",
-    permission: CMS_PERMISSIONS.tokens,
-    path: "/cms/tokens",
-    routePath: "tokens",
     group: "operations",
   },
   {

@@ -93,7 +93,6 @@ interface EntityLink {
  * Currently understood keys (intentionally narrow — we only link when the
  * destination page would actually surface the entity):
  *   - session_id / chat_id  → /cms/sessions
- *   - token_id              → /cms/tokens
  *   - user / username       → /cms/access/users (search) — admin entities
  *   - admin                 → same as user
  *
@@ -119,14 +118,6 @@ function extractEntityLinks(payload: Record<string, unknown> | null): EntityLink
         : null;
   if (sessionId) {
     push({ label: `Открыть сессию ${sessionId}`, to: `/cms/sessions?q=${encodeURIComponent(sessionId)}` });
-  }
-
-  const tokenId =
-    typeof payload.token_id === "number" || typeof payload.token_id === "string"
-      ? String(payload.token_id)
-      : null;
-  if (tokenId) {
-    push({ label: "Открыть invite-ссылки", to: "/cms/tokens" });
   }
 
   const username =

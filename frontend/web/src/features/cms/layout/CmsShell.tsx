@@ -19,7 +19,6 @@ const PlannerShell = lazy(() => import("../planner/PlannerShell"));
 const ScopeBoardShell = lazy(() => import("../scope/ScopeBoardShell"));
 const RetroShell = lazy(() => import("../retro/RetroShell"));
 const SessionsPage = lazy(() => import("../sessions/SessionsPage"));
-const TokensPage = lazy(() => import("../tokens/TokensPage"));
 const UsersPage = lazy(() => import("../users/UsersPage"));
 
 export default function CmsShell({
@@ -252,9 +251,6 @@ export default function CmsShell({
                 />
               ) : null}
               {hasPermission(principal, CMS_PERMISSIONS.users) ? <Route path="users" element={<UsersPage principal={principal} />} /> : null}
-              {hasPermission(principal, CMS_PERMISSIONS.tokens) ? (
-                <Route path="tokens" element={<TokensPage canManageSessions={canManageSessions} />} />
-              ) : null}
               {hasPermission(principal, CMS_PERMISSIONS.events) ? <Route path="events" element={<AuditEventsPage />} /> : null}
               {hasPermission(principal, CMS_PERMISSIONS.access) ? (
                 <Route
@@ -290,6 +286,7 @@ export default function CmsShell({
                   lingering bookmarks back to the active landing page. */}
               <Route path="votes" element={<Navigate to="/cms/sessions" replace />} />
               <Route path="web" element={<Navigate to="/cms/sessions" replace />} />
+              <Route path="tokens" element={<Navigate to="/cms/sessions" replace />} />
               <Route path="*" element={<CmsIndexRedirect firstPath={visibleTabs[0]?.path} principal={principal} />} />
             </Routes>
           </RouteTransition>

@@ -849,7 +849,7 @@ function SessionDetails({
               total={participantList.total}
               onMore={participantList.loadMore}
             />
-            <WebInviteesBlock sessionKey={detail.session_key} canManageSessions={canManageSessions} />
+            <WebInviteesBlock sessionKey={detail.session_key} />
           </div>
           <TaskQueueEditor
             sessionId={sessionId}
@@ -933,10 +933,8 @@ function ParticipantsBlock({
 
 function WebInviteesBlock({
   sessionKey,
-  canManageSessions,
 }: {
   sessionKey: string;
-  canManageSessions: boolean;
 }) {
   const params = useMemo(() => ({}), []);
   // The CMS API filters by token_hash; we instead pull recent entries and
@@ -957,7 +955,6 @@ function WebInviteesBlock({
       <h4 className="text-sm font-bold text-ink">Заходили по invite-ссылке</h4>
       <p className="text-xs text-ink3">
         Лог веб-участников, которые открыли invite-ссылку и присоединились к сессии. Помогает понять, кто кого пригласил.
-        {canManageSessions ? " Управление самими ссылками — в разделе «Invite-ссылки»." : ""}
       </p>
       <CompactList
         loading={list.loading}

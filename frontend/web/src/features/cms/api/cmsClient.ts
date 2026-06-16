@@ -271,13 +271,6 @@ export const cmsUsersApi = {
     }),
 };
 
-export const cmsTokensApi = {
-  revoke: (tokenId: number) =>
-    cmsFetch<{ ok: boolean; token_id: number; revoked: boolean }>(`/tokens/${tokenId}`, {
-      method: "DELETE",
-    }),
-};
-
 export interface SprintPlanTrack {
   /** Short slug used as the stable reference (e.g. "back", "front", "qa"). */
   id: string;

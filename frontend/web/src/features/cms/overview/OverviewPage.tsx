@@ -118,16 +118,9 @@ function OverviewCards({
       to: "/cms/sessions",
       hint: "Перейти к сессиям",
     },
-    {
-      label: "Invite-ссылки",
-      value: overview.active_web_tokens,
-      caption: `всего создано ${overview.total_web_tokens}`,
-      to: "/cms/tokens",
-      hint: "Открыть invite-ссылки",
-    },
   ];
   return (
-    <section className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7">
+    <section className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">
       {tiles.map((tile) => (
         <button
           key={tile.label}
