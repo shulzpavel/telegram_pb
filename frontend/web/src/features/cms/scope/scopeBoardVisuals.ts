@@ -26,7 +26,75 @@ const SEGMENT_COLORS = {
   overfill: "var(--color-red, #ef4444)",
 } as const;
 
-export function buildCapacityVisual(metrics: ScopeBoardMetrics): CapacityVisualModel {
+type TrackKey = "dev" | "test";
+
+function trackMetrics(metrics: ScopeBoardMetrics, track: TrackKey) {
+  if (track === "dev") {
+    return {
+      plan: metrics.plan_dev_sp ?? 0,
+      unplan: metrics.unplan_dev_sp ?? 0,
+      buffer: metrics.buffer_dev_sp ?? 0,
+      overfill: metrics.overfill_dev_sp ?? 0,
+    };
+  }
+  return {
+    plan: metrics.plan_test_sp ?? 0,
+    unplan: metrics.unplan_test_sp ?? 0,
+    buffer: metrics.buffer_test_sp ?? 0,
+    overfill: metrics.overfill_test_sp ?? 0,
+  };
+}
+
+function buildSpCapacityVisual(
+  capacity: number,
+  planSp: number,
+  unplanSp: number,
+  bufferSp: number,
+  overfill: number,
+  subtitle: string,
+): CapacityVisualModel {
+  const committedSp = planSp + unplanSp;
+  const free = Math.max(0, bufferSp);
+  const segments: DonutSegment[] = [];
+  if (planSp > 0) segments.push({ key: "plan", label: "Плановый scope", value: planSp, color: SEGMENT_COLORS.plan });
+  if (unplanSp > 0) segments.push({ key: "unplan", label: "Внеплановый scope", value: unplanSp, color: SEGMENT_COLORS.unplan });
+  if (free > 0) segments.push({ key: "buffer", label: "Буфер", value: free, color: SEGMENT_COLORS.buffer });
+  if (overfill > 0) segments.push({ key: "overfill", label: "Перегруз", value: overfill, color: SEGMENT_COLORS.overfill });
+  const loadPercent = capacity > 0 ? Math.min(150, (committedSp / capacity) * 100) : 0;
+
+  return {
+    mode: "sp",
+    segments: segments.length ? segments : [{ key: "empty", label: "Пусто", value: 1, color: "#94a3b8" }],
+    centerValue: formatScopeSp(bufferSp),
+    centerLabel: "Буфер",
+    subtitle,
+    loadPercent,
+    loadLabel: `${Math.round(loadPercent)}%`,
+    committedLabel: `${formatScopeSp(committedSp)} / ${formatScopeSp(capacity)} SP`,
+  };
+}
+
+export function buildTrackCapacityVisual(metrics: ScopeBoardMetrics, track: TrackKey): CapacityVisualModel {
+  const capacity =
+    track === "dev"
+      ? Math.max(0, metrics.capacity_sp_dev ?? metrics.capacity_sp)
+      : Math.max(0, metrics.capacity_sp_test ?? metrics.capacity_sp);
+  const { plan, unplan, buffer, overfill } = trackMetrics(metrics, track);
+  const label = track === "dev" ? "SP Dev" : "SP Test";
+  return buildSpCapacityVisual(
+    capacity,
+    Math.max(0, plan),
+    Math.max(0, unplan),
+    buffer,
+    Math.max(0, overfill),
+    `Capacity ${formatScopeSp(capacity)} ${label}`,
+  );
+}
+
+export function buildCapacityVisual(
+  metrics: ScopeBoardMetrics,
+  options?: { splitMode?: boolean },
+): CapacityVisualModel {
   const capacity = Math.max(0, metrics.capacity_sp);
   const planSp = Math.max(0, metrics.plan_sp);
   const unplanSp = Math.max(0, metrics.unplan_sp);
@@ -36,25 +104,16 @@ export function buildCapacityVisual(metrics: ScopeBoardMetrics): CapacityVisualM
   const hasSp = committedSp > 0 || overfill > 0;
 
   if (hasSp) {
-    const free = Math.max(0, bufferSp);
-    const segments: DonutSegment[] = [];
-    if (planSp > 0) segments.push({ key: "plan", label: "Плановый scope", value: planSp, color: SEGMENT_COLORS.plan });
-    if (unplanSp > 0) segments.push({ key: "unplan", label: "Внеплановый scope", value: unplanSp, color: SEGMENT_COLORS.unplan });
-    if (free > 0) segments.push({ key: "buffer", label: "Буфер", value: free, color: SEGMENT_COLORS.buffer });
-    if (overfill > 0) segments.push({ key: "overfill", label: "Перегруз", value: overfill, color: SEGMENT_COLORS.overfill });
-
-    const loadPercent = capacity > 0 ? Math.min(150, (committedSp / capacity) * 100) : 0;
-
-    return {
-      mode: "sp",
-      segments: segments.length ? segments : [{ key: "empty", label: "Пусто", value: 1, color: "#94a3b8" }],
-      centerValue: formatScopeSp(bufferSp),
-      centerLabel: "Буфер",
-      subtitle: `Capacity ${formatScopeSp(capacity)} SP`,
-      loadPercent,
-      loadLabel: `${Math.round(loadPercent)}%`,
-      committedLabel: `${formatScopeSp(committedSp)} / ${formatScopeSp(capacity)} SP`,
-    };
+    return buildSpCapacityVisual(
+      capacity,
+      planSp,
+      unplanSp,
+      bufferSp,
+      overfill,
+      options?.splitMode
+        ? `Суммарно Dev + Test`
+        : `Capacity ${formatScopeSp(capacity)} SP`,
+    );
   }
 
   const planCount = metrics.plan_count;

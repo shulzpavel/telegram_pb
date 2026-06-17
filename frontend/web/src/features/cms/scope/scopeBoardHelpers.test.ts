@@ -7,7 +7,11 @@ import {
   intakeStatusMeta,
   jiraPriorityRank,
   resolveOpenQuestions,
+  needsWorkloadTrackAttention,
+  roleAttentionReasons,
+  workloadAttentionReasons,
   sortDoneIssuesByRecentStatus,
+  sortInTestReportIssues,
   sortIssuesByJiraPriority,
 } from "./scopeBoardHelpers";
 
@@ -44,10 +48,10 @@ describe("intakeStatusMeta", () => {
     expect(meta.bannerTitle).toContain("Буфер");
   });
 
-  it("explains unestimated tasks when buffer is still available", () => {
-    const meta = intakeStatusMeta("stop", { buffer_sp: 29, unestimated_count: 3 });
-    expect(meta.tone).toBe("danger");
-    expect(meta.bannerTitle).toContain("без оценки");
+  it("explains unestimated tasks as warning when buffer is still available", () => {
+    const meta = intakeStatusMeta("warning", { buffer_sp: 29, unestimated_count: 3 });
+    expect(meta.tone).toBe("warning");
+    expect(meta.bannerTitle).toContain("без SP");
     expect(meta.bannerTitle).not.toContain("Буфер исчерпан");
   });
 });
@@ -190,13 +194,37 @@ describe("classifyScopeReportBucket parity with backend", () => {
       }) as const;
 
     expect(classifyScopeReportBucket(issue("В работе"))).toBe("in_work");
-    expect(classifyScopeReportBucket(issue("К тестированию"))).toBe("in_work");
+    expect(classifyScopeReportBucket(issue("К тестированию"))).toBe("in_test");
     expect(classifyScopeReportBucket(issue("Тестирование"))).toBe("in_test");
     expect(classifyScopeReportBucket(issue("Готово", "done"))).toBe("done");
     expect(classifyScopeReportBucket(issue("Пауза"))).toBe("open_questions");
     expect(classifyScopeReportBucket(issue("К релизу"))).toBe("in_test");
     expect(classifyScopeReportBucket(issue("Backlog", "new"))).toBe("not_started");
     expect(classifyScopeReportBucket(issue("К выполнению", "new"))).toBe("not_started");
+  });
+
+  it("sorts in-test column by subgroup then priority", () => {
+    const issue = (key: string, status: string, priority = "Medium") =>
+      ({
+        key,
+        summary: key,
+        url: "",
+        story_points: 1,
+        estimated: true,
+        status,
+        status_category: "indeterminate",
+        issue_type: "Story",
+        labels: [],
+        priority,
+      }) as const;
+
+    const sorted = sortInTestReportIssues([
+      issue("R-1", "К релизу", "Low"),
+      issue("T-1", "К тестированию", "High"),
+      issue("Q-1", "Тестирование", "Medium"),
+    ]);
+
+    expect(sorted.map((item) => item.key)).toEqual(["Q-1", "T-1", "R-1"]);
   });
 });
 
@@ -225,5 +253,112 @@ describe("resolveOpenQuestions", () => {
 
     expect(items).toHaveLength(1);
     expect(items[0]?.last_comment).toBe("Нужен ответ от legal");
+  });
+});
+
+describe("role attention", () => {
+  const baseIssue = {
+    key: "FLEX-1",
+    summary: "Example",
+    url: "https://example/browse/FLEX-1",
+    story_points: 3,
+    estimated: true,
+    status_category: "indeterminate",
+    issue_type: "Story",
+    labels: [],
+    jira_role_assignees: { front: "", back: "", qa: "" },
+  } as const;
+
+  const configured = { front: true, back: true, qa: true };
+
+  it("flags QA gaps only in testing status", () => {
+    const inWork = {
+      ...baseIssue,
+      status: "В работе",
+    };
+    expect(roleAttentionReasons(inWork, { jiraRoleFieldsConfigured: configured })).toEqual([
+      "Не заполнено поле «Разработчик Front»",
+      "Не заполнено поле «Разработчик Back»",
+    ]);
+
+    const inTest = {
+      ...baseIssue,
+      key: "FLEX-2",
+      status: "Тестирование",
+    };
+    expect(roleAttentionReasons(inTest, { jiraRoleFieldsConfigured: configured })).toEqual([
+      "Не заполнено поле «Разработчик Front»",
+      "Не заполнено поле «Разработчик Back»",
+      "Не заполнено поле «Тестировщик»",
+    ]);
+  });
+
+  it("does not flag when jira role fields are filled", () => {
+    const issue = {
+      ...baseIssue,
+      status: "В работе",
+      jira_role_assignees: { front: "Front Dev", back: "Back Dev", qa: "" },
+    };
+    expect(roleAttentionReasons(issue, { jiraRoleFieldsConfigured: configured })).toEqual([]);
+  });
+
+  it("ignores gitlab attribution when jira fields are empty like FLEX-2673", () => {
+    const issue = {
+      ...baseIssue,
+      key: "FLEX-2673",
+      status: "В работе",
+      labels: [],
+      role_evidence: [],
+      role_contributors: {
+        back: { name: "Someone from GitLab", source: "gitlab_mr" },
+      },
+      jira_role_assignees: { front: "", back: "", qa: "" },
+    };
+    expect(roleAttentionReasons(issue, { jiraRoleFieldsConfigured: configured })).toEqual([
+      "Не заполнено поле «Разработчик Front»",
+      "Не заполнено поле «Разработчик Back»",
+    ]);
+  });
+
+  it("flags only configured jira fields", () => {
+    const issue = {
+      ...baseIssue,
+      status: "В работе",
+      jira_role_assignees: { front: "", back: "", qa: "" },
+    };
+    expect(
+      roleAttentionReasons(issue, { jiraRoleFieldsConfigured: { front: false, back: true, qa: false } }),
+    ).toEqual(["Не заполнено поле «Разработчик Back»"]);
+  });
+
+  it("does not flag backlog tasks without roles", () => {
+    const issue = {
+      ...baseIssue,
+      status: "Backlog",
+      status_category: "new",
+      labels: [],
+      role_evidence: [],
+    };
+    expect(roleAttentionReasons(issue, { jiraRoleFieldsConfigured: configured })).toEqual([]);
+  });
+});
+
+describe("workload attention", () => {
+  it("flags issues with only general SP in split mode", () => {
+    const issue = {
+      key: "FLEX-1853",
+      summary: "Example",
+      url: "https://example/browse/FLEX-1853",
+      story_points: 8,
+      story_points_dev: null,
+      story_points_test: null,
+      estimated: true,
+      status: "В работе",
+      status_category: "indeterminate",
+      issue_type: "Story",
+      labels: [],
+    };
+    expect(needsWorkloadTrackAttention(issue)).toBe(true);
+    expect(workloadAttentionReasons(issue)).toEqual(["нет SP Dev", "нет SP Test", "указан только общий SP"]);
   });
 });

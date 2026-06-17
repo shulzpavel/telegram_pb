@@ -1,47 +1,65 @@
 import { Badge, Surface } from "../../../design-system";
-import type { ScopeBoardMetrics } from "../api/cmsClient";
+import type { ScopeBoardMetrics, ScopeWorkloadMode } from "../api/cmsClient";
 import { formatScopeSp, intakeStatusMeta } from "./scopeBoardHelpers";
-import { buildCapacityVisual, donutArcs } from "./scopeBoardVisuals";
+import {
+  buildScopeAlerts,
+  SCOPE_ALERT_LEVEL_LABELS,
+  scopeAlertCountLabel,
+  scopeAlertsSummary,
+  type ScopeDataQualityDetails,
+  type ScopeDataQualityIssue,
+} from "./scopeAlerts";
+import { buildCapacityVisual, buildTrackCapacityVisual, donutArcs } from "./scopeBoardVisuals";
+import { ScopeIncrementalFooter } from "./ScopeIncrementalFooter";
+import { useIncrementalList } from "./scopeListPaging";
+import { DEFAULT_SCOPE_WORKLOAD_MODE } from "./WorkloadModePicker";
+
+export type { ScopeDataQualityDetails, ScopeDataQualityIssue };
 
 export interface ScopeReportSummary {
   inWorkSp: number;
   doneSp: number;
 }
 
-export interface ScopeDataQualityIssue {
-  key: string;
-  summary: string;
-  url?: string;
-  status?: string;
-  section?: string;
-  storyPoints?: number | null;
-  reasons?: string[];
-}
-
-export interface ScopeDataQualityDetails {
-  unestimated: ScopeDataQualityIssue[];
-  roleIssues: ScopeDataQualityIssue[];
-}
-
 export function ScopeVisualDashboard({
   metrics,
+  workloadMode = DEFAULT_SCOPE_WORKLOAD_MODE,
   reportSummary,
   dataQualityDetails,
+  jiraFetchTruncated = 0,
 }: {
   metrics: ScopeBoardMetrics;
+  workloadMode?: ScopeWorkloadMode;
   reportSummary?: ScopeReportSummary;
   dataQualityDetails?: ScopeDataQualityDetails;
+  jiraFetchTruncated?: number;
 }) {
-  const intake = intakeStatusMeta(metrics.intake_status, metrics);
-  const visual = buildCapacityVisual(metrics);
+  const splitMode = workloadMode === "sp_dev_test";
+  const intake = intakeStatusMeta(metrics.intake_status, metrics, splitMode);
+  const visual = buildCapacityVisual(metrics, { splitMode });
+  const devVisual = splitMode ? buildTrackCapacityVisual(metrics, "dev") : null;
+  const testVisual = splitMode ? buildTrackCapacityVisual(metrics, "test") : null;
   const arcs = donutArcs(visual.segments);
-  const roleIssueCount = dataQualityDetails?.roleIssues.length ?? 0;
-  const hasCapacityError = metrics.intake_status === "stop" || metrics.buffer_sp < 0 || metrics.overfill_sp > 0;
-  const hasWarnings = metrics.unestimated_count > 0 || roleIssueCount > 0 || metrics.intake_status === "warning";
+  const alerts = buildScopeAlerts({
+    metrics,
+    workloadMode,
+    dataQualityDetails,
+    jiraFetchTruncated,
+  });
+  const alertSummary = scopeAlertsSummary(alerts);
+  const unestimatedCount = splitMode
+    ? (dataQualityDetails?.unestimated.length ?? metrics.unestimated_count)
+    : metrics.unestimated_count;
 
   return (
     <Surface className="overflow-hidden border-transparent bg-surface/80 p-0 shadow-card">
       <div className="space-y-5 p-4 sm:p-6 lg:p-7">
+        {splitMode && devVisual && testVisual ? (
+          <div className="grid gap-5 xl:grid-cols-2">
+            <TrackCapacityPanel title="SP Dev" visual={devVisual} intake={intake} />
+            <TrackCapacityPanel title="SP Test" visual={testVisual} intake={intake} />
+          </div>
+        ) : (
         <div className="grid gap-5 xl:grid-cols-[minmax(280px,0.85fr)_minmax(0,1.15fr)]">
           <div className="rounded-2xl bg-bg/70 p-5 sm:p-6">
             <div className="flex flex-col items-center gap-5">
@@ -72,13 +90,12 @@ export function ScopeVisualDashboard({
                 <p className="text-sm font-medium text-ink3">{visual.subtitle}</p>
                 <div className="grid auto-rows-fr gap-2 sm:grid-cols-3">
                   {visual.segments.map((segment) => (
-                    <span
+                    <CapacitySegmentChip
                       key={segment.key}
-                      className="inline-flex min-h-14 w-full items-center justify-center gap-2 rounded-xl bg-line2/60 px-3 py-2 text-center text-sm font-medium text-ink2"
-                    >
-                      <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: segment.color }} />
-                      {segment.label} · {visual.mode === "sp" ? `${formatScopeSp(segment.value)} SP` : segment.value}
-                    </span>
+                      color={segment.color}
+                      label={segment.label}
+                      value={visual.mode === "sp" ? `${formatScopeSp(segment.value)} SP` : String(segment.value)}
+                    />
                   ))}
                 </div>
               </div>
@@ -131,49 +148,38 @@ export function ScopeVisualDashboard({
               <MetricChip
                 label="Буфер"
                 value={formatScopeSp(metrics.buffer_sp)}
-                meta={`${metrics.unestimated_count} без оценки`}
-                tone={metrics.buffer_sp < 0 || metrics.unestimated_count > 0 ? "warning" : "neutral"}
+                meta={`${unestimatedCount} без оценки`}
+                tone={metrics.buffer_sp < 0 || unestimatedCount > 0 ? "warning" : "neutral"}
               />
             </div>
           </div>
         </div>
+        )}
 
         <div className="rounded-2xl p-4 sm:p-5">
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
             <div>
               <p className="text-base font-semibold text-ink">Предупреждения и ошибки</p>
-              <p className="mt-1 text-sm text-ink3">Что влияет на достоверность capacity и решение по новому intake.</p>
+              <p className="mt-1 text-sm text-ink3">Критичные блокируют intake, предупреждения требуют согласования, рекомендации — улучшение данных.</p>
             </div>
-            <Badge tone={hasCapacityError ? "danger" : hasWarnings ? "warning" : "success"}>
-              {hasCapacityError ? "Есть ошибки" : hasWarnings ? "Есть предупреждения" : "Без замечаний"}
-            </Badge>
+            <ScopeAlertSummaryBadges summary={alertSummary} />
           </div>
 
-          {intake.bannerTitle ? (
-            <QualityNoticeCard
-              label={intake.bannerTone === "danger" ? "Ошибка" : "Предупреждение"}
-              title={intake.bannerTitle}
-              description={intake.bannerMessage ?? ""}
-              tone={intake.bannerTone === "danger" ? "danger" : "warning"}
-            />
+          {alerts.length === 0 ? (
+            <div className="rounded-2xl bg-emerald-500/10 px-4 py-3 text-sm text-emerald-700">
+              Замечаний нет — capacity и данные выглядят согласованными.
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <ScopeAlertSection level="critical" alerts={alerts} />
+              <ScopeAlertSection level="warning" alerts={alerts} />
+              <ScopeAlertSection level="recommendation" alerts={alerts} />
+            </div>
+          )}
+
+          {dataQualityDetails ? (
+            <DataQualityDetailsBlock details={dataQualityDetails} splitMode={splitMode} />
           ) : null}
-
-          <div className="mt-3 grid gap-3 md:grid-cols-2">
-            <DataQualityCard
-              label="Не оценено"
-              value={`${metrics.unestimated_count} задач`}
-              description="Нет SP — capacity и буфер считаются неполно."
-              tone={metrics.unestimated_count > 0 ? "warning" : "neutral"}
-            />
-            <DataQualityCard
-              label="Не назначена роль"
-              value={`${roleIssueCount} задач`}
-              description="Front/Back/QA не всегда можно разложить по людям."
-              tone={roleIssueCount > 0 ? "warning" : "neutral"}
-            />
-          </div>
-
-          {dataQualityDetails ? <DataQualityDetailsBlock details={dataQualityDetails} /> : null}
         </div>
       </div>
     </Surface>
@@ -191,7 +197,13 @@ function issueLink(issue: ScopeDataQualityIssue) {
   );
 }
 
-function DataQualityDetailsBlock({ details }: { details: ScopeDataQualityDetails }) {
+function DataQualityDetailsBlock({
+  details,
+  splitMode,
+}: {
+  details: ScopeDataQualityDetails;
+  splitMode: boolean;
+}) {
   const hasUnestimated = details.unestimated.length > 0;
   const hasRoleIssues = details.roleIssues.length > 0;
   if (!hasUnestimated && !hasRoleIssues) return null;
@@ -214,13 +226,13 @@ function DataQualityDetailsBlock({ details }: { details: ScopeDataQualityDetails
       </summary>
       <div className="grid gap-4 px-4 pb-4 pt-4 text-sm sm:px-5 sm:pb-5 lg:grid-cols-2">
         <QualityIssueList
-          title="Без SP"
-          emptyText="Все задачи оценены."
+          title={splitMode ? "Без SP Dev / Test" : "Без SP"}
+          emptyText={splitMode ? "У всех задач заполнены SP Dev и SP Test." : "Все задачи оценены."}
           issues={details.unestimated}
-          showStoryPoints={false}
+          showStoryPoints={!splitMode}
         />
         <QualityIssueList
-          title="Без роли"
+          title="Без роли (Front/Back; QA — в тесте)"
           emptyText="Разрывов атрибуции не найдено."
           issues={details.roleIssues}
           showStoryPoints
@@ -241,32 +253,208 @@ function QualityIssueList({
   issues: ScopeDataQualityIssue[];
   showStoryPoints: boolean;
 }) {
-  const visible = issues.slice(0, 12);
-  const hiddenCount = Math.max(0, issues.length - visible.length);
+  const { visibleItems, hasMore, loadMore, loadedCount, total } = useIncrementalList(issues);
+
   return (
     <div>
       <p className="mb-2 font-semibold text-ink">{title}</p>
       {issues.length === 0 ? (
         <p className="rounded-xl bg-amber/[0.08] px-3 py-3 text-ink3">{emptyText}</p>
       ) : (
-        <ul className="space-y-3">
-          {visible.map((issue) => (
-            <li key={`${title}-${issue.key}`} className="rounded-xl bg-amber/[0.08] px-4 py-4">
-              <div className="flex flex-wrap items-center gap-2">
-                {issueLink(issue)}
-                {issue.status ? <Badge tone="neutral">{issue.status}</Badge> : null}
-                {issue.section ? <span className="text-ink3">{issue.section}</span> : null}
-                {showStoryPoints ? <span className="text-ink3">{formatScopeSp(issue.storyPoints ?? null)} SP</span> : null}
-              </div>
-              <p className="mt-1 line-clamp-2 text-ink2">{issue.summary}</p>
-              {issue.reasons?.length ? (
-                <p className="mt-1 text-ink3">{issue.reasons.join(" · ")}</p>
-              ) : null}
-            </li>
-          ))}
-          {hiddenCount > 0 ? <li className="text-ink3">Ещё {hiddenCount} задач скрыто.</li> : null}
-        </ul>
+        <>
+          <ul className="space-y-3">
+            {visibleItems.map((issue) => (
+              <li key={`${title}-${issue.key}`} className="rounded-xl bg-amber/[0.08] px-4 py-4">
+                <div className="flex flex-wrap items-center gap-2">
+                  {issueLink(issue)}
+                  {issue.status ? <Badge tone="neutral">{issue.status}</Badge> : null}
+                  {issue.section ? <span className="text-ink3">{issue.section}</span> : null}
+                  {showStoryPoints ? <span className="text-ink3">{formatScopeSp(issue.storyPoints ?? null)} SP</span> : null}
+                </div>
+                <p className="mt-1 line-clamp-2 text-ink2">{issue.summary}</p>
+                {issue.reasons?.length ? (
+                  <p className="mt-1 text-ink3">{issue.reasons.join(" · ")}</p>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+          <ScopeIncrementalFooter
+            loadedCount={loadedCount}
+            total={total}
+            hasMore={hasMore}
+            onMore={loadMore}
+          />
+        </>
       )}
+    </div>
+  );
+}
+
+function TrackCapacityPanel({
+  title,
+  visual,
+  intake,
+}: {
+  title: string;
+  visual: ReturnType<typeof buildTrackCapacityVisual>;
+  intake: ReturnType<typeof intakeStatusMeta>;
+}) {
+  const arcs = donutArcs(visual.segments);
+  return (
+    <div className="rounded-2xl bg-bg/70 p-5 sm:p-6">
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-base font-semibold text-ink">{title}</p>
+          <p className="mt-1 text-sm text-ink3">{visual.subtitle}</p>
+        </div>
+        <Badge tone={intake.tone}>{intake.label}</Badge>
+      </div>
+      <div className="flex flex-col items-center gap-5">
+        <div className="relative h-44 w-44 sm:h-48 sm:w-48">
+          <svg viewBox="0 0 100 100" className="h-full w-full -rotate-90">
+            <circle cx="50" cy="50" r="38" fill="none" stroke="currentColor" strokeWidth="10" className="text-line2" />
+            {arcs.map((arc) => (
+              <circle
+                key={arc.key}
+                cx="50"
+                cy="50"
+                r="38"
+                fill="none"
+                stroke={arc.color}
+                strokeWidth="10"
+                strokeDasharray={arc.dasharray}
+                strokeDashoffset={arc.dashoffset}
+                strokeLinecap="butt"
+              />
+            ))}
+          </svg>
+          <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center text-center">
+            <p className="text-3xl font-bold text-ink sm:text-4xl">{visual.centerValue}</p>
+            <p className="mt-1 text-xs font-semibold uppercase tracking-wide text-ink3">{visual.centerLabel}</p>
+          </div>
+        </div>
+        <div className="w-full space-y-3">
+          <div className="h-3 overflow-hidden rounded-full bg-line2">
+            <div
+              className={`h-full rounded-full transition-all ${
+                visual.loadPercent > 100 ? "bg-red" : visual.loadPercent > 80 ? "bg-amber" : "bg-emerald-500"
+              }`}
+              style={{ width: `${Math.min(100, visual.loadPercent)}%` }}
+            />
+          </div>
+          <div className="flex items-center justify-between gap-3 text-sm font-medium text-ink2">
+            <span>{visual.committedLabel}</span>
+            <span>{visual.loadLabel}</span>
+          </div>
+          <div className="grid gap-2 sm:grid-cols-3">
+            {visual.segments.map((segment) => (
+              <CapacitySegmentChip
+                key={segment.key}
+                color={segment.color}
+                label={segment.label}
+                value={`${formatScopeSp(segment.value)} SP`}
+                compact
+              />
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CapacitySegmentChip({
+  color,
+  label,
+  value,
+  compact = false,
+}: {
+  color: string;
+  label: string;
+  value: string;
+  compact?: boolean;
+}) {
+  return (
+    <span
+      className={`flex w-full flex-col items-center justify-center gap-1 rounded-xl bg-line2/60 px-2 py-2 text-center ${
+        compact ? "min-h-12" : "min-h-14"
+      }`}
+    >
+      <span className={`flex items-center justify-center gap-1.5 font-medium text-ink3 ${compact ? "text-xs" : "text-xs sm:text-sm"}`}>
+        <span className={`shrink-0 rounded-full ${compact ? "h-2 w-2" : "h-2.5 w-2.5"}`} style={{ backgroundColor: color }} />
+        <span className="leading-snug">{label}</span>
+      </span>
+      <span className={`font-semibold text-ink ${compact ? "text-xs" : "text-sm"}`}>{value}</span>
+    </span>
+  );
+}
+
+function ScopeAlertSummaryBadges({
+  summary,
+}: {
+  summary: ReturnType<typeof scopeAlertsSummary>;
+}) {
+  const total = summary.critical + summary.warning + summary.recommendation;
+  if (total === 0) {
+    return <Badge tone="success" className="shrink-0 whitespace-nowrap">Без замечаний</Badge>;
+  }
+
+  return (
+    <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+      {summary.critical > 0 ? (
+        <Badge tone="danger" className="shrink-0">
+          {scopeAlertCountLabel("critical", summary.critical)}
+        </Badge>
+      ) : null}
+      {summary.warning > 0 ? (
+        <Badge tone="warning" className="shrink-0">
+          {scopeAlertCountLabel("warning", summary.warning)}
+        </Badge>
+      ) : null}
+      {summary.recommendation > 0 ? (
+        <Badge tone="info" className="shrink-0">
+          {scopeAlertCountLabel("recommendation", summary.recommendation)}
+        </Badge>
+      ) : null}
+    </div>
+  );
+}
+
+function ScopeAlertSection({
+  level,
+  alerts,
+}: {
+  level: "critical" | "warning" | "recommendation";
+  alerts: ReturnType<typeof buildScopeAlerts>;
+}) {
+  const items = alerts.filter((alert) => alert.level === level);
+  if (items.length === 0) return null;
+
+  const toneClass =
+    level === "critical"
+      ? "border-red/20 bg-red/[0.06]"
+      : level === "warning"
+        ? "border-amber/20 bg-amber/[0.06]"
+        : "border-blue/20 bg-blue/[0.06]";
+  const titleClass =
+    level === "critical" ? "text-red" : level === "warning" ? "text-amber" : "text-blue";
+
+  return (
+    <div className={`rounded-2xl border px-4 py-3 ${toneClass}`}>
+      <p className={`text-xs font-bold uppercase tracking-wide ${titleClass}`}>
+        {SCOPE_ALERT_LEVEL_LABELS[level]}
+      </p>
+      <ul className="mt-2 space-y-2">
+        {items.map((alert) => (
+          <li key={alert.id} className="rounded-xl bg-surface/70 px-3 py-3">
+            <p className="text-sm font-semibold text-ink">
+              {alert.title}
+              {alert.count != null ? <span className="ml-2 font-normal text-ink3">· {alert.count}</span> : null}
+            </p>
+            <p className="mt-1 text-sm leading-relaxed text-ink3">{alert.description}</p>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
@@ -289,51 +477,6 @@ function MetricChip({
       <p className="text-xs font-semibold uppercase tracking-wide text-ink3">{label}</p>
       <p className="mt-1 text-3xl font-bold text-ink">{value}</p>
       <p className={`mt-1 text-sm ${toneClass}`}>{meta}</p>
-    </div>
-  );
-}
-
-function QualityNoticeCard({
-  label,
-  title,
-  description,
-  tone,
-}: {
-  label: string;
-  title: string;
-  description: string;
-  tone: "warning" | "danger";
-}) {
-  const toneClass =
-    tone === "danger"
-      ? "bg-red/[0.09] text-red"
-      : "bg-amber/[0.09] text-amber";
-  return (
-    <div className={`rounded-2xl px-4 py-3 ${toneClass}`}>
-      <p className="text-xs font-bold uppercase tracking-wide">{label}</p>
-      <p className="mt-1 text-base font-semibold">{title}</p>
-      {description ? <p className="mt-1 text-sm leading-relaxed opacity-90">{description}</p> : null}
-    </div>
-  );
-}
-
-function DataQualityCard({
-  label,
-  value,
-  description,
-  tone,
-}: {
-  label: string;
-  value: string;
-  description: string;
-  tone: "neutral" | "warning";
-}) {
-  const toneClass = tone === "warning" ? "bg-amber/[0.07]" : "bg-surface/80";
-  return (
-    <div className={`rounded-2xl px-4 py-4 ${toneClass}`}>
-      <p className="text-xs font-semibold uppercase tracking-wide text-ink3">{tone === "warning" ? "Предупреждение" : "Проверка"}</p>
-      <p className="mt-1 text-base font-semibold text-ink">{label}: {value}</p>
-      <p className="mt-1 text-sm leading-relaxed text-ink3">{description}</p>
     </div>
   );
 }

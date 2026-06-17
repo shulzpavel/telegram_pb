@@ -31,3 +31,20 @@ def test_scope_issue_responses_include_role_contributors():
     assert rows[0].story_points_front == 3
     assert rows[0].story_points_back == 2
     assert rows[0].story_points_qa == 1
+
+
+def test_scope_issue_responses_include_jira_role_assignees():
+    rows = _scope_issue_responses(
+        [
+            {
+                "key": "FLEX-2673",
+                "summary": "Example",
+                "url": "/browse/FLEX-2673",
+                "story_points": 3,
+                "status": {"name": "В работе", "category": "indeterminate"},
+                "issue_type": {"name": "Story"},
+                "jira_role_assignees": {"front": "", "back": "", "qa": ""},
+            }
+        ]
+    )
+    assert rows[0].jira_role_assignees == {"front": "", "back": "", "qa": ""}

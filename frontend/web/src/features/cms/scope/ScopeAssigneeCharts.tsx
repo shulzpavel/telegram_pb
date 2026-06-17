@@ -25,17 +25,17 @@ const ROLE_META: Record<
   front: {
     label: "Front",
     accent: "neutral",
-    description: "Front по GitLab API (MR/commit), затем Jira-комментарии igaming; оценка — developer из changelog.",
+    description: "Поле Jira «Разработчик Front». Учитываются задачи в работе и в тесте.",
   },
   back: {
     label: "Back",
     accent: "info",
-    description: "Back по GitLab API (MR/commit), затем Jira-комментарии igaming; оценка — developer из changelog.",
+    description: "Поле Jira «Разработчик Back». Учитываются задачи в работе и в тесте.",
   },
   qa: {
     label: "QA",
     accent: "warning",
-    description: "Assignee при переходе в test-статус; при отсутствии — комментарии с признаками тестирования.",
+    description: "Поле Jira «Тестировщик». Учитываются только задачи в статусе тестирования.",
   },
 };
 
@@ -58,7 +58,7 @@ export function ScopeAssigneeCharts({ metrics }: { metrics: ScopeBoardMetrics })
         <summary className="scope-section-header flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 marker:content-none sm:px-5">
           <div>
             <h2 className="text-base font-semibold text-ink">Нагрузка по ролям</h2>
-            <p className="scope-section-header-subtitle mt-1 text-sm">Ролевой срез plan/unplan по Front, Back и QA</p>
+            <p className="scope-section-header-subtitle mt-1 text-sm">Ролевой срез plan/unplan по полям Jira: Front, Back, QA</p>
           </div>
           <span className="scope-section-header-icon inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-transform group-open:rotate-180">
             <svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4" aria-hidden="true">
@@ -94,7 +94,7 @@ export function ScopeAssigneeCharts({ metrics }: { metrics: ScopeBoardMetrics })
         <div className="grid auto-rows-fr gap-3 sm:grid-cols-3">
           <SummaryChip label="Scope всего" value={`${formatScopeSp(roleSummary.scopeSp)} SP`} meta={taskCountLabel(roleSummary.scopeCount)} />
           <SummaryChip label={roleMeta.label} value={`${formatScopeSp(roleSummary.roleSp)} SP`} meta={taskCountLabel(roleSummary.roleCount)} tone="accent" />
-          <SummaryChip label="Без роли" value={taskCountLabel(roleSummary.unattributedCount)} meta="требует атрибуции" tone={roleSummary.unattributedCount > 0 ? "warning" : "neutral"} />
+          <SummaryChip label="Без роли" value={taskCountLabel(roleSummary.unattributedCount)} meta="поле Jira не заполнено" tone={roleSummary.unattributedCount > 0 ? "warning" : "neutral"} />
         </div>
 
         <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(260px,0.55fr)]">
@@ -176,31 +176,16 @@ function SummaryChip({
 
 function formatCoverageLabel(coverage?: ScopeRoleCoverageMap[RoleKey], role?: RoleKey): string | null {
   if (!coverage || coverage.total <= 0) return null;
-  const parts = [`${coverage.attributed} из ${coverage.total} с атрибуцией`];
+  const parts = [`${coverage.attributed} из ${coverage.total} с полем Jira`];
   const tiers: string[] = [];
-  if (role && role !== "qa" && coverage.confirmed_gitlab != null && coverage.confirmed_gitlab > 0) {
-    tiers.push(`${coverage.confirmed_gitlab} GitLab`);
+  if (coverage.confirmed_jira != null && coverage.confirmed_jira > 0) {
+    tiers.push(`${coverage.confirmed_jira} Jira`);
   }
-  if (role === "qa" && coverage.confirmed_jira_qa != null && coverage.confirmed_jira_qa > 0) {
-    tiers.push(`${coverage.confirmed_jira_qa} Jira QA`);
+  if (role === "qa" && coverage.confirmed_jira_qa != null && coverage.confirmed_jira_qa > 0 && coverage.confirmed_jira == null) {
+    tiers.push(`${coverage.confirmed_jira_qa} Jira`);
   }
-  if (coverage.confirmed != null && coverage.confirmed > 0 && role === "qa") {
-    tiers.push(`${coverage.confirmed} подтв.`);
-  }
-  if (coverage.estimated != null && coverage.estimated > 0) {
-    tiers.push(`${coverage.estimated} оценка`);
-  }
-  if (coverage.unresolved_no_gitlab_link != null && coverage.unresolved_no_gitlab_link > 0) {
-    tiers.push(`${coverage.unresolved_no_gitlab_link} без GitLab`);
-  }
-  if (coverage.unresolved_ambiguous_role != null && coverage.unresolved_ambiguous_role > 0) {
-    tiers.push(`${coverage.unresolved_ambiguous_role} конфликт ролей`);
-  }
-  if (coverage.unresolved_no_qa_transition != null && coverage.unresolved_no_qa_transition > 0) {
-    tiers.push(`${coverage.unresolved_no_qa_transition} без QA`);
-  }
-  if (coverage.unattributed != null && coverage.unattributed > 0 && tiers.length === 0) {
-    tiers.push(`${coverage.unattributed} без атрибуции`);
+  if (coverage.unattributed != null && coverage.unattributed > 0) {
+    tiers.push(`${coverage.unattributed} без поля`);
   }
   if (tiers.length > 0) {
     parts.push(`(${tiers.join(" · ")})`);

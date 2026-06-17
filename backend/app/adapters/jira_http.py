@@ -905,6 +905,14 @@ class JiraHttpClient(JiraClient):
                 )
         enriched["role_evidence"] = role_evidence
 
+        from_jira_fields = enriched.get("role_contributors_from_jira_fields")
+        if not isinstance(from_jira_fields, dict):
+            from_jira_fields = {}
+        enriched["jira_role_assignees"] = {
+            role: str((from_jira_fields.get(role) or {}).get("name") or "").strip()
+            for role in ("front", "back", "qa")
+        }
+
         enriched.pop("_subtasks", None)
         enriched.pop("role_contributors_from_jira_fields", None)
         enriched.pop("_comments", None)

@@ -11,6 +11,7 @@ requests, which they did not when the client was instantiated per-request.
 import os
 from typing import Any, Dict, List, Optional
 
+from app.domain.scope_board import jira_role_fields_configured
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
@@ -89,6 +90,7 @@ class ScopeIssueResponse(BaseModel):
     developer: str = ""
     developer_source: str = ""
     role_contributors: dict[str, ScopeRoleContributor] = Field(default_factory=dict)
+    jira_role_assignees: dict[str, str] = Field(default_factory=dict)
     role_contributors_list: list[dict[str, str]] = Field(default_factory=list)
     role_workload_items: list[dict[str, str]] = Field(default_factory=list)
     role_evidence: list[dict[str, str]] = Field(default_factory=list)
@@ -115,6 +117,7 @@ class ScopeIssueResponse(BaseModel):
 
 class ScopeSearchResponse(BaseModel):
     issues: List[ScopeIssueResponse]
+    jira_role_fields_configured: dict[str, bool] = Field(default_factory=dict)
 
 
 class IssueContextResponse(BaseModel):
@@ -421,6 +424,10 @@ def _scope_issue_responses(issues: list[dict]) -> list[ScopeIssueResponse]:
                     for role, payload in (issue.get("role_contributors") or {}).items()
                     if isinstance(payload, dict)
                 },
+                jira_role_assignees={
+                    role: str((issue.get("jira_role_assignees") or {}).get(role) or "").strip()
+                    for role in ("front", "back", "qa")
+                },
                 role_contributors_list=[
                     {
                         "role": str(item.get("role") or ""),
@@ -535,8 +542,11 @@ async def search_scope_issues(
                         )
                     issues = demo_rows
         if not issues:
-            return ScopeSearchResponse(issues=[])
-        return ScopeSearchResponse(issues=_scope_issue_responses(issues))
+            return ScopeSearchResponse(issues=[], jira_role_fields_configured=jira_role_fields_configured())
+        return ScopeSearchResponse(
+            issues=_scope_issue_responses(issues),
+            jira_role_fields_configured=jira_role_fields_configured(),
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Jira scope search failed: {str(e)}")
 

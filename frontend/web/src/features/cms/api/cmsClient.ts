@@ -367,6 +367,7 @@ export const cmsPlannerApi = {
 };
 
 export type ScopeIntakeStatus = "ok" | "warning" | "stop";
+export type ScopeWorkloadMode = "sp" | "sp_dev_test";
 
 export type ScopeSectionKind = "planned" | "unplanned";
 
@@ -382,6 +383,8 @@ export interface ScopeBoardIssue {
   story_points_test?: number | null;
   story_point_estimate?: number | null;
   estimated: boolean;
+  missing_tracks?: string[];
+  workload_attention_reasons?: string[];
   status: string;
   status_category: string;
   issue_type: string;
@@ -403,6 +406,7 @@ export interface ScopeBoardIssue {
   developer?: string;
   developer_source?: string;
   role_contributors?: Record<string, { name?: string; source?: string }>;
+  jira_role_assignees?: Partial<Record<"front" | "back" | "qa", string>>;
   role_contributors_list?: ScopeRoleContributor[];
   role_workload_items?: ScopeRoleEvidence[];
   role_evidence?: ScopeRoleEvidence[];
@@ -578,6 +582,7 @@ export interface ScopeRoleCoverageDetail {
   confirmed?: number;
   estimated?: number;
   unattributed?: number;
+  confirmed_jira?: number;
   confirmed_gitlab?: number;
   confirmed_jira_qa?: number;
   unresolved_no_gitlab_link?: number;
@@ -599,11 +604,22 @@ export interface ScopeDeveloperBreakdown {
 }
 
 export interface ScopeBoardMetrics {
+  workload_mode?: ScopeWorkloadMode;
   capacity_sp: number;
+  capacity_sp_dev?: number | null;
+  capacity_sp_test?: number | null;
   plan_sp: number;
   unplan_sp: number;
   buffer_sp: number;
   overfill_sp: number;
+  plan_dev_sp?: number;
+  unplan_dev_sp?: number;
+  buffer_dev_sp?: number;
+  overfill_dev_sp?: number;
+  plan_test_sp?: number;
+  unplan_test_sp?: number;
+  buffer_test_sp?: number;
+  overfill_test_sp?: number;
   intake_status: ScopeIntakeStatus;
   plan_count: number;
   unplan_count: number;
@@ -723,6 +739,7 @@ export interface ScopeBoardSnapshot {
   unplan_issues: ScopeBoardIssue[];
   metrics: ScopeBoardMetrics;
   report?: ScopeBoardReport;
+  jira_role_fields_configured?: Partial<Record<"front" | "back" | "qa", boolean>>;
   release_context?: ScopeReleaseContext;
   manual_questions?: ScopeManualQuestion[];
   top_items?: ScopeTopItem[];
@@ -805,7 +822,10 @@ export interface ScopeBoardRecord {
   name: string;
   month: string;
   report_type?: "monthly" | "release";
+  workload_mode?: ScopeWorkloadMode;
   capacity_sp: number;
+  capacity_sp_dev?: number | null;
+  capacity_sp_test?: number | null;
   plan_jql: string;
   unplan_jql: string;
   scope_sections: ScopeSectionConfig[] | null;
@@ -843,6 +863,9 @@ export const cmsScopeApi = {
     name: string;
     month: string;
     capacity_sp: number;
+    capacity_sp_dev?: number | null;
+    capacity_sp_test?: number | null;
+    workload_mode?: ScopeWorkloadMode;
     scope_sections: ScopeSectionConfig[];
     todo_jql?: string;
     test_jql?: string;
@@ -867,6 +890,9 @@ export const cmsScopeApi = {
       name: string;
       month: string;
       capacity_sp: number;
+      capacity_sp_dev?: number | null;
+      capacity_sp_test?: number | null;
+      workload_mode?: ScopeWorkloadMode;
       scope_sections: ScopeSectionConfig[];
       todo_jql?: string;
       test_jql?: string;

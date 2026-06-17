@@ -8,71 +8,36 @@ def _issue(key: str, sp: float, **extra):
             "summary": key,
             "url": f"/browse/{key}",
             "story_points": sp,
-            "status": "Done",
+            "status": {"name": "В работе", "category": "indeterminate"},
+            "jira_role_assignees": {"front": "", "back": "", "qa": ""},
             **extra,
         }
     )
 
 
-def test_role_coverage_tracks_gitlab_api_and_unresolved_reason():
-    issue = _issue(
+def test_role_coverage_tracks_jira_fields_and_unfilled():
+    attributed = _issue(
         "P-1",
         5,
-        labels=["backend"],
-        role_contributors={"back": {"name": "Back Dev", "source": "gitlab_api_mr"}},
-        role_evidence=[
-            {
-                "role": "back",
-                "name": "Back Dev",
-                "source": "gitlab_api_mr",
-                "confidence": "confirmed",
-            }
-        ],
+        jira_role_assignees={"front": "", "back": "Back Dev", "qa": ""},
     )
-    unattributed = _issue(
-        "P-2",
-        3,
-        labels=["backend"],
-        role_evidence=[{"role": "back", "unresolved_reason": "unresolved_no_gitlab_link"}],
-    )
+    unattributed = _issue("P-2", 3)
     metrics = compute_scope_metrics_from_sections(
         80,
-        [{"id": "core", "name": "Plan", "kind": "planned", "order": 0, "issues": [issue, unattributed]}],
+        [{"id": "core", "name": "Plan", "kind": "planned", "order": 0, "issues": [attributed, unattributed]}],
         "2026-06",
     )
     coverage = metrics["plan_role_coverage"]["back"]
-    assert coverage["confirmed_gitlab"] == 1
-    assert coverage["unresolved_no_gitlab_link"] == 1
+    assert coverage["confirmed_jira"] == 1
+    assert coverage["unattributed"] == 1
     assert coverage["total"] == 2
 
 
-def test_role_coverage_does_not_require_front_when_back_is_confirmed():
+def test_role_coverage_counts_front_and_back_independently():
     issue = _issue(
         "FLEX-1965",
         2,
-        labels=["frontend", "backend"],
-        role_contributors={"back": {"name": "Back Dev", "source": "gitlab_api_mr"}},
-        role_workload_items=[
-            {
-                "role": "back",
-                "name": "Back Dev",
-                "source": "gitlab_api_mr",
-                "confidence": "confirmed",
-            }
-        ],
-        role_evidence=[
-            {
-                "role": "back",
-                "name": "Back Dev",
-                "source": "gitlab_api_mr",
-                "confidence": "confirmed",
-            },
-            {
-                "role": "front",
-                "unresolved_reason": "unresolved_ambiguous_role",
-                "confidence": "unresolved",
-            },
-        ],
+        jira_role_assignees={"front": "", "back": "Back Dev", "qa": ""},
     )
     metrics = compute_scope_metrics_from_sections(
         80,
@@ -81,6 +46,6 @@ def test_role_coverage_does_not_require_front_when_back_is_confirmed():
     )
 
     assert metrics["plan_role_coverage"]["back"]["total"] == 1
-    assert metrics["plan_role_coverage"]["back"]["confirmed_gitlab"] == 1
-    assert metrics["plan_role_coverage"]["front"]["total"] == 0
-    assert metrics["plan_role_coverage"]["front"]["unresolved_ambiguous_role"] == 0
+    assert metrics["plan_role_coverage"]["back"]["confirmed_jira"] == 1
+    assert metrics["plan_role_coverage"]["front"]["total"] == 1
+    assert metrics["plan_role_coverage"]["front"]["unattributed"] == 1

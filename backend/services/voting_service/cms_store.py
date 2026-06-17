@@ -168,6 +168,9 @@ def _scope_board_row(row: asyncpg.Record) -> dict[str, Any]:
         "name": row["name"],
         "month": row["month"],
         "capacity_sp": float(row["capacity_sp"]),
+        "capacity_sp_dev": float(row["capacity_sp_dev"]) if "capacity_sp_dev" in row.keys() and row["capacity_sp_dev"] is not None else None,
+        "capacity_sp_test": float(row["capacity_sp_test"]) if "capacity_sp_test" in row.keys() and row["capacity_sp_test"] is not None else None,
+        "workload_mode": row["workload_mode"] if "workload_mode" in row.keys() else "sp",
         "plan_jql": row["plan_jql"],
         "unplan_jql": row["unplan_jql"],
         "todo_jql": row["todo_jql"],
@@ -731,6 +734,12 @@ class PostgresCmsStore:
                 ADD COLUMN IF NOT EXISTS next_release_comment TEXT NOT NULL DEFAULT '';
             ALTER TABLE cms_scope_boards
                 ADD COLUMN IF NOT EXISTS custom_release_comment TEXT NOT NULL DEFAULT '';
+            ALTER TABLE cms_scope_boards
+                ADD COLUMN IF NOT EXISTS workload_mode TEXT NOT NULL DEFAULT 'sp';
+            ALTER TABLE cms_scope_boards
+                ADD COLUMN IF NOT EXISTS capacity_sp_dev NUMERIC(10, 2);
+            ALTER TABLE cms_scope_boards
+                ADD COLUMN IF NOT EXISTS capacity_sp_test NUMERIC(10, 2);
             CREATE INDEX IF NOT EXISTS idx_cms_scope_boards_updated
                 ON cms_scope_boards(updated_at DESC, id DESC);
 
@@ -1976,7 +1985,8 @@ class PostgresCmsStore:
     # -- monthly scope boards --------------------------------------------
 
     _SCOPE_BOARD_SELECT = """
-        SELECT b.id, b.name, b.month, b.capacity_sp, b.plan_jql, b.unplan_jql,
+        SELECT b.id, b.name, b.month, b.capacity_sp, b.capacity_sp_dev, b.capacity_sp_test,
+               b.workload_mode, b.plan_jql, b.unplan_jql,
                b.todo_jql, b.test_jql, b.report_type, b.previous_release_jql,
                b.next_release_jql, b.custom_release_name, b.custom_release_jql,
                b.release_queries,
@@ -2038,6 +2048,9 @@ class PostgresCmsStore:
         unplan_jql: str,
         todo_jql: str = "",
         test_jql: str = "",
+        workload_mode: str = "sp",
+        capacity_sp_dev: Optional[float] = None,
+        capacity_sp_test: Optional[float] = None,
         report_type: str = "monthly",
         previous_release_jql: str = "",
         next_release_jql: str = "",
@@ -2056,21 +2069,24 @@ class PostgresCmsStore:
             row = await conn.fetchrow(
                 """
                 INSERT INTO cms_scope_boards
-                    (name, month, capacity_sp, plan_jql, unplan_jql, todo_jql, test_jql,
+                    (name, month, capacity_sp, capacity_sp_dev, capacity_sp_test, plan_jql, unplan_jql, todo_jql, test_jql, workload_mode,
                      report_type, previous_release_jql, next_release_jql, custom_release_name, custom_release_jql,
                      release_queries,
                      release_comment, previous_release_comment, next_release_comment, custom_release_comment,
                      scope_sections, created_by, team_id)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb, $14, $15, $16, $17, $18::jsonb, $19, $20)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16::jsonb, $17, $18, $19, $20, $21::jsonb, $22, $23)
                 RETURNING id
                 """,
                 name.strip(),
                 month.strip(),
                 capacity_sp,
+                capacity_sp_dev,
+                capacity_sp_test,
                 plan_jql.strip(),
                 unplan_jql.strip(),
                 todo_jql.strip(),
                 test_jql.strip(),
+                workload_mode.strip() or "sp",
                 report_type.strip() or "monthly",
                 previous_release_jql.strip(),
                 next_release_jql.strip(),
@@ -2100,6 +2116,9 @@ class PostgresCmsStore:
         unplan_jql: str,
         todo_jql: str = "",
         test_jql: str = "",
+        workload_mode: str = "sp",
+        capacity_sp_dev: Optional[float] = None,
+        capacity_sp_test: Optional[float] = None,
         report_type: str = "monthly",
         previous_release_jql: str = "",
         next_release_jql: str = "",
@@ -2119,21 +2138,24 @@ class PostgresCmsStore:
                 SET name = $2,
                     month = $3,
                     capacity_sp = $4,
-                    plan_jql = $5,
-                    unplan_jql = $6,
-                    todo_jql = $7,
-                    test_jql = $8,
-                    report_type = $9,
-                    previous_release_jql = $10,
-                    next_release_jql = $11,
-                    custom_release_name = $12,
-                    custom_release_jql = $13,
-                    release_queries = $14::jsonb,
-                    release_comment = $15,
-                    previous_release_comment = $16,
-                    next_release_comment = $17,
-                    custom_release_comment = $18,
-                    scope_sections = $19::jsonb,
+                    capacity_sp_dev = $5,
+                    capacity_sp_test = $6,
+                    plan_jql = $7,
+                    unplan_jql = $8,
+                    todo_jql = $9,
+                    test_jql = $10,
+                    workload_mode = $11,
+                    report_type = $12,
+                    previous_release_jql = $13,
+                    next_release_jql = $14,
+                    custom_release_name = $15,
+                    custom_release_jql = $16,
+                    release_queries = $17::jsonb,
+                    release_comment = $18,
+                    previous_release_comment = $19,
+                    next_release_comment = $20,
+                    custom_release_comment = $21,
+                    scope_sections = $22::jsonb,
                     updated_at = NOW()
                 WHERE id = $1
                 RETURNING id
@@ -2142,10 +2164,13 @@ class PostgresCmsStore:
                 name.strip(),
                 month.strip(),
                 capacity_sp,
+                capacity_sp_dev,
+                capacity_sp_test,
                 plan_jql.strip(),
                 unplan_jql.strip(),
                 todo_jql.strip(),
                 test_jql.strip(),
+                workload_mode.strip() or "sp",
                 report_type.strip() or "monthly",
                 previous_release_jql.strip(),
                 next_release_jql.strip(),

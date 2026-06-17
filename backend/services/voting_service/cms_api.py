@@ -38,11 +38,14 @@ from app.domain.scope_board import (
     infer_release_version_lookup,
     is_scope_creep,
     merge_priority_queue,
+    merge_jira_role_fields_configured,
     merge_scope_issues,
+    normalise_workload_mode,
     normalize_scope_issue,
     normalize_scope_sections,
     normalize_version_meta,
     pause_supplement_jql,
+    refresh_scope_snapshot_metrics,
     priority_queue_label,
     priority_queue_milestone_targets,
     release_scope_sections,
@@ -299,6 +302,9 @@ class ScopeBoardCreateRequest(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     month: str = Field(min_length=7, max_length=7, pattern=r"^\d{4}-\d{2}$")
     capacity_sp: float = Field(ge=0, le=99999)
+    capacity_sp_dev: Optional[float] = Field(default=None, ge=0, le=99999)
+    capacity_sp_test: Optional[float] = Field(default=None, ge=0, le=99999)
+    workload_mode: Literal["sp", "sp_dev_test"] = "sp"
     scope_sections: list[ScopeSectionConfigRequest] = Field(min_length=1, max_length=20)
     plan_jql: str = Field(default="", max_length=4000)
     unplan_jql: str = Field(default="", max_length=4000)
@@ -320,6 +326,9 @@ class ScopeBoardUpdateRequest(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     month: str = Field(min_length=7, max_length=7, pattern=r"^\d{4}-\d{2}$")
     capacity_sp: float = Field(ge=0, le=99999)
+    capacity_sp_dev: Optional[float] = Field(default=None, ge=0, le=99999)
+    capacity_sp_test: Optional[float] = Field(default=None, ge=0, le=99999)
+    workload_mode: Literal["sp", "sp_dev_test"] = "sp"
     scope_sections: list[ScopeSectionConfigRequest] = Field(min_length=1, max_length=20)
     plan_jql: str = Field(default="", max_length=4000)
     unplan_jql: str = Field(default="", max_length=4000)
@@ -1499,6 +1508,7 @@ class _ScopeJqlFetchResult:
     issues: list[dict[str, Any]]
     failed: bool = False
     truncated: bool = False
+    jira_role_fields_configured: dict[str, bool] | None = None
 
 
 def _count_snapshot_issues(snapshot: dict[str, Any] | None) -> int:
@@ -1527,7 +1537,7 @@ async def _fetch_scope_issues(
     if not cleaned:
         return _ScopeJqlFetchResult(jql="", issues=[])
     try:
-        raw_issues = await client.parse_jira_scope_issues(
+        raw_payload = await client.parse_jira_scope_issues(
             cleaned,
             max_results=SCOPE_JQL_MAX_RESULTS,
             force_refresh=force_refresh,
@@ -1537,13 +1547,20 @@ async def _fetch_scope_issues(
     except Exception as exc:
         logger.warning("scope jql fetch failed jql=%s error=%s", cleaned, exc)
         return _ScopeJqlFetchResult(jql=cleaned, issues=[], failed=True)
-    if raw_issues is None:
+    if raw_payload is None:
         return _ScopeJqlFetchResult(jql=cleaned, issues=[], failed=True)
+    if isinstance(raw_payload, dict):
+        raw_issues = raw_payload.get("issues") or []
+        configured = raw_payload.get("jira_role_fields_configured") or {}
+    else:
+        raw_issues = raw_payload
+        configured = {}
     issues = [normalize_scope_issue(issue) for issue in raw_issues]
     return _ScopeJqlFetchResult(
         jql=cleaned,
         issues=issues,
         truncated=len(issues) >= SCOPE_JQL_MAX_RESULTS,
+        jira_role_fields_configured=configured,
     )
 
 
@@ -1709,6 +1726,9 @@ def _scope_board_payload_from_request(
         "name": body.name,
         "month": body.month,
         "capacity_sp": body.capacity_sp,
+        "capacity_sp_dev": body.capacity_sp_dev,
+        "capacity_sp_test": body.capacity_sp_test,
+        "workload_mode": normalise_workload_mode(body.workload_mode),
         "plan_jql": plan_jql,
         "unplan_jql": unplan_jql,
         "todo_jql": body.todo_jql,
@@ -2232,6 +2252,19 @@ async def cms_update_scope_board(
     )
     if not board:
         raise HTTPException(status_code=404, detail="Scope board not found")
+    snapshot = board.get("snapshot")
+    if snapshot:
+        refreshed_snapshot = refresh_scope_snapshot_metrics(
+            snapshot,
+            capacity_sp=board["capacity_sp"],
+            month=board["month"],
+            workload_mode=board.get("workload_mode"),
+            capacity_sp_dev=board.get("capacity_sp_dev"),
+            capacity_sp_test=board.get("capacity_sp_test"),
+        )
+        board = await _get_cms_store(request).save_scope_board_snapshot(board_id, refreshed_snapshot)
+        if not board:
+            raise HTTPException(status_code=404, detail="Scope board not found")
     await _audit(
         request,
         "cms.scope_board.update",
@@ -2372,12 +2405,19 @@ async def cms_refresh_scope_board(
         existing["capacity_sp"],
         fetched_sections,
         existing["month"],
+        workload_mode=existing.get("workload_mode"),
+        capacity_sp_dev=existing.get("capacity_sp_dev"),
+        capacity_sp_test=existing.get("capacity_sp_test"),
     )
     snapshot = build_scope_snapshot(
         sections=fetched_sections,
         metrics=metrics,
         refreshed_at=refreshed_at,
         previous_snapshot=previous_snapshot,
+    )
+    snapshot["jira_role_fields_configured"] = merge_jira_role_fields_configured(
+        snapshot.get("jira_role_fields_configured"),
+        *[outcome.jira_role_fields_configured for outcome in fetch_outcomes],
     )
     snapshot["manual_questions"] = previous_snapshot.get("manual_questions") or []
     snapshot["resolved_questions"] = previous_snapshot.get("resolved_questions") or []

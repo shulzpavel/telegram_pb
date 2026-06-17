@@ -28,6 +28,7 @@ export type ScopeOpenQuestion = (ScopeBoardIssue | ScopeManualQuestion) & {
 const DONE_STATUS_NAMES = new Set(["готово", "done", "closed", "resolved", "cancelled", "canceled", "won't do", "wont do"]);
 const PAUSE_STATUS_KEYWORDS = ["пауз", "pause", "on hold", "blocked"];
 const TEST_STATUS_NAMES = new Set(["тестирование", "к релизу"]);
+const REPORT_IN_TEST_STATUS_NAMES = new Set(["тестирование", "к тестированию", "к релизу"]);
 const NOT_STARTED_STATUS_NAMES = new Set(["backlog", "бэклог", "к выполнению", "to do", "todo", "open"]);
 
 const JIRA_PRIORITY_RANK: Record<string, number> = {
@@ -82,7 +83,41 @@ export function sortDoneIssuesByRecentStatus(issues: ScopeBoardIssue[]): ScopeBo
 
 function sortReportColumnIssues(column: ScopeReportBucket, issues: ScopeBoardIssue[]): ScopeBoardIssue[] {
   if (column === "done") return sortDoneIssuesByRecentStatus(issues);
+  if (column === "in_test") return sortInTestReportIssues(issues);
   return sortIssuesByJiraPriority(issues);
+}
+
+export type InTestReportSubgroup = "testing" | "ready_for_test" | "ready_for_release";
+
+const IN_TEST_REPORT_SUBGROUP_ORDER: Record<InTestReportSubgroup, number> = {
+  testing: 0,
+  ready_for_test: 1,
+  ready_for_release: 2,
+};
+
+export const IN_TEST_REPORT_SUBGROUP_LABELS: Record<InTestReportSubgroup, string> = {
+  testing: "Тестирование",
+  ready_for_test: "К тестированию",
+  ready_for_release: "К релизу",
+};
+
+export function inTestReportSubgroup(issue: ScopeBoardIssue): InTestReportSubgroup {
+  const status = (issue.status || "").toLowerCase().trim();
+  if (status === "к тестированию") return "ready_for_test";
+  if (status === "к релизу") return "ready_for_release";
+  return "testing";
+}
+
+export function sortInTestReportIssues(issues: ScopeBoardIssue[]): ScopeBoardIssue[] {
+  return [...issues].sort((left, right) => {
+    const bySubgroup =
+      IN_TEST_REPORT_SUBGROUP_ORDER[inTestReportSubgroup(left)] -
+      IN_TEST_REPORT_SUBGROUP_ORDER[inTestReportSubgroup(right)];
+    if (bySubgroup !== 0) return bySubgroup;
+    const byPriority = jiraPriorityRank(left.priority) - jiraPriorityRank(right.priority);
+    if (byPriority !== 0) return byPriority;
+    return left.key.localeCompare(right.key);
+  });
 }
 
 export function classifyScopeReportBucket(issue: ScopeBoardIssue): ScopeReportBucket {
@@ -94,7 +129,7 @@ export function classifyScopeReportBucket(issue: ScopeBoardIssue): ScopeReportBu
   if (status === "пауза" || PAUSE_STATUS_KEYWORDS.some((token) => status.includes(token))) {
     return "open_questions";
   }
-  if (TEST_STATUS_NAMES.has(status)) {
+  if (REPORT_IN_TEST_STATUS_NAMES.has(status)) {
     return "in_test";
   }
   if (category === "new" || NOT_STARTED_STATUS_NAMES.has(status)) {
@@ -419,29 +454,37 @@ export interface IntakeStatusMeta {
 
 type IntakeStatusMetricContext = Pick<ScopeBoardMetrics, "buffer_sp" | "unestimated_count">;
 
-export function intakeStatusMeta(status: ScopeIntakeStatus, metrics?: IntakeStatusMetricContext | null): IntakeStatusMeta {
+export function intakeStatusMeta(
+  status: ScopeIntakeStatus,
+  metrics?: IntakeStatusMetricContext | null,
+  splitMode = false,
+): IntakeStatusMeta {
+  const missingLabel = splitMode ? "SP Dev / Test" : "SP";
+  const unestimatedCount = metrics?.unestimated_count ?? 0;
+
   switch (status) {
-    case "stop": {
-      if (metrics && metrics.buffer_sp > 0 && metrics.unestimated_count > 0) {
-        return {
-          label: "Стоп intake",
-          tone: "danger",
-          bannerTitle: "Есть задачи без оценки — новые задачи не берём",
-          bannerMessage:
-            "Буфер ещё есть, но активные задачи без SP делают capacity недостоверной. Сначала оцените задачи или согласуйте исключение.",
-          bannerTone: "danger",
-        };
-      }
+    case "stop":
       return {
         label: "Стоп intake",
         tone: "danger",
-        bannerTitle: "Буфер исчерпан — новые задачи не берём",
-        bannerMessage:
-          "План и незапланированный burn превышают capacity, или есть активные задачи без оценки. Новый intake только после согласования.",
+        bannerTitle: splitMode ? "Буфер Dev или Test исчерпан — новые задачи не берём" : "Буфер исчерпан — новые задачи не берём",
+        bannerMessage: splitMode
+          ? "План и внеплановый burn превышают capacity по Dev или Test."
+          : "План и незапланированный burn превышают capacity. Новый intake только после согласования.",
         bannerTone: "danger",
       };
-    }
     case "warning":
+      if (unestimatedCount > 0) {
+        return {
+          label: "Осторожно",
+          tone: "warning",
+          bannerTitle: `Есть задачи без ${missingLabel} — intake по согласованию`,
+          bannerMessage: splitMode
+            ? "Активные задачи без SP Dev или SP Test делают capacity по трекам недостоверной. Оцените задачи или согласуйте исключение."
+            : "Активные задачи без SP делают capacity недостоверной. Оцените задачи или согласуйте исключение.",
+          bannerTone: "warning",
+        };
+      }
       return {
         label: "Осторожно",
         tone: "warning",
@@ -466,6 +509,142 @@ export function formatScopeSp(value: number | null | undefined): string {
   }
   const rounded = Math.round(value * 10) / 10;
   return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
+}
+
+function positiveTrackSp(value: number | null | undefined): number | null {
+  if (value == null || Number.isNaN(value) || value <= 0) return null;
+  return value;
+}
+
+export function issueInTestPhase(issue: ScopeBoardIssue): boolean {
+  const status = (issue.status || "").toLowerCase().trim();
+  return TEST_STATUS_NAMES.has(status);
+}
+
+export type JiraScopeRole = "front" | "back" | "qa";
+
+export type JiraRoleFieldsConfigured = Record<JiraScopeRole, boolean>;
+
+const DEFAULT_JIRA_ROLE_FIELDS_CONFIGURED: JiraRoleFieldsConfigured = {
+  front: true,
+  back: true,
+  qa: true,
+};
+
+const JIRA_ROLE_FIELD_LABELS: Record<JiraScopeRole, string> = {
+  front: "Не заполнено поле «Разработчик Front»",
+  back: "Не заполнено поле «Разработчик Back»",
+  qa: "Не заполнено поле «Тестировщик»",
+};
+
+export function resolveJiraRoleFieldsConfigured(
+  snapshot?: Pick<ScopeBoardSnapshot, "jira_role_fields_configured" | "sections" | "plan_issues" | "unplan_issues"> | null,
+): JiraRoleFieldsConfigured {
+  const configured = snapshot?.jira_role_fields_configured;
+  if (!configured) return DEFAULT_JIRA_ROLE_FIELDS_CONFIGURED;
+  const resolved: JiraRoleFieldsConfigured = {
+    front: configured.front ?? false,
+    back: configured.back ?? false,
+    qa: configured.qa ?? false,
+  };
+  if (resolved.front || resolved.back || resolved.qa) return resolved;
+  if (snapshot && snapshotHasJiraRoleFieldSignals(snapshot)) {
+    return DEFAULT_JIRA_ROLE_FIELDS_CONFIGURED;
+  }
+  return resolved;
+}
+
+function snapshotHasJiraRoleFieldSignals(
+  snapshot: Pick<ScopeBoardSnapshot, "sections" | "plan_issues" | "unplan_issues">,
+): boolean {
+  for (const section of resolveSnapshotSections(snapshot as ScopeBoardSnapshot)) {
+    for (const issue of section.issues) {
+      if (issue.jira_role_assignees) return true;
+      for (const role of ["front", "back", "qa"] as const) {
+        if (issue.role_contributors?.[role]?.source === "jira_field") return true;
+      }
+    }
+  }
+  return false;
+}
+
+export function jiraRoleAssigneeName(issue: ScopeBoardIssue, role: JiraScopeRole): string {
+  const explicit = issue.jira_role_assignees?.[role];
+  if (explicit !== undefined) return explicit.trim();
+  const contributor = issue.role_contributors?.[role];
+  if (contributor?.source === "jira_field") return contributor.name?.trim() ?? "";
+  return "";
+}
+
+export function hasJiraRoleAssignee(issue: ScopeBoardIssue, role: JiraScopeRole): boolean {
+  return Boolean(jiraRoleAssigneeName(issue, role));
+}
+
+export function roleAttentionReasons(
+  issue: ScopeBoardIssue,
+  options?: { jiraRoleFieldsConfigured?: JiraRoleFieldsConfigured },
+): string[] {
+  const bucket = classifyScopeReportBucket(issue);
+  if (bucket === "done" || bucket === "open_questions" || bucket === "not_started") return [];
+
+  const configured = options?.jiraRoleFieldsConfigured ?? DEFAULT_JIRA_ROLE_FIELDS_CONFIGURED;
+  const reasons: string[] = [];
+
+  if (bucket === "in_work" || bucket === "in_test") {
+    for (const role of ["front", "back"] as const) {
+      if (!configured[role]) continue;
+      if (!hasJiraRoleAssignee(issue, role)) {
+        reasons.push(JIRA_ROLE_FIELD_LABELS[role]);
+      }
+    }
+  }
+
+  if (issueInTestPhase(issue) && configured.qa && !hasJiraRoleAssignee(issue, "qa")) {
+    reasons.push(JIRA_ROLE_FIELD_LABELS.qa);
+  }
+
+  return reasons;
+}
+
+export function needsRoleAttributionAttention(issue: ScopeBoardIssue): boolean {
+  return roleAttentionReasons(issue).length > 0;
+}
+
+export function missingWorkloadTracks(issue: ScopeBoardIssue): Array<"dev" | "test"> {
+  const missing: Array<"dev" | "test"> = [];
+  if (positiveTrackSp(issue.story_points_dev) == null) missing.push("dev");
+  if (positiveTrackSp(issue.story_points_test) == null) missing.push("test");
+  return missing;
+}
+
+export function workloadAttentionReasons(issue: ScopeBoardIssue): string[] {
+  const missing = missingWorkloadTracks(issue);
+  if (missing.length === 0) return [];
+  const reasons: string[] = missing.map((track) => (track === "dev" ? "нет SP Dev" : "нет SP Test"));
+  if (positiveTrackSp(issue.story_points) != null) {
+    reasons.push("указан только общий SP");
+  }
+  return reasons;
+}
+
+export function needsWorkloadTrackAttention(issue: ScopeBoardIssue): boolean {
+  if (classifyScopeReportBucket(issue) === "done") return false;
+  return missingWorkloadTracks(issue).length > 0;
+}
+
+export function buildWorkloadAttentionIssues(snapshot: ScopeBoardSnapshot): ScopeBoardIssue[] {
+  const byKey = new Map<string, ScopeBoardIssue>();
+  for (const section of resolveSnapshotSections(snapshot)) {
+    for (const issue of section.issues) {
+      if (!needsWorkloadTrackAttention(issue)) continue;
+      byKey.set(issue.key, {
+        ...issue,
+        section_name: issue.section_name || section.name,
+        bucket: issue.bucket || section.id,
+      });
+    }
+  }
+  return Array.from(byKey.values()).sort((left, right) => left.key.localeCompare(right.key));
 }
 
 export function currentMonthValue(): string {

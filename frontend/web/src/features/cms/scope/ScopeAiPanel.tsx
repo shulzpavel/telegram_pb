@@ -3,7 +3,8 @@ import { Badge, cn } from "../../../design-system";
 import { normalizeAiHistory } from "./scopeAiHistory";
 import { ScopeAiView, formatAiTime, HEALTH_LABELS, HEALTH_TONE } from "./ScopeAiView";
 import type { ScopeAiHistoryEntry, ScopeAiSummary } from "./scopeAiTypes";
-import type { ScopeBoardMetrics } from "../api/cmsClient";
+import type { ScopeBoardMetrics, ScopeWorkloadMode } from "../api/cmsClient";
+import { DEFAULT_SCOPE_WORKLOAD_MODE } from "./WorkloadModePicker";
 
 export function ScopeAiPanel({
   summary,
@@ -11,6 +12,7 @@ export function ScopeAiPanel({
   selectedHistoryId,
   onSelectHistory,
   metrics,
+  workloadMode = DEFAULT_SCOPE_WORKLOAD_MODE,
   openQuestionsCount = 0,
   autoOpenSignal = 0,
   analyzing = false,
@@ -20,6 +22,7 @@ export function ScopeAiPanel({
   selectedHistoryId: string | null;
   onSelectHistory: (id: string | null) => void;
   metrics?: ScopeBoardMetrics | null;
+  workloadMode?: ScopeWorkloadMode;
   openQuestionsCount?: number;
   autoOpenSignal?: number;
   analyzing?: boolean;
@@ -109,6 +112,7 @@ export function ScopeAiPanel({
               snapshotLabel={snapshotLabel}
               isHistorical={isHistorical}
               metrics={metrics}
+              workloadMode={workloadMode}
               openQuestionsCount={openQuestionsCount}
             />
 

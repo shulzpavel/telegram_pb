@@ -223,7 +223,7 @@ class JiraServiceHttpClient(JiraClient):
         force_refresh: bool = False,
         milestone_status_targets: Optional[list[str]] = None,
         enrich_changelog: bool = True,
-    ) -> Optional[List[Dict[str, Any]]]:
+    ) -> Optional[dict[str, Any]]:
         """Fetch scope-dashboard issues via Jira Service."""
         url = f"{self.base_url}/api/v1/search/scope"
         payload: dict[str, Any] = {
@@ -237,7 +237,7 @@ class JiraServiceHttpClient(JiraClient):
         try:
             data = await self._post_json(url, payload)
             issues = data.get("issues", [])
-            return [
+            mapped = [
                 {
                     "key": issue["key"],
                     "summary": issue["summary"],
@@ -269,6 +269,7 @@ class JiraServiceHttpClient(JiraClient):
                     "developer": issue.get("developer"),
                     "developer_source": issue.get("developer_source"),
                     "role_contributors": issue.get("role_contributors") or {},
+                    "jira_role_assignees": issue.get("jira_role_assignees") or {},
                     "role_contributors_list": issue.get("role_contributors_list") or [],
                     "role_workload_items": issue.get("role_workload_items") or [],
                     "role_evidence": issue.get("role_evidence") or [],
@@ -297,6 +298,10 @@ class JiraServiceHttpClient(JiraClient):
                 }
                 for issue in issues
             ]
+            return {
+                "issues": mapped,
+                "jira_role_fields_configured": data.get("jira_role_fields_configured") or {},
+            }
         except Exception as e:
             raise RuntimeError(f"Failed to fetch scope issues via Jira Service: {e}") from e
 

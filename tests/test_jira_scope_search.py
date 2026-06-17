@@ -95,6 +95,11 @@ def test_finalize_scope_issue_roles_trusts_jira_qa_field():
         "name": "QA Person",
         "source": "jira_field",
     }
+    assert enriched["jira_role_assignees"] == {
+        "front": "",
+        "back": "",
+        "qa": "QA Person",
+    }
     assert not any(
         item.get("role") == "qa" and item.get("unresolved_reason") == "unresolved_no_qa_transition"
         for item in enriched["role_evidence"]

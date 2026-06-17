@@ -56,6 +56,7 @@ import {
 import { useCmsTeams } from "../hooks/useCmsTeams";
 import { useUnsavedChangesGuard } from "../hooks/useUnsavedChangesGuard";
 import {
+  buildWorkloadAttentionIssues,
   currentMonthValue,
   computeScopeReport,
   formatScopeDisplayMonth,
@@ -63,6 +64,9 @@ import {
   intakeStatusMeta,
   normalizeScopeReport,
   resolveOpenQuestions,
+  roleAttentionReasons,
+  resolveJiraRoleFieldsConfigured,
+  workloadAttentionReasons,
 } from "./scopeBoardHelpers";
 import { ScopeActivityFeed } from "./ScopeActivityFeed";
 import { ScopeAiPanel } from "./ScopeAiPanel";
@@ -92,7 +96,8 @@ import {
 import { useIncrementalList } from "./scopeListPaging";
 import type { ScopeAiSummary, ScopeAiHistoryEntry } from "./scopeAiTypes";
 import { printScopeReport } from "./scopeReportPrint";
-import type { ScopeSectionConfig } from "../api/cmsClient";
+import type { ScopeSectionConfig, ScopeWorkloadMode } from "../api/cmsClient";
+import WorkloadModePicker, { DEFAULT_SCOPE_WORKLOAD_MODE } from "./WorkloadModePicker";
 
 interface ScopeBoardShellProps {
   principal: CmsPrincipal;
@@ -103,6 +108,9 @@ interface ScopeBoardForm {
   name: string;
   month: string;
   capacity_sp: string;
+  capacity_sp_dev: string;
+  capacity_sp_test: string;
+  workload_mode: ScopeWorkloadMode;
   scope_sections: ScopeSectionConfig[];
   todo_jql: string;
   test_jql: string;
@@ -180,6 +188,14 @@ function formatCreated(iso: string | null | undefined): string {
   }
 }
 
+function resolveCapacityFields(board: ScopeBoardRecord): { dev: string; test: string } {
+  const fallback = String(board.capacity_sp);
+  return {
+    dev: board.capacity_sp_dev != null ? String(board.capacity_sp_dev) : fallback,
+    test: board.capacity_sp_test != null ? String(board.capacity_sp_test) : fallback,
+  };
+}
+
 function boardToForm(board: ScopeBoardRecord): ScopeBoardForm {
   const legacyReleaseQueries = normalizeReleaseQueries(board.release_queries, {
     previous_release_jql: board.previous_release_jql ?? "",
@@ -187,10 +203,14 @@ function boardToForm(board: ScopeBoardRecord): ScopeBoardForm {
     custom_release_name: board.custom_release_name ?? "",
     custom_release_jql: board.custom_release_jql ?? "",
   });
+  const capacities = resolveCapacityFields(board);
   return {
     name: board.name,
     month: board.month,
     capacity_sp: String(board.capacity_sp),
+    capacity_sp_dev: capacities.dev,
+    capacity_sp_test: capacities.test,
+    workload_mode: board.workload_mode ?? DEFAULT_SCOPE_WORKLOAD_MODE,
     scope_sections: normalizeScopeSectionOrder(resolveScopeSections(board)),
     todo_jql: board.todo_jql ?? "",
     test_jql: board.test_jql ?? "",
@@ -211,6 +231,9 @@ function defaultForm(): ScopeBoardForm {
     name: "",
     month: currentMonthValue(),
     capacity_sp: "80",
+    capacity_sp_dev: "80",
+    capacity_sp_test: "80",
+    workload_mode: DEFAULT_SCOPE_WORKLOAD_MODE,
     scope_sections: defaultScopeSections(),
     todo_jql: "",
     test_jql: "",
@@ -245,20 +268,6 @@ function isReleaseTemplateTeam(team: { slug?: string; name?: string } | null | u
   return haystack.includes("ios") || haystack.includes("android") || haystack.includes("igaming");
 }
 
-function hasRoleAttribution(issue: ScopeBoardIssue, role: "front" | "back"): boolean {
-  const contributor = issue.role_contributors?.[role];
-  if (contributor?.name?.trim()) return true;
-  return (issue.role_evidence ?? []).some(
-    (item) => item.role === role && !item.unresolved_reason && (item.name?.trim() || item.source_url?.trim())
-  );
-}
-
-function isStaleOppositeRoleGap(issue: ScopeBoardIssue, role: string): boolean {
-  if (role !== "front" && role !== "back") return false;
-  const oppositeRole = role === "front" ? "back" : "front";
-  return hasRoleAttribution(issue, oppositeRole);
-}
-
 function buildReportSummary(snapshot: ScopeBoardSnapshot): ScopeReportSummary {
   const report = snapshot.report ? normalizeScopeReport(snapshot.report) : computeScopeReport(snapshot);
   const sections = report.sections ?? [report.plan, report.unplan];
@@ -271,22 +280,33 @@ function buildReportSummary(snapshot: ScopeBoardSnapshot): ScopeReportSummary {
   );
 }
 
-function buildDataQualityDetails(snapshot: ScopeBoardSnapshot): ScopeDataQualityDetails {
-  const unestimated = (snapshot.metrics?.unestimated_tasks ?? []).map((issue) => ({
-    key: issue.key,
-    summary: issue.summary,
-    url: issue.url,
-    status: issue.status,
-    section: issue.section_name || issue.bucket,
-    storyPoints: issue.story_points,
-  }));
+function buildDataQualityDetails(
+  snapshot: ScopeBoardSnapshot,
+  workloadMode: ScopeWorkloadMode = DEFAULT_SCOPE_WORKLOAD_MODE,
+): ScopeDataQualityDetails {
+  const splitMode = workloadMode === "sp_dev_test";
+  const jiraRoleFieldsConfigured = resolveJiraRoleFieldsConfigured(snapshot);
+  const attentionIssues = splitMode
+    ? buildWorkloadAttentionIssues(snapshot)
+    : (snapshot.metrics?.unestimated_tasks ?? []);
+  const unestimated = attentionIssues.map((issue) => {
+    const backendReasons = (issue as ScopeBoardIssue & { workload_attention_reasons?: string[] }).workload_attention_reasons;
+    const reasons = splitMode ? backendReasons ?? workloadAttentionReasons(issue) : undefined;
+    return {
+      key: issue.key,
+      summary: issue.summary,
+      url: issue.url,
+      status: issue.status,
+      section: issue.section_name || issue.bucket,
+      storyPoints: issue.story_points,
+      reasons,
+    };
+  });
   const roleByKey = new Map<string, ScopeDataQualityDetails["roleIssues"][number]>();
 
   for (const section of resolveSnapshotSections(snapshot)) {
     for (const issue of section.issues) {
-      const reasons = (issue.role_evidence ?? [])
-        .filter((item) => item.unresolved_reason && !isStaleOppositeRoleGap(issue, item.role))
-        .map((item) => `${item.role}: ${item.unresolved_reason}`);
+      const reasons = roleAttentionReasons(issue, { jiraRoleFieldsConfigured });
       if (reasons.length === 0) continue;
       const existing = roleByKey.get(issue.key);
       const mergedReasons = Array.from(new Set([...(existing?.reasons ?? []), ...reasons]));
@@ -306,6 +326,59 @@ function buildDataQualityDetails(snapshot: ScopeBoardSnapshot): ScopeDataQuality
     unestimated,
     roleIssues: Array.from(roleByKey.values()),
   };
+}
+
+function applyWorkloadModeChange(form: ScopeBoardForm, workload_mode: ScopeWorkloadMode): ScopeBoardForm {
+  if (workload_mode !== "sp_dev_test") {
+    return { ...form, workload_mode };
+  }
+  return {
+    ...form,
+    workload_mode,
+    capacity_sp_dev: form.capacity_sp_dev || form.capacity_sp,
+    capacity_sp_test: form.capacity_sp_test || form.capacity_sp,
+  };
+}
+
+function ScopeCapacityFields({
+  form,
+  disabled,
+  onChange,
+}: {
+  form: ScopeBoardForm;
+  disabled: boolean;
+  onChange: (patch: Partial<ScopeBoardForm>) => void;
+}) {
+  if (form.workload_mode === "sp_dev_test") {
+    return (
+      <>
+        <TextField
+          label="Capacity SP Dev"
+          inputMode="decimal"
+          value={form.capacity_sp_dev}
+          disabled={disabled}
+          onChange={(event) => onChange({ capacity_sp_dev: event.target.value })}
+        />
+        <TextField
+          label="Capacity SP Test"
+          inputMode="decimal"
+          value={form.capacity_sp_test}
+          disabled={disabled}
+          onChange={(event) => onChange({ capacity_sp_test: event.target.value })}
+        />
+      </>
+    );
+  }
+
+  return (
+    <TextField
+      label="Capacity (SP)"
+      inputMode="decimal"
+      value={form.capacity_sp}
+      disabled={disabled}
+      onChange={(event) => onChange({ capacity_sp: event.target.value })}
+    />
+  );
 }
 
 export default function ScopeBoardShell({ principal, canManage }: ScopeBoardShellProps) {
@@ -565,6 +638,9 @@ interface ScopeBoardPayload {
   name: string;
   month: string;
   capacity_sp: number;
+  capacity_sp_dev?: number | null;
+  capacity_sp_test?: number | null;
+  workload_mode: ScopeWorkloadMode;
   scope_sections: ScopeSectionConfig[];
   todo_jql: string;
   test_jql: string;
@@ -580,25 +656,36 @@ interface ScopeBoardPayload {
 }
 
 function validateScopeForm(form: ScopeBoardForm): { error: string } | { payload: ScopeBoardPayload } {
+  const splitMode = form.workload_mode === "sp_dev_test";
   const capacity = parseCapacity(form.capacity_sp);
+  const capacityDev = parseCapacity(form.capacity_sp_dev);
+  const capacityTest = parseCapacity(form.capacity_sp_test);
   if (!form.name.trim()) {
     return { error: "Укажите название board." };
   }
   if (!form.month.match(/^\d{4}-\d{2}$/)) {
     return { error: "Месяц должен быть в формате YYYY-MM." };
   }
-  if (capacity === null) {
+  if (splitMode) {
+    if (capacityDev === null || capacityTest === null) {
+      return { error: "Capacity SP Dev и SP Test должны быть неотрицательными числами." };
+    }
+  } else if (capacity === null) {
     return { error: "Capacity должен быть неотрицательным числом." };
   }
   const sectionError = validateScopeSections(form.scope_sections);
   if (sectionError) {
     return { error: sectionError };
   }
+  const resolvedCapacity = splitMode ? Math.max(capacityDev ?? 0, capacityTest ?? 0) : (capacity ?? 0);
   return {
     payload: {
       name: form.name.trim(),
       month: form.month.trim(),
-      capacity_sp: capacity,
+      capacity_sp: resolvedCapacity,
+      capacity_sp_dev: splitMode ? capacityDev : null,
+      capacity_sp_test: splitMode ? capacityTest : null,
+      workload_mode: form.workload_mode,
       scope_sections: normalizeScopeSectionOrder(form.scope_sections),
       todo_jql: form.todo_jql.trim(),
       test_jql: form.test_jql.trim(),
@@ -1118,7 +1205,11 @@ function ScopeBoardEditorPage({
   const metrics = board?.snapshot?.metrics ?? null;
   const snapshot = board?.snapshot ?? null;
   const reportSummary = useMemo(() => (snapshot ? buildReportSummary(snapshot) : null), [snapshot]);
-  const dataQualityDetails = useMemo(() => (snapshot ? buildDataQualityDetails(snapshot) : null), [snapshot]);
+  const workloadMode = form.workload_mode ?? board?.workload_mode ?? DEFAULT_SCOPE_WORKLOAD_MODE;
+  const dataQualityDetails = useMemo(
+    () => (snapshot ? buildDataQualityDetails(snapshot, workloadMode) : null),
+    [snapshot, workloadMode],
+  );
   const snapshotRefreshedLabel = snapshot?.refreshed_at
     ? new Date(snapshot.refreshed_at).toLocaleString("ru-RU", { dateStyle: "short", timeStyle: "short" })
     : null;
@@ -1190,8 +1281,10 @@ function ScopeBoardEditorPage({
         return (
           <ScopeVisualDashboard
             metrics={metrics}
+            workloadMode={workloadMode}
             reportSummary={reportSummary ?? undefined}
             dataQualityDetails={dataQualityDetails ?? undefined}
+            jiraFetchTruncated={snapshot?.jira_fetch_warnings?.length ?? 0}
           />
         );
       case "roleWorkload":
@@ -1208,6 +1301,7 @@ function ScopeBoardEditorPage({
               selectedHistoryId={selectedAiHistoryId}
               onSelectHistory={setSelectedAiHistoryId}
               metrics={metrics}
+              workloadMode={workloadMode}
               openQuestionsCount={resolveOpenQuestions(snapshot).length}
               autoOpenSignal={aiPanelOpenSignal}
               analyzing={analyzing}
@@ -1317,14 +1411,17 @@ function ScopeBoardEditorPage({
                   disabled={!canManage}
                   onChange={(event) => setForm((current) => ({ ...current, month: event.target.value }))}
                 />
-                <TextField
-                  label="Capacity (SP)"
-                  inputMode="decimal"
-                  value={form.capacity_sp}
+                <ScopeCapacityFields
+                  form={form}
                   disabled={!canManage}
-                  onChange={(event) => setForm((current) => ({ ...current, capacity_sp: event.target.value }))}
+                  onChange={(patch) => setForm((current) => ({ ...current, ...patch }))}
                 />
               </div>
+              <WorkloadModePicker
+                value={form.workload_mode}
+                disabled={!canManage}
+                onChange={(workload_mode) => setForm((current) => applyWorkloadModeChange(current, workload_mode))}
+              />
               {isReleaseTemplate ? (
                 <div className="space-y-5">
                   <TextareaField
@@ -1480,14 +1577,17 @@ function ScopeBoardEditorPage({
                   required
                   onChange={setTeamId}
                 />
-                <TextField
-                  label="Capacity (SP)"
-                  inputMode="decimal"
-                  value={form.capacity_sp}
+                <ScopeCapacityFields
+                  form={form}
                   disabled={!canManage}
-                  onChange={(event) => setForm((current) => ({ ...current, capacity_sp: event.target.value }))}
+                  onChange={(patch) => setForm((current) => ({ ...current, ...patch }))}
                 />
               </div>
+              <WorkloadModePicker
+                value={form.workload_mode}
+                disabled={!canManage}
+                onChange={(workload_mode) => setForm((current) => applyWorkloadModeChange(current, workload_mode))}
+              />
             </Surface>
           ) : null}
 

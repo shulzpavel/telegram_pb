@@ -8,12 +8,27 @@ import secrets
 from datetime import datetime, timezone
 from typing import Any, Literal, Optional
 
-from app.utils.jira_role_contributors import attribution_tier, person_bucket_key
+from app.utils.jira_role_contributors import person_bucket_key
 
 IntakeStatus = Literal["ok", "warning", "stop"]
 ScopeSectionKind = Literal["planned", "unplanned"]
+WorkloadMode = Literal["sp", "sp_dev_test"]
+
+DEFAULT_WORKLOAD_MODE: WorkloadMode = "sp"
+WORKLOAD_MODES = frozenset({"sp", "sp_dev_test"})
 
 ACTIVE_STATUS_CATEGORIES = frozenset({"new", "indeterminate"})
+
+
+def normalise_workload_mode(mode: Optional[str]) -> WorkloadMode:
+    normalized = str(mode or DEFAULT_WORKLOAD_MODE).strip().lower()
+    if normalized in WORKLOAD_MODES:
+        return normalized  # type: ignore[return-value]
+    return DEFAULT_WORKLOAD_MODE
+
+
+def is_split_workload_mode(mode: Optional[str]) -> bool:
+    return normalise_workload_mode(mode) == "sp_dev_test"
 
 
 def month_start_iso(month: str) -> str:
@@ -61,6 +76,37 @@ def _string_list(raw: Any) -> list[str]:
     return [str(item) for item in raw if item]
 
 
+def _jira_role_assignees(raw: dict[str, Any]) -> dict[str, str]:
+    assignees = raw.get("jira_role_assignees")
+    if not isinstance(assignees, dict):
+        return {"front": "", "back": "", "qa": ""}
+    return {
+        role: str(assignees.get(role) or "").strip()
+        for role in ("front", "back", "qa")
+    }
+
+
+def jira_role_fields_configured() -> dict[str, bool]:
+    from config import JIRA_BACK_ASSIGNEE_FIELD, JIRA_FRONT_ASSIGNEE_FIELD, JIRA_QA_ASSIGNEE_FIELD
+
+    return {
+        "front": bool(JIRA_FRONT_ASSIGNEE_FIELD),
+        "back": bool(JIRA_BACK_ASSIGNEE_FIELD),
+        "qa": bool(JIRA_QA_ASSIGNEE_FIELD),
+    }
+
+
+def merge_jira_role_fields_configured(*sources: dict[str, Any] | None) -> dict[str, bool]:
+    merged = {"front": False, "back": False, "qa": False}
+    for source in sources:
+        if not isinstance(source, dict):
+            continue
+        for role in ("front", "back", "qa"):
+            if bool(source.get(role)):
+                merged[role] = True
+    return merged
+
+
 def normalize_scope_issue(raw: dict[str, Any]) -> dict[str, Any]:
     """Normalize a Jira issue dict into the scope-board snapshot shape."""
     status = raw.get("status") if isinstance(raw.get("status"), dict) else {}
@@ -102,6 +148,7 @@ def normalize_scope_issue(raw: dict[str, Any]) -> dict[str, Any]:
         "developer": str(raw.get("developer") or raw.get("assignee") or ""),
         "developer_source": str(raw.get("developer_source") or "fallback"),
         "role_contributors": raw.get("role_contributors") if isinstance(raw.get("role_contributors"), dict) else {},
+        "jira_role_assignees": _jira_role_assignees(raw),
         "role_contributors_list": raw.get("role_contributors_list") if isinstance(raw.get("role_contributors_list"), list) else [],
         "role_workload_items": raw.get("role_workload_items") if isinstance(raw.get("role_workload_items"), list) else [],
         "role_evidence": raw.get("role_evidence") if isinstance(raw.get("role_evidence"), list) else [],
@@ -144,6 +191,59 @@ def _sum_sp(issues: list[dict[str, Any]]) -> float:
     return total
 
 
+def _track_sp_value(issue: dict[str, Any], track: Literal["dev", "test"]) -> Optional[float]:
+    field = "story_points_dev" if track == "dev" else "story_points_test"
+    return _story_points_value(issue.get(field))
+
+
+def _sum_track_sp(issues: list[dict[str, Any]], track: Literal["dev", "test"]) -> float:
+    total = 0.0
+    for issue in issues:
+        sp = _track_sp_value(issue, track)
+        if sp is not None:
+            total += sp
+    return total
+
+
+def _missing_workload_tracks(issue: dict[str, Any]) -> list[str]:
+    missing: list[str] = []
+    if _track_sp_value(issue, "dev") is None:
+        missing.append("dev")
+    if _track_sp_value(issue, "test") is None:
+        missing.append("test")
+    return missing
+
+
+def _workload_attention_reasons(issue: dict[str, Any]) -> list[str]:
+    missing = _missing_workload_tracks(issue)
+    if not missing:
+        return []
+    reasons: list[str] = []
+    for track in missing:
+        reasons.append(f"нет SP {'Dev' if track == 'dev' else 'Test'}")
+    if _story_points_value(issue.get("story_points")) is not None:
+        reasons.append("указан только общий SP")
+    return reasons
+
+
+def _is_done_issue(issue: dict[str, Any]) -> bool:
+    category = str(issue.get("status_category") or "").lower()
+    if category == "done":
+        return True
+    status = str(issue.get("status") or "").lower()
+    return status in {"done", "closed", "resolved", "cancelled", "canceled", "готово"}
+
+
+def _needs_workload_track_attention(issue: dict[str, Any]) -> bool:
+    if _is_done_issue(issue):
+        return False
+    return bool(_missing_workload_tracks(issue))
+
+
+def _is_track_estimated(issue: dict[str, Any], track: Literal["dev", "test"]) -> bool:
+    return _track_sp_value(issue, track) is not None
+
+
 def _status_breakdown(issues: list[dict[str, Any]]) -> dict[str, int]:
     counts: dict[str, int] = {}
     for issue in issues:
@@ -153,28 +253,27 @@ def _status_breakdown(issues: list[dict[str, Any]]) -> dict[str, int]:
 
 
 _UNASSIGNED_ASSIGNEE = "Не назначен"
-_GITLAB_ROLE_SOURCES = {
-    "gitlab_mr",
-    "gitlab_commit",
-    "subtask_gitlab_mr",
-    "subtask_gitlab_commit",
-    "gitlab_api_mr",
-    "gitlab_api_commit",
-    "subtask_gitlab_api_mr",
-    "subtask_gitlab_api_commit",
-}
-_GITLAB_API_SOURCES = {"gitlab_api_mr", "gitlab_api_commit", "subtask_gitlab_api_mr", "subtask_gitlab_api_commit"}
 _JIRA_FIELD_SOURCES = {"jira_field"}
-_ESTIMATED_ROLE_SOURCES = {"changelog_dev", "testing_comment"}
-_QA_ROLE_SOURCES = {"changelog", "current", "testing_comment"} | _JIRA_FIELD_SOURCES
-_TRUSTED_ROLE_SOURCES = {
-    "front": _GITLAB_ROLE_SOURCES | _ESTIMATED_ROLE_SOURCES | _JIRA_FIELD_SOURCES,
-    "back": _GITLAB_ROLE_SOURCES | _ESTIMATED_ROLE_SOURCES | _JIRA_FIELD_SOURCES,
-    "qa": _QA_ROLE_SOURCES,
-}
 _UNATTRIBUTED_ROLE = "Не атрибутировано"
-_FRONT_MARKERS = ("frontend", "front-end", "front", "ui", "web")
-_BACK_MARKERS = ("backend", "back-end", "back", "api", "server")
+_PAUSE_STATUS_KEYWORDS = ("пауз", "pause", "on hold", "blocked")
+_QA_TEST_STATUS_NAMES = frozenset({"тестирование", "к релизу"})
+_REPORT_IN_TEST_STATUS_NAMES = frozenset({"тестирование", "к тестированию", "к релизу"})
+_DONE_STATUS_NAMES = frozenset({"готово", "done", "closed", "resolved", "cancelled", "canceled", "won't do", "wont do"})
+_NOT_STARTED_STATUS_NAMES = frozenset({"backlog", "бэклог", "к выполнению", "to do", "todo", "open"})
+
+
+def _status_tokens(issue: dict[str, Any]) -> tuple[str, str]:
+    status = str(issue.get("status") or "").lower().strip()
+    category = str(issue.get("status_category") or "").lower()
+    return status, category
+
+
+def _issue_in_test_phase(issue: dict[str, Any]) -> bool:
+    """QA attribution is required only when the task is already in testing."""
+    status, category = _status_tokens(issue)
+    if category == "done" or status in _DONE_STATUS_NAMES:
+        return False
+    return status in _QA_TEST_STATUS_NAMES
 
 
 def _developer_task_summary(issue: dict[str, Any]) -> dict[str, Any]:
@@ -202,53 +301,28 @@ def _role_source(payload: Any) -> str:
     return ""
 
 
-def _trusted_role_name(issue: dict[str, Any], role: str) -> str:
+def _jira_role_assignee_name(issue: dict[str, Any], role: str) -> str:
+    assignees = issue.get("jira_role_assignees")
+    if isinstance(assignees, dict) and role in assignees:
+        return str(assignees.get(role) or "").strip()
     contributors = issue.get("role_contributors") if isinstance(issue.get("role_contributors"), dict) else {}
     payload = contributors.get(role)
-    name = _norm_role_name(payload)
-    source = _role_source(payload)
-    if not name or source not in _TRUSTED_ROLE_SOURCES.get(role, set()):
-        return ""
-    return name
+    if _role_source(payload) in _JIRA_FIELD_SOURCES:
+        return _norm_role_name(payload)
+    return ""
 
 
-def _issue_marker_values(issue: dict[str, Any]) -> list[str]:
-    values: list[str] = []
-    for field in ("labels", "components"):
-        raw = issue.get(field)
-        if isinstance(raw, list):
-            for item in raw:
-                if isinstance(item, dict):
-                    values.extend(str(item.get(key) or "") for key in ("name", "value", "title"))
-                else:
-                    values.append(str(item or ""))
-        elif raw:
-            values.append(str(raw))
-    return [value.strip().lower() for value in values if value and value.strip()]
+def _issue_has_jira_role_assignee(issue: dict[str, Any], role: str) -> bool:
+    return bool(_jira_role_assignee_name(issue, role))
 
 
-def _issue_matches_engineering_role(issue: dict[str, Any], role: str) -> bool:
-    markers = _FRONT_MARKERS if role == "front" else _BACK_MARKERS if role == "back" else ()
-    if not markers:
-        return False
-    return any(any(marker in value for marker in markers) for value in _issue_marker_values(issue))
-
-
-def _attributed_engineering_roles(issue: dict[str, Any]) -> list[str]:
-    return [role for role in ("front", "back") if _trusted_role_name(issue, role)]
-
-
-def _issue_has_role_attribution(issue: dict[str, Any], role: str) -> bool:
-    return bool(_trusted_role_name(issue, role))
-
-
-def _opposite_engineering_role(role: str) -> str:
-    return "back" if role == "front" else "front" if role == "back" else ""
-
-
-def _issue_has_opposite_engineering_attribution(issue: dict[str, Any], role: str) -> bool:
-    opposite = _opposite_engineering_role(role)
-    return bool(opposite and _issue_has_role_attribution(issue, opposite))
+def _issue_in_role_workload_scope(issue: dict[str, Any], role: str) -> bool:
+    bucket = classify_scope_report_bucket(issue)
+    if role in {"front", "back"}:
+        return bucket in {"in_work", "in_test"}
+    if role == "qa":
+        return bucket == "in_test"
+    return False
 
 
 def _role_bucket_key(name: str) -> str:
@@ -266,35 +340,19 @@ def _prefer_display_name(current: str, candidate: str) -> str:
 
 
 def _issue_unresolved_reason(issue: dict[str, Any], role: str) -> str:
-    if _issue_has_role_attribution(issue, role):
+    if not _issue_in_role_workload_scope(issue, role):
         return ""
-    for item in issue.get("role_evidence") or []:
-        if not isinstance(item, dict):
-            continue
-        if str(item.get("role") or "") == role:
-            reason = str(item.get("unresolved_reason") or "").strip()
-            if reason:
-                if role in {"front", "back"} and _issue_has_opposite_engineering_attribution(issue, role):
-                    return ""
-                return reason
-    return ""
-
-
-def _role_source_is_gitlab_api(source: str) -> bool:
-    return source in _GITLAB_API_SOURCES
+    if _issue_has_jira_role_assignee(issue, role):
+        return ""
+    return "jira_field_empty"
 
 
 def _role_attribution_tier(issue: dict[str, Any], role: str) -> str:
-    name = _trusted_role_name(issue, role)
-    if name:
-        contributors = issue.get("role_contributors") if isinstance(issue.get("role_contributors"), dict) else {}
-        payload = contributors.get(role)
-        return attribution_tier(_role_source(payload))
-    if role in {"front", "back"} and _issue_matches_engineering_role(issue, role):
-        return "unattributed"
-    if role == "qa":
-        return "unattributed"
-    return "none"
+    if not _issue_in_role_workload_scope(issue, role):
+        return "none"
+    if _issue_has_jira_role_assignee(issue, role):
+        return "confirmed"
+    return "unattributed"
 
 
 def _parent_role_sp(issue: dict[str, Any], role: str) -> float:
@@ -317,26 +375,19 @@ def _parent_role_sp(issue: dict[str, Any], role: str) -> float:
 
 
 def _role_workload_slices(issue: dict[str, Any], role: str) -> list[tuple[str, dict[str, Any]]]:
-    name = _trusted_role_name(issue, role)
+    if not _issue_in_role_workload_scope(issue, role):
+        return []
+    name = _jira_role_assignee_name(issue, role)
+    payload = {"count": 1, "story_points": _role_sp(issue, role)}
     if name:
-        return [(name, {"count": 1, "story_points": _role_sp(issue, role)})]
-
-    if role in {"front", "back"} and _role_scope_matches(issue, role):
-        return [(_UNATTRIBUTED_ROLE, {"count": 1, "story_points": _parent_role_sp(issue, role)})]
-    return []
-
-
-def _role_scope_matches(issue: dict[str, Any], role: str) -> bool:
-    if _issue_has_role_attribution(issue, role):
-        return True
-    if role in {"front", "back"}:
-        if _issue_has_opposite_engineering_attribution(issue, role):
-            return False
-        return _issue_matches_engineering_role(issue, role)
-    return False
+        return [(name, payload)]
+    return [(_UNATTRIBUTED_ROLE, {**payload, "story_points": _parent_role_sp(issue, role)})]
 
 
 def _role_sp(issue: dict[str, Any], role: str) -> float:
+    if not _issue_in_role_workload_scope(issue, role):
+        return 0.0
+
     field_by_role = {
         "front": "story_points_front",
         "back": "story_points_back",
@@ -351,15 +402,6 @@ def _role_sp(issue: dict[str, Any], role: str) -> float:
         if isinstance(test_sp, (int, float)) and test_sp > 0:
             return float(test_sp)
 
-    if not _role_scope_matches(issue, role):
-        return 0.0
-
-    if role in {"front", "back"}:
-        sp = issue.get("story_points")
-        if isinstance(sp, (int, float)) and sp > 0:
-            return float(sp)
-        return 0.0
-
     sp = issue.get("story_points")
     if isinstance(sp, (int, float)) and sp > 0:
         return float(sp)
@@ -369,13 +411,14 @@ def _role_sp(issue: dict[str, Any], role: str) -> float:
 def _role_task_summary(issue: dict[str, Any], *, role: str = "") -> dict[str, Any]:
     summary = _developer_task_summary(issue)
     summary["role_contributors_list"] = issue.get("role_contributors_list") or []
-    summary["front"] = _trusted_role_name(issue, "front")
-    summary["back"] = _trusted_role_name(issue, "back")
-    summary["qa"] = _trusted_role_name(issue, "qa")
+    summary["front"] = _jira_role_assignee_name(issue, "front")
+    summary["back"] = _jira_role_assignee_name(issue, "back")
+    summary["qa"] = _jira_role_assignee_name(issue, "qa")
+    unresolved_roles = (role,) if role else ("front", "back", "qa")
     unresolved = {
-        role: _issue_unresolved_reason(issue, role)
-        for role in ("front", "back", "qa")
-        if _issue_unresolved_reason(issue, role)
+        role_key: _issue_unresolved_reason(issue, role_key)
+        for role_key in unresolved_roles
+        if _issue_unresolved_reason(issue, role_key)
     }
     if unresolved:
         summary["role_unresolved"] = unresolved
@@ -388,13 +431,7 @@ def _role_task_summary(issue: dict[str, Any], *, role: str = "") -> dict[str, An
 def _role_breakdown(issues: list[dict[str, Any]], role: str, *, max_items: int = 10) -> list[dict[str, Any]]:
     buckets: dict[str, dict[str, Any]] = {}
     for issue in issues:
-        if role == "qa":
-            name = _trusted_role_name(issue, role)
-            if not name:
-                continue
-            slices = [(name, {"count": 1, "story_points": _role_sp(issue, role)})]
-        else:
-            slices = _role_workload_slices(issue, role)
+        slices = _role_workload_slices(issue, role)
         for name, payload in slices:
             bucket_key = _role_bucket_key(name)
             entry = buckets.setdefault(
@@ -448,59 +485,30 @@ def _role_metrics(issues: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]
 def _role_coverage(issues: list[dict[str, Any]]) -> dict[str, dict[str, int]]:
     coverage: dict[str, dict[str, int]] = {}
     for role in ("front", "back", "qa"):
-        total = (
-            sum(1 for issue in issues if _role_scope_matches(issue, role))
-            if role in {"front", "back"}
-            else len(issues)
-        )
-        confirmed = estimated = unattributed = 0
-        confirmed_gitlab = confirmed_jira_qa = 0
-        unresolved_no_gitlab_link = unresolved_ambiguous_role = unresolved_no_qa_transition = 0
+        total = sum(1 for issue in issues if _issue_in_role_workload_scope(issue, role))
+        confirmed = unattributed = 0
         for issue in issues:
-            if role in {"front", "back"} and not _role_scope_matches(issue, role):
+            if not _issue_in_role_workload_scope(issue, role):
                 continue
-            tier = _role_attribution_tier(issue, role)
-            contributors = issue.get("role_contributors") if isinstance(issue.get("role_contributors"), dict) else {}
-            payload = contributors.get(role)
-            source = _role_source(payload)
-            if tier == "confirmed":
+            if _issue_has_jira_role_assignee(issue, role):
                 confirmed += 1
-                if role == "qa" and source in {"changelog", "current", "jira_field"}:
-                    confirmed_jira_qa += 1
-                elif role in {"front", "back"} and (
-                    _role_source_is_gitlab_api(source)
-                    or source in _GITLAB_ROLE_SOURCES
-                ):
-                    confirmed_gitlab += 1
-            elif tier == "estimated":
-                estimated += 1
-            elif tier == "unattributed":
+            else:
                 unattributed += 1
-                reason = _issue_unresolved_reason(issue, role)
-                if reason == "unresolved_no_gitlab_link":
-                    unresolved_no_gitlab_link += 1
-                elif reason == "unresolved_ambiguous_role":
-                    unresolved_ambiguous_role += 1
-                elif reason == "unresolved_no_qa_transition":
-                    unresolved_no_qa_transition += 1
-                elif role == "qa":
-                    unresolved_no_qa_transition += 1
-                elif role in {"front", "back"}:
-                    unresolved_no_gitlab_link += 1
         role_coverage = {
-            "attributed": confirmed + estimated,
+            "attributed": confirmed,
             "total": total,
             "confirmed": confirmed,
-            "estimated": estimated,
+            "estimated": 0,
             "unattributed": unattributed,
+            "confirmed_jira": confirmed,
         }
         if role in {"front", "back"}:
-            role_coverage["confirmed_gitlab"] = confirmed_gitlab
-            role_coverage["unresolved_no_gitlab_link"] = unresolved_no_gitlab_link
-            role_coverage["unresolved_ambiguous_role"] = unresolved_ambiguous_role
+            role_coverage["confirmed_gitlab"] = 0
+            role_coverage["unresolved_no_gitlab_link"] = 0
+            role_coverage["unresolved_ambiguous_role"] = 0
         if role == "qa":
-            role_coverage["confirmed_jira_qa"] = confirmed_jira_qa
-            role_coverage["unresolved_no_qa_transition"] = unresolved_no_qa_transition
+            role_coverage["confirmed_jira_qa"] = confirmed
+            role_coverage["unresolved_no_qa_transition"] = unattributed
         coverage[role] = role_coverage
     return coverage
 
@@ -596,18 +604,6 @@ def _plan_change_reason_counts(issues: list[dict[str, Any]]) -> dict[str, int]:
     return dict(sorted(counts.items(), key=lambda item: (-item[1], item[0])))
 
 
-_PAUSE_STATUS_KEYWORDS = ("пауз", "pause", "on hold", "blocked")
-_TEST_STATUS_NAMES = frozenset({"тестирование", "к релизу"})
-_DONE_STATUS_NAMES = frozenset({"готово", "done", "closed", "resolved", "cancelled", "canceled", "won't do", "wont do"})
-_NOT_STARTED_STATUS_NAMES = frozenset({"backlog", "бэклог", "к выполнению", "to do", "todo", "open"})
-
-
-def _status_tokens(issue: dict[str, Any]) -> tuple[str, str]:
-    status = str(issue.get("status") or "").lower().strip()
-    category = str(issue.get("status_category") or "").lower()
-    return status, category
-
-
 def classify_scope_report_bucket(issue: dict[str, Any]) -> Literal["in_work", "in_test", "done", "open_questions", "not_started"]:
     """Bucket an issue for the monthly scope status report."""
     status, category = _status_tokens(issue)
@@ -615,7 +611,7 @@ def classify_scope_report_bucket(issue: dict[str, Any]) -> Literal["in_work", "i
         return "done"
     if status == "пауза" or any(token in status for token in _PAUSE_STATUS_KEYWORDS):
         return "open_questions"
-    if status in _TEST_STATUS_NAMES:
+    if status in _REPORT_IN_TEST_STATUS_NAMES:
         return "in_test"
     if category == "new" or status in _NOT_STARTED_STATUS_NAMES:
         return "not_started"
@@ -1209,9 +1205,17 @@ def compute_scope_metrics_from_sections(
     capacity_sp: float,
     sections: list[dict[str, Any]],
     month: str,
+    *,
+    workload_mode: Optional[str] = None,
+    capacity_sp_dev: Optional[float] = None,
+    capacity_sp_test: Optional[float] = None,
 ) -> dict[str, Any]:
     """Compute buffer / intake metrics for configured scope sections."""
+    mode = normalise_workload_mode(workload_mode)
+    split_mode = mode == "sp_dev_test"
     capacity = max(0.0, float(capacity_sp))
+    capacity_dev = max(0.0, float(capacity_sp_dev if capacity_sp_dev is not None else capacity_sp))
+    capacity_test = max(0.0, float(capacity_sp_test if capacity_sp_test is not None else capacity_sp))
     planned_issues: list[dict[str, Any]] = []
     unplanned_issues: list[dict[str, Any]] = []
     section_metrics: list[dict[str, Any]] = []
@@ -1249,7 +1253,18 @@ def compute_scope_metrics_from_sections(
 
     plan_sp = _sum_sp(planned_issues)
     unplan_sp = _sum_sp(unplanned_issues)
+    plan_dev_sp = _sum_track_sp(planned_issues, "dev")
+    unplan_dev_sp = _sum_track_sp(unplanned_issues, "dev")
+    plan_test_sp = _sum_track_sp(planned_issues, "test")
+    unplan_test_sp = _sum_track_sp(unplanned_issues, "test")
+
+    if split_mode:
+        plan_sp = plan_dev_sp + plan_test_sp
+        unplan_sp = unplan_dev_sp + unplan_test_sp
+
     buffer_sp = capacity - plan_sp - unplan_sp
+    buffer_dev_sp = capacity_dev - plan_dev_sp - unplan_dev_sp
+    buffer_test_sp = capacity_test - plan_test_sp - unplan_test_sp
     all_issues = planned_issues + unplanned_issues
 
     unestimated_tasks: list[dict[str, Any]] = []
@@ -1257,28 +1272,86 @@ def compute_scope_metrics_from_sections(
     for issue in all_issues:
         bucket = issue.get("bucket")
         normalized = {k: v for k, v in issue.items() if k not in {"bucket", "section_id", "section_name", "section_kind"}}
-        if not normalized.get("estimated"):
-            if _is_active_issue(normalized):
-                unestimated_tasks.append({**normalized, "bucket": bucket, "section_id": issue.get("section_id"), "section_name": issue.get("section_name"), "section_kind": issue.get("section_kind")})
+        if _needs_workload_track_attention(normalized) if split_mode else _is_active_issue(normalized):
+            if split_mode:
+                missing_tracks = _missing_workload_tracks(normalized)
+                if missing_tracks:
+                    unestimated_tasks.append(
+                        {
+                            **normalized,
+                            "bucket": bucket,
+                            "section_id": issue.get("section_id"),
+                            "section_name": issue.get("section_name"),
+                            "section_kind": issue.get("section_kind"),
+                            "missing_tracks": missing_tracks,
+                            "workload_attention_reasons": _workload_attention_reasons(normalized),
+                            "estimated": False,
+                        }
+                    )
+            elif not normalized.get("estimated"):
+                unestimated_tasks.append(
+                    {
+                        **normalized,
+                        "bucket": bucket,
+                        "section_id": issue.get("section_id"),
+                        "section_name": issue.get("section_name"),
+                        "section_kind": issue.get("section_kind"),
+                    }
+                )
         created = normalized.get("created")
         if is_scope_creep(str(created) if created else None, month):
             scope_creep_count += 1
 
-    if buffer_sp <= 0 or unestimated_tasks:
+    track_buffers = [buffer_dev_sp, buffer_test_sp] if split_mode else [buffer_sp]
+    worst_buffer = min(track_buffers) if track_buffers else buffer_sp
+
+    def _track_intake_risk(buffer: float, track_capacity: float) -> IntakeStatus:
+        if buffer <= 0:
+            return "stop"
+        if track_capacity > 0 and buffer <= track_capacity * 0.2:
+            return "warning"
+        return "ok"
+
+    if split_mode:
+        dev_risk = _track_intake_risk(buffer_dev_sp, capacity_dev)
+        test_risk = _track_intake_risk(buffer_test_sp, capacity_test)
+        if dev_risk == "stop" or test_risk == "stop":
+            buffer_risk: IntakeStatus = "stop"
+        elif dev_risk == "warning" or test_risk == "warning":
+            buffer_risk = "warning"
+        else:
+            buffer_risk = "ok"
+    else:
+        buffer_risk = _track_intake_risk(buffer_sp, capacity)
+
+    if buffer_risk == "stop":
         intake_status: IntakeStatus = "stop"
-    elif capacity > 0 and buffer_sp <= capacity * 0.2:
+    elif unestimated_tasks or buffer_risk == "warning":
         intake_status = "warning"
     else:
         intake_status = "ok"
 
     overfill_sp = max(0.0, plan_sp + unplan_sp - capacity)
+    overfill_dev_sp = max(0.0, plan_dev_sp + unplan_dev_sp - capacity_dev)
+    overfill_test_sp = max(0.0, plan_test_sp + unplan_test_sp - capacity_test)
 
     return {
+        "workload_mode": mode,
         "capacity_sp": capacity,
+        "capacity_sp_dev": capacity_dev if split_mode else None,
+        "capacity_sp_test": capacity_test if split_mode else None,
         "plan_sp": plan_sp,
         "unplan_sp": unplan_sp,
-        "buffer_sp": buffer_sp,
-        "overfill_sp": overfill_sp,
+        "buffer_sp": buffer_sp if not split_mode else min(buffer_dev_sp, buffer_test_sp),
+        "overfill_sp": overfill_sp if not split_mode else max(overfill_dev_sp, overfill_test_sp),
+        "plan_dev_sp": plan_dev_sp,
+        "unplan_dev_sp": unplan_dev_sp,
+        "buffer_dev_sp": buffer_dev_sp,
+        "overfill_dev_sp": overfill_dev_sp,
+        "plan_test_sp": plan_test_sp,
+        "unplan_test_sp": unplan_test_sp,
+        "buffer_test_sp": buffer_test_sp,
+        "overfill_test_sp": overfill_test_sp,
         "intake_status": intake_status,
         "plan_count": len(planned_issues),
         "unplan_count": len(unplanned_issues),
@@ -1304,11 +1377,48 @@ def compute_scope_metrics_from_sections(
     }
 
 
+def refresh_scope_snapshot_metrics(
+    snapshot: dict[str, Any],
+    *,
+    capacity_sp: float,
+    month: str,
+    workload_mode: Optional[str] = None,
+    capacity_sp_dev: Optional[float] = None,
+    capacity_sp_test: Optional[float] = None,
+) -> dict[str, Any]:
+    """Recompute metrics block from an existing snapshot without refetching Jira."""
+    sections = snapshot.get("sections")
+    if sections:
+        metrics = compute_scope_metrics_from_sections(
+            capacity_sp,
+            sections,
+            month,
+            workload_mode=workload_mode,
+            capacity_sp_dev=capacity_sp_dev,
+            capacity_sp_test=capacity_sp_test,
+        )
+    else:
+        metrics = compute_scope_metrics(
+            capacity_sp,
+            snapshot.get("plan_issues") or [],
+            snapshot.get("unplan_issues") or [],
+            month,
+            workload_mode=workload_mode,
+            capacity_sp_dev=capacity_sp_dev,
+            capacity_sp_test=capacity_sp_test,
+        )
+    return {**snapshot, "metrics": metrics}
+
+
 def compute_scope_metrics(
     capacity_sp: float,
     plan_issues: list[dict[str, Any]],
     unplan_issues: list[dict[str, Any]],
     month: str,
+    *,
+    workload_mode: Optional[str] = None,
+    capacity_sp_dev: Optional[float] = None,
+    capacity_sp_test: Optional[float] = None,
 ) -> dict[str, Any]:
     """Legacy wrapper for Plan/Unplan-only boards."""
     return compute_scope_metrics_from_sections(
@@ -1318,6 +1428,9 @@ def compute_scope_metrics(
             {"id": "unplan", "name": "Unplan", "kind": "unplanned", "order": 1, "issues": unplan_issues},
         ],
         month,
+        workload_mode=workload_mode,
+        capacity_sp_dev=capacity_sp_dev,
+        capacity_sp_test=capacity_sp_test,
     )
 
 
@@ -1379,6 +1492,7 @@ def build_scope_snapshot(
         "unplan_issues": resolved_unplan,
         "metrics": metrics,
         "report": compute_scope_report_from_sections(resolved_sections),
+        "jira_role_fields_configured": jira_role_fields_configured(),
         "refreshed_at": refreshed_at,
         "delta": delta_pack["delta"],
         "events": delta_pack["events"],

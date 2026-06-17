@@ -11,30 +11,34 @@ from app.domain.scope_board import (
     compute_scope_report,
     compute_scope_report_from_sections,
     jira_priority_rank,
+    merge_jira_role_fields_configured,
     merge_priority_queue,
     merge_scope_issues,
     month_start_iso,
     normalize_scope_issue,
     normalize_scope_sections,
     pause_supplement_jql,
+    refresh_scope_snapshot_metrics,
     sort_issues_by_jira_priority,
 )
 
 
+def _raw_issue(key: str, sp: Optional[float], *, status="To Do", category="new", created="2026-05-01T10:00:00.000+0000"):
+    return {
+        "key": key,
+        "summary": key,
+        "url": f"/browse/{key}",
+        "story_points": sp,
+        "status": {"name": status, "category": category},
+        "issue_type": {"name": "Story"},
+        "labels": [],
+        "created": created,
+        "updated": created,
+    }
+
+
 def _issue(key: str, sp: Optional[float], *, status="To Do", category="new", created="2026-05-01T10:00:00.000+0000"):
-    return normalize_scope_issue(
-        {
-            "key": key,
-            "summary": key,
-            "url": f"/browse/{key}",
-            "story_points": sp,
-            "status": {"name": status, "category": category},
-            "issue_type": {"name": "Story"},
-            "labels": [],
-            "created": created,
-            "updated": created,
-        }
-    )
+    return normalize_scope_issue(_raw_issue(key, sp, status=status, category=category, created=created))
 
 
 def test_month_start_iso():
@@ -68,6 +72,17 @@ def test_normalize_scope_issue_keeps_jira_metadata():
     assert issue["team_labels"] == ["rip"]
 
 
+def test_normalize_scope_issue_keeps_jira_role_assignees():
+    issue = normalize_scope_issue(
+        {
+            "key": "FLEX-2673",
+            "summary": "Task",
+            "jira_role_assignees": {"front": "", "back": "", "qa": "QA Person"},
+        }
+    )
+    assert issue["jira_role_assignees"] == {"front": "", "back": "", "qa": "QA Person"}
+
+
 def test_compute_scope_metrics_ok():
     plan = [_issue("P-1", 20), _issue("P-2", 10)]
     unplan = [_issue("U-1", 5)]
@@ -91,7 +106,7 @@ def test_compute_scope_metrics_stop_on_unestimated_active():
     plan = [_issue("P-1", 10), _issue("P-2", None)]
     metrics = compute_scope_metrics(80, plan, [], "2026-06")
     assert metrics["unestimated_count"] == 1
-    assert metrics["intake_status"] == "stop"
+    assert metrics["intake_status"] == "warning"
 
 
 def test_compute_scope_metrics_warning_on_low_buffer():
@@ -153,7 +168,7 @@ def test_scope_creep_detection():
 
 def test_classify_scope_report_bucket_flex_statuses():
     assert classify_scope_report_bucket(_issue("P-1", 3, status="В работе", category="indeterminate")) == "in_work"
-    assert classify_scope_report_bucket(_issue("P-2", 3, status="К тестированию", category="indeterminate")) == "in_work"
+    assert classify_scope_report_bucket(_issue("P-2", 3, status="К тестированию", category="indeterminate")) == "in_test"
     assert classify_scope_report_bucket(_issue("P-3", 3, status="Тестирование", category="indeterminate")) == "in_test"
     assert classify_scope_report_bucket(_issue("P-4", 3, status="Готово", category="done")) == "done"
     assert classify_scope_report_bucket(_issue("P-5", 3, status="Пауза", category="indeterminate")) == "open_questions"
@@ -241,6 +256,8 @@ def test_build_scope_snapshot_includes_report():
         refreshed_at="2026-06-10T10:00:00+00:00",
     )
     assert snapshot["report"]["plan"]["counts"]["in_work"] == 1
+    assert "jira_role_fields_configured" in snapshot
+    assert set(snapshot["jira_role_fields_configured"]) == {"front", "back", "qa"}
 
 
 def test_pause_supplement_jql_adds_status_filter():
@@ -476,25 +493,34 @@ def test_compute_scope_metrics_developer_breakdown():
     ]
 
 
-def test_compute_scope_metrics_role_breakdown():
-    front_issue = normalize_scope_issue(
+def _active_issue(key: str, sp: Optional[float], **extra):
+    return normalize_scope_issue(
         {
-            **_issue("P-1", 5),
-            "role_contributors": {"front": {"name": "Front Dev", "source": "gitlab_mr"}},
-            "role_contributors_list": [{"role": "front", "name": "Front Dev", "source": "gitlab_mr"}],
+            **_raw_issue(key, sp, status="В работе", category="indeterminate"),
+            "jira_role_assignees": {"front": "", "back": "", "qa": ""},
+            **extra,
         }
+    )
+
+
+def test_merge_jira_role_fields_configured_prefers_true_flags():
+    merged = merge_jira_role_fields_configured(
+        {"front": False, "back": False, "qa": False},
+        {"front": True, "back": False, "qa": False},
+    )
+    assert merged == {"front": True, "back": False, "qa": False}
+
+
+def test_compute_scope_metrics_role_breakdown():
+    front_issue = _active_issue(
+        "P-1",
+        5,
+        jira_role_assignees={"front": "Front Dev", "back": "", "qa": ""},
     )
     qa_issue = normalize_scope_issue(
         {
-            **_issue("P-2", 3),
-            "role_contributors": {
-                "front": {"name": "Front Dev", "source": "gitlab_mr"},
-                "qa": {"name": "QA Person", "source": "changelog"},
-            },
-            "role_contributors_list": [
-                {"role": "front", "name": "Front Dev", "source": "gitlab_mr"},
-                {"role": "qa", "name": "QA Person", "source": "changelog"},
-            ],
+            **_raw_issue("P-2", 3, status="Тестирование", category="indeterminate"),
+            "jira_role_assignees": {"front": "Front Dev", "back": "", "qa": "QA Person"},
         }
     )
     sections = [
@@ -524,44 +550,42 @@ def test_compute_scope_metrics_role_breakdown():
         "confirmed": 2,
         "estimated": 0,
         "unattributed": 0,
-        "confirmed_gitlab": 2,
+        "confirmed_jira": 2,
+        "confirmed_gitlab": 0,
         "unresolved_no_gitlab_link": 0,
         "unresolved_ambiguous_role": 0,
     }
     assert metrics["plan_role_coverage"]["qa"] == {
         "attributed": 1,
-        "total": 2,
+        "total": 1,
         "confirmed": 1,
         "estimated": 0,
-        "unattributed": 1,
+        "unattributed": 0,
+        "confirmed_jira": 1,
         "confirmed_jira_qa": 1,
-        "unresolved_no_qa_transition": 1,
+        "unresolved_no_qa_transition": 0,
     }
 
 
-def test_role_metrics_ignore_untrusted_label_fallback():
-    issue = normalize_scope_issue(
-        {
-            **_issue("P-1", 5),
-            "role_contributors": {
-                "front": {"name": "Wrong Dev", "source": "label_fallback"},
-                "qa": {"name": "QA Person", "source": "changelog"},
-            },
-        }
+def test_role_metrics_ignore_gitlab_when_jira_field_empty():
+    issue = _active_issue(
+        "P-1",
+        5,
+        role_contributors={"front": {"name": "Wrong Dev", "source": "gitlab_mr"}},
     )
     metrics = compute_scope_metrics_from_sections(
         80,
         [{"id": "core", "name": "Plan", "kind": "planned", "order": 0, "issues": [issue]}],
         "2026-06",
     )
-    assert metrics["plan_by_role"]["front"] == []
-    assert metrics["plan_by_role"]["qa"][0]["developer"] == "QA Person"
+    assert metrics["plan_by_role"]["front"][0]["developer"] == "Не атрибутировано"
     assert metrics["plan_role_coverage"]["front"] == {
         "attributed": 0,
-        "total": 0,
+        "total": 1,
         "confirmed": 0,
         "estimated": 0,
-        "unattributed": 0,
+        "unattributed": 1,
+        "confirmed_jira": 0,
         "confirmed_gitlab": 0,
         "unresolved_no_gitlab_link": 0,
         "unresolved_ambiguous_role": 0,
@@ -571,15 +595,9 @@ def test_role_metrics_ignore_untrusted_label_fallback():
 def test_role_metrics_trust_jira_field_contributors():
     issue = normalize_scope_issue(
         {
-            **_issue("P-1", 3),
+            **_raw_issue("P-1", 3, status="Тестирование", category="indeterminate"),
+            "jira_role_assignees": {"front": "", "back": "", "qa": "QA Person"},
             "role_contributors": {"qa": {"name": "QA Person", "source": "jira_field"}},
-            "role_evidence": [
-                {
-                    "role": "qa",
-                    "unresolved_reason": "unresolved_no_qa_transition",
-                    "confidence": "unresolved",
-                }
-            ],
         }
     )
     metrics = compute_scope_metrics_from_sections(
@@ -595,19 +613,54 @@ def test_role_metrics_trust_jira_field_contributors():
         "confirmed": 1,
         "estimated": 0,
         "unattributed": 0,
+        "confirmed_jira": 1,
         "confirmed_jira_qa": 1,
         "unresolved_no_qa_transition": 0,
     }
     assert "role_unresolved" not in metrics["plan_by_role"]["qa"][0]["issues"][0]
 
 
-def test_role_metrics_add_unattributed_bucket_for_labeled_front_work():
-    issue = normalize_scope_issue(
+def test_role_coverage_requires_qa_only_in_test_status():
+    in_work_without_qa = _active_issue("P-1", 3)
+    in_test_without_qa = normalize_scope_issue(
         {
-            **_issue("P-1", 5),
-            "labels": ["frontend"],
+            **_raw_issue("P-2", 2, status="Тестирование", category="indeterminate"),
+            "jira_role_assignees": {"front": "", "back": "", "qa": ""},
         }
     )
+    in_test_with_qa = normalize_scope_issue(
+        {
+            **_raw_issue("P-3", 1, status="Тестирование", category="indeterminate"),
+            "jira_role_assignees": {"front": "", "back": "", "qa": "QA Person"},
+        }
+    )
+    metrics = compute_scope_metrics_from_sections(
+        80,
+        [
+            {
+                "id": "core",
+                "name": "Plan",
+                "kind": "planned",
+                "order": 0,
+                "issues": [in_work_without_qa, in_test_without_qa, in_test_with_qa],
+            }
+        ],
+        "2026-06",
+    )
+    assert metrics["plan_role_coverage"]["qa"] == {
+        "attributed": 1,
+        "total": 2,
+        "confirmed": 1,
+        "estimated": 0,
+        "unattributed": 1,
+        "confirmed_jira": 1,
+        "confirmed_jira_qa": 1,
+        "unresolved_no_qa_transition": 1,
+    }
+
+
+def test_role_metrics_add_unattributed_bucket_for_active_work_without_jira_field():
+    issue = _active_issue("P-1", 5)
     metrics = compute_scope_metrics_from_sections(
         80,
         [{"id": "core", "name": "Plan", "kind": "planned", "order": 0, "issues": [issue]}],
@@ -622,35 +675,18 @@ def test_role_metrics_add_unattributed_bucket_for_labeled_front_work():
         "confirmed": 0,
         "estimated": 0,
         "unattributed": 1,
+        "confirmed_jira": 0,
         "confirmed_gitlab": 0,
-        "unresolved_no_gitlab_link": 1,
+        "unresolved_no_gitlab_link": 0,
         "unresolved_ambiguous_role": 0,
     }
 
 
-def test_role_metrics_count_parent_task_once_for_subtask_gitlab_contributor():
-    issue = normalize_scope_issue(
-        {
-            **_issue("P-1", 4),
-            "labels": ["backend"],
-            "role_contributors": {"back": {"name": "Минаев Дмитрий Дмитриевич", "source": "subtask_gitlab_mr"}},
-            "role_workload_items": [
-                {
-                    "role": "back",
-                    "name": "Минаев Дмитрий Дмитриевич",
-                    "source": "subtask_gitlab_mr",
-                    "subtask_key": "FLEX-2245",
-                    "subtask_summary": "CMS_API",
-                },
-                {
-                    "role": "back",
-                    "name": "Егор Наумов",
-                    "source": "subtask_gitlab_commit",
-                    "subtask_key": "FLEX-2243",
-                    "subtask_summary": "Crutcher",
-                },
-            ],
-        }
+def test_role_metrics_count_task_by_jira_back_field():
+    issue = _active_issue(
+        "P-1",
+        4,
+        jira_role_assignees={"front": "", "back": "Минаев Дмитрий Дмитриевич", "qa": ""},
     )
     metrics = compute_scope_metrics_from_sections(
         80,
@@ -662,65 +698,47 @@ def test_role_metrics_count_parent_task_once_for_subtask_gitlab_contributor():
     assert rows["Минаев Дмитрий Дмитриевич"]["count"] == 1
     assert rows["Минаев Дмитрий Дмитриевич"]["story_points"] == 4.0
     assert rows["Минаев Дмитрий Дмитриевич"]["issues"][0]["key"] == "P-1"
-    assert "subtasks" not in rows["Минаев Дмитрий Дмитриевич"]["issues"][0]
     assert metrics["plan_role_coverage"]["back"] == {
         "attributed": 1,
         "total": 1,
         "confirmed": 1,
         "estimated": 0,
         "unattributed": 0,
-        "confirmed_gitlab": 1,
-        "unresolved_no_gitlab_link": 0,
-        "unresolved_ambiguous_role": 0,
-    }
-
-
-def test_role_metrics_use_changelog_dev_for_single_label_backend():
-    issue = normalize_scope_issue(
-        {
-            **_issue("P-1", 5),
-            "labels": ["backend"],
-            "developer": "Back Dev",
-            "developer_source": "changelog",
-            "role_contributors": {"back": {"name": "Back Dev", "source": "changelog_dev"}},
-            "role_contributors_list": [{"role": "back", "name": "Back Dev", "source": "changelog_dev"}],
-        }
-    )
-    metrics = compute_scope_metrics_from_sections(
-        80,
-        [{"id": "core", "name": "Plan", "kind": "planned", "order": 0, "issues": [issue]}],
-        "2026-06",
-    )
-    assert metrics["plan_by_role"]["back"][0]["developer"] == "Back Dev"
-    assert metrics["plan_role_coverage"]["back"] == {
-        "attributed": 1,
-        "total": 1,
-        "confirmed": 0,
-        "estimated": 1,
-        "unattributed": 0,
+        "confirmed_jira": 1,
         "confirmed_gitlab": 0,
         "unresolved_no_gitlab_link": 0,
         "unresolved_ambiguous_role": 0,
     }
 
 
+def test_role_metrics_ignore_changelog_when_jira_field_empty():
+    issue = _active_issue(
+        "P-1",
+        5,
+        developer="Back Dev",
+        developer_source="changelog",
+        role_contributors={"back": {"name": "Back Dev", "source": "changelog_dev"}},
+    )
+    metrics = compute_scope_metrics_from_sections(
+        80,
+        [{"id": "core", "name": "Plan", "kind": "planned", "order": 0, "issues": [issue]}],
+        "2026-06",
+    )
+    assert metrics["plan_by_role"]["back"][0]["developer"] == "Не атрибутировано"
+    assert metrics["plan_role_coverage"]["back"]["unattributed"] == 1
+
+
 def test_role_metrics_merge_same_person_by_name_tokens():
     issues = [
-        normalize_scope_issue(
-            {
-                **_issue("P-1", 3),
-                "role_contributors": {"front": {"name": "Илья Пыхтин", "source": "gitlab_mr"}},
-                "role_contributors_list": [{"role": "front", "name": "Илья Пыхтин", "source": "gitlab_mr"}],
-            }
+        _active_issue(
+            "P-1",
+            3,
+            jira_role_assignees={"front": "Илья Пыхтин", "back": "", "qa": ""},
         ),
-        normalize_scope_issue(
-            {
-                **_issue("P-2", 2),
-                "role_contributors": {"front": {"name": "Пыхтин Илья Александрович", "source": "gitlab_mr"}},
-                "role_contributors_list": [
-                    {"role": "front", "name": "Пыхтин Илья Александрович", "source": "gitlab_mr"}
-                ],
-            }
+        _active_issue(
+            "P-2",
+            2,
+            jira_role_assignees={"front": "Пыхтин Илья Александрович", "back": "", "qa": ""},
         ),
     ]
     metrics = compute_scope_metrics_from_sections(
@@ -773,3 +791,73 @@ def test_build_scope_snapshot_with_sections():
     assert snapshot["report"]["sections"][0]["name"] == "Epic Core"
     assert snapshot["plan_issues"][0]["section_name"] == "Epic Core"
     assert snapshot["unplan_issues"] == []
+
+
+def _dev_test_issue(
+    key: str,
+    *,
+    sp: Optional[float] = None,
+    sp_dev: Optional[float] = None,
+    sp_test: Optional[float] = None,
+    status="To Do",
+    category="new",
+):
+    return normalize_scope_issue(
+        {
+            "key": key,
+            "summary": key,
+            "url": f"/browse/{key}",
+            "story_points": sp,
+            "story_points_dev": sp_dev,
+            "story_points_test": sp_test,
+            "status": {"name": status, "category": category},
+            "issue_type": {"name": "Story"},
+            "labels": [],
+            "created": "2026-05-01T10:00:00.000+0000",
+            "updated": "2026-05-01T10:00:00.000+0000",
+        }
+    )
+
+
+def test_compute_scope_metrics_dev_test_mode():
+    plan = [
+        _dev_test_issue("P-1", sp_dev=10, sp_test=3),
+        _dev_test_issue("P-2", sp_dev=5, sp_test=2),
+    ]
+    unplan = [_dev_test_issue("U-1", sp_dev=4, sp_test=1)]
+    metrics = compute_scope_metrics(80, plan, unplan, "2026-06", workload_mode="sp_dev_test", capacity_sp_dev=60, capacity_sp_test=30)
+    assert metrics["workload_mode"] == "sp_dev_test"
+    assert metrics["capacity_sp_dev"] == 60
+    assert metrics["capacity_sp_test"] == 30
+    assert metrics["plan_dev_sp"] == 15
+    assert metrics["plan_test_sp"] == 5
+    assert metrics["unplan_dev_sp"] == 4
+    assert metrics["unplan_test_sp"] == 1
+    assert metrics["plan_sp"] == 20
+    assert metrics["unplan_sp"] == 5
+    assert metrics["buffer_dev_sp"] == 41
+    assert metrics["buffer_test_sp"] == 24
+    assert metrics["intake_status"] == "ok"
+
+
+def test_compute_scope_metrics_dev_test_mode_flags_missing_track_fields():
+    plan = [
+        _dev_test_issue("P-1", sp_dev=10, sp_test=3),
+        _dev_test_issue("P-2", sp_dev=5, sp_test=None),
+    ]
+    metrics = compute_scope_metrics(80, plan, [], "2026-06", workload_mode="sp_dev_test")
+    assert metrics["unestimated_count"] == 1
+    assert metrics["unestimated_tasks"][0]["key"] == "P-2"
+    assert metrics["unestimated_tasks"][0]["missing_tracks"] == ["test"]
+    assert metrics["intake_status"] == "warning"
+
+
+def test_compute_scope_metrics_dev_test_mode_flags_only_general_sp():
+    plan = [_dev_test_issue("FLEX-1853", sp=8, sp_dev=None, sp_test=None, status="В работе", category="indeterminate")]
+    metrics = compute_scope_metrics(80, plan, [], "2026-06", workload_mode="sp_dev_test")
+    assert metrics["unestimated_count"] == 1
+    issue = metrics["unestimated_tasks"][0]
+    assert issue["key"] == "FLEX-1853"
+    assert issue["missing_tracks"] == ["dev", "test"]
+    assert "указан только общий SP" in issue["workload_attention_reasons"]
+    assert metrics["intake_status"] == "warning"

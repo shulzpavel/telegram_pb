@@ -11,7 +11,7 @@ from services.voting_service.scope_ai_llm import (
 
 
 def test_system_prompt_pins_schema_keys():
-    prompt = _system_prompt()
+    prompt = _system_prompt("sp")
     for fragment in (
         '"health"',
         '"whats_good"',
@@ -26,15 +26,18 @@ def test_system_prompt_pins_schema_keys():
         '"buffer_status"',
         '"queue_insights"',
         '"focus_now"',
-        "intake_status",
+        "бизнес",
         "JSON",
-        "недоверенный ввод",
         "Открытые вопросы",
-        "Нагрузка по ролям",
-        "пересекающийся срез",
-        "не сравнивай сумму ролей напрямую с capacity",
+        "нагрузку по ролям",
     ):
         assert fragment in prompt
+
+
+def test_system_prompt_split_mode_mentions_dev_test_tracks():
+    prompt = _system_prompt("sp_dev_test")
+    assert "SP Dev" in prompt
+    assert "SP Test" in prompt
 
 
 def test_build_context_includes_metrics_queues_and_questions():
@@ -98,7 +101,8 @@ def test_build_context_includes_metrics_queues_and_questions():
         },
     })
     assert "Июнь FLEX" in context
-    assert "buffer_sp: 20" in context
+    assert "лимит месяца: 80 SP" in context
+    assert "запас на новые задачи: 20 SP" in context
     assert "FLEX-20" in context
     assert "Берём первой" in context
     assert "FLEX-99" in context
@@ -113,22 +117,55 @@ def test_build_context_includes_metrics_queues_and_questions():
     assert "Открытые вопросы" in context
 
 
+def test_build_context_includes_dev_test_capacity_tracks():
+    context = build_scope_analysis_context({
+        "name": "Split board",
+        "month": "2026-06",
+        "workload_mode": "sp_dev_test",
+        "snapshot": {
+            "metrics": {
+                "workload_mode": "sp_dev_test",
+                "capacity_sp": 80,
+                "capacity_sp_dev": 60,
+                "capacity_sp_test": 30,
+                "plan_dev_sp": 20,
+                "unplan_dev_sp": 5,
+                "buffer_dev_sp": 35,
+                "overfill_dev_sp": 0,
+                "plan_test_sp": 8,
+                "unplan_test_sp": 2,
+                "buffer_test_sp": 20,
+                "overfill_test_sp": 0,
+                "plan_sp": 28,
+                "unplan_sp": 7,
+                "buffer_sp": 20,
+                "intake_status": "ok",
+            },
+        },
+    })
+    assert "workload_mode: sp_dev_test" in context
+    assert "Разработка (SP Dev)" in context
+    assert "Тестирование (SP Test)" in context
+    assert "запас=35 SP" in context
+    assert "запас=20 SP" in context
+
+
 def test_build_context_includes_role_workload_coverage():
     context = build_scope_analysis_context({
         "name": "Test",
         "month": "2026-06",
         "snapshot": {
             "metrics": {
-                "plan_role_coverage": {"back": {"attributed": 1, "total": 2, "unresolved_no_gitlab_link": 1}},
+                "plan_role_coverage": {"back": {"attributed": 1, "total": 2, "unattributed": 1, "confirmed_jira": 1}},
                 "plan_by_role": {"back": [{"developer": "Не атрибутировано", "story_points": 5, "count": 1, "issues": [{"key": "FLEX-99"}]}]},
             },
         },
     })
-    assert "без GitLab" in context or "1/2" in context
+    assert "1/2" in context
     assert "FLEX-99" in context
 
 
-def test_build_context_suppresses_stale_opposite_role_gap_for_ai():
+def test_build_context_uses_jira_role_rules_for_ai():
     context = build_scope_analysis_context({
         "name": "Test",
         "month": "2026-06",
@@ -139,9 +176,8 @@ def test_build_context_suppresses_stale_opposite_role_gap_for_ai():
                         "attributed": 0,
                         "total": 1,
                         "unattributed": 1,
-                        "unresolved_ambiguous_role": 1,
                     },
-                    "back": {"attributed": 1, "total": 1, "confirmed_gitlab": 1},
+                    "back": {"attributed": 1, "total": 1, "confirmed_jira": 1},
                 },
                 "plan_by_role": {
                     "back": [{"developer": "Back Dev", "story_points": 2, "count": 1, "issues": [{"key": "FLEX-1965"}]}],
@@ -157,20 +193,8 @@ def test_build_context_suppresses_stale_opposite_role_gap_for_ai():
                             "key": "FLEX-1965",
                             "summary": "Ретраи при отправке сообщений в AlanBase",
                             "story_points": 2,
-                            "status": "Готово",
-                            "labels": ["frontend", "backend"],
-                            "role_contributors": {"back": {"name": "Back Dev", "source": "gitlab_api_mr"}},
-                            "role_workload_items": [
-                                {"role": "back", "name": "Back Dev", "source": "gitlab_api_mr"}
-                            ],
-                            "role_evidence": [
-                                {"role": "back", "name": "Back Dev", "source": "gitlab_api_mr"},
-                                {
-                                    "role": "front",
-                                    "unresolved_reason": "unresolved_ambiguous_role",
-                                    "confidence": "unresolved",
-                                },
-                            ],
+                            "status": "В работе",
+                            "jira_role_assignees": {"front": "", "back": "Back Dev", "qa": ""},
                         }
                     ],
                 }
@@ -178,10 +202,9 @@ def test_build_context_suppresses_stale_opposite_role_gap_for_ai():
         },
     })
 
-    assert "Правило атрибуции" in context
-    assert "Plan Front: 0/0 с атрибуцией" in context
-    assert "Plan Front: 0/1" not in context
-    assert "конфликт ролей" not in context
+    assert "полям Jira" in context
+    assert "Plan Front: 0/1" in context
+    assert "Plan Back: 1/1" in context
 
 
 def test_collect_open_questions_includes_manual_and_excludes_resolved():

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { Badge, Button, Spinner, TextareaField } from "../../../design-system";
 import type {
   ScopeBoardIssue,
@@ -16,7 +16,10 @@ import {
   formatCommentMeta,
   formatScopeSp,
   normalizeScopeReport,
+  IN_TEST_REPORT_SUBGROUP_LABELS,
+  inTestReportSubgroup,
   priorityBadgeTone,
+  sortInTestReportIssues,
   resolveOpenQuestions,
   resolvedQuestions,
   sortDoneIssuesByRecentStatus,
@@ -1234,7 +1237,12 @@ function ReportColumn({
   hidePlanFields?: boolean;
 }) {
   const sortedIssues = useMemo(
-    () => (columnKey === "done" ? sortDoneIssuesByRecentStatus(issues) : issues),
+    () =>
+      columnKey === "done"
+        ? sortDoneIssuesByRecentStatus(issues)
+        : columnKey === "in_test"
+          ? sortInTestReportIssues(issues)
+          : issues,
     [columnKey, issues]
   );
   const { visibleItems, hasMore, loadMore, loadedCount, total } = useIncrementalList(sortedIssues);
@@ -1250,34 +1258,50 @@ function ReportColumn({
       ) : (
         <>
           <ul className="space-y-3 text-sm">
-            {visibleItems.map((issue) => (
-              <li key={issue.key} className="rounded-xl bg-surface/80 px-3 py-3">
-                <div className="flex flex-wrap items-center gap-2">
-                  <ReportIssueLink issue={issue} />
-                  {issue.priority ? (
-                    <Badge tone={priorityBadgeTone(issue.priority)}>{issue.priority}</Badge>
-                  ) : (
-                    <Badge tone="neutral">—</Badge>
-                  )}
-                  <span className="text-xs text-ink3">{formatScopeSp(issue.story_points)} SP</span>
-                </div>
-                <p className="mt-2 line-clamp-3 text-sm text-ink2">{issue.summary}</p>
-                <div className="mt-2">
-                  <RoleContributorsBadges issue={issue} showSource={showTechnicalFields} />
-                  {hidePlanFields ? null : <PlanFieldBadges issue={issue} />}
-                </div>
-                {columnKey === "done" && (issue.status_entered_at || issue.status_changed_at) ? (
-                  <p className="mt-2 text-xs text-ink3">
-                    В «{issue.status || "Готово"}» с{" "}
-                    {formatQueueTimelineDate(issue.status_entered_at || issue.status_changed_at || "")}
-                  </p>
-                ) : (
-                  <p className="mt-2 text-xs text-ink3">
-                    {[issue.status, issue.assignee].filter(Boolean).join(" · ") || "—"}
-                  </p>
-                )}
-              </li>
-            ))}
+            {visibleItems.map((issue, index) => {
+              const subgroup = columnKey === "in_test" ? inTestReportSubgroup(issue) : null;
+              const previousSubgroup =
+                columnKey === "in_test" && index > 0 ? inTestReportSubgroup(visibleItems[index - 1]!) : null;
+              const showSubgroupHeader = subgroup != null && subgroup !== previousSubgroup;
+
+              return (
+                <Fragment key={issue.key}>
+                  {showSubgroupHeader ? (
+                    <li className="list-none pt-1 first:pt-0">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-ink3">
+                        {IN_TEST_REPORT_SUBGROUP_LABELS[subgroup]}
+                      </p>
+                    </li>
+                  ) : null}
+                  <li className="rounded-xl bg-surface/80 px-3 py-3">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <ReportIssueLink issue={issue} />
+                      {issue.priority ? (
+                        <Badge tone={priorityBadgeTone(issue.priority)}>{issue.priority}</Badge>
+                      ) : (
+                        <Badge tone="neutral">—</Badge>
+                      )}
+                      <span className="text-xs text-ink3">{formatScopeSp(issue.story_points)} SP</span>
+                    </div>
+                    <p className="mt-2 line-clamp-3 text-sm text-ink2">{issue.summary}</p>
+                    <div className="mt-2">
+                      <RoleContributorsBadges issue={issue} showSource={showTechnicalFields} />
+                      {hidePlanFields ? null : <PlanFieldBadges issue={issue} />}
+                    </div>
+                    {columnKey === "done" && (issue.status_entered_at || issue.status_changed_at) ? (
+                      <p className="mt-2 text-xs text-ink3">
+                        В «{issue.status || "Готово"}» с{" "}
+                        {formatQueueTimelineDate(issue.status_entered_at || issue.status_changed_at || "")}
+                      </p>
+                    ) : (
+                      <p className="mt-2 text-xs text-ink3">
+                        {[issue.status, issue.assignee].filter(Boolean).join(" · ") || "—"}
+                      </p>
+                    )}
+                  </li>
+                </Fragment>
+              );
+            })}
           </ul>
           <ScopeIncrementalFooter
             loadedCount={loadedCount}

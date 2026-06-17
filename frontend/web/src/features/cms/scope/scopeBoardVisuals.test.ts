@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ScopeBoardMetrics } from "../api/cmsClient";
-import { buildCapacityVisual } from "./scopeBoardVisuals";
+import { buildCapacityVisual, buildTrackCapacityVisual } from "./scopeBoardVisuals";
 
 function metrics(overrides: Partial<ScopeBoardMetrics>): ScopeBoardMetrics {
   return {
@@ -37,6 +37,31 @@ describe("buildCapacityVisual", () => {
     );
     expect(visual.mode).toBe("tasks");
     expect(visual.centerValue).toBe("15");
+  });
+
+  it("builds track visuals for dev and test", () => {
+    const base = metrics({
+      workload_mode: "sp_dev_test",
+      capacity_sp_dev: 60,
+      capacity_sp_test: 30,
+      plan_dev_sp: 20,
+      unplan_dev_sp: 5,
+      buffer_dev_sp: 55,
+      overfill_dev_sp: 0,
+      plan_test_sp: 8,
+      unplan_test_sp: 2,
+      buffer_test_sp: 20,
+      overfill_test_sp: 0,
+      plan_sp: 28,
+      unplan_sp: 7,
+      buffer_sp: 55,
+    });
+    const dev = buildTrackCapacityVisual(base, "dev");
+    const test = buildTrackCapacityVisual(base, "test");
+    expect(dev.centerValue).toBe("55");
+    expect(test.centerValue).toBe("20");
+    expect(dev.subtitle).toContain("SP Dev");
+    expect(test.subtitle).toContain("SP Test");
   });
 });
 
