@@ -4,7 +4,6 @@ import type {
   ScopeBoardMetrics,
   ScopeDeveloperBreakdown,
   ScopeRoleBreakdownMap,
-  ScopeRoleCoverageMap,
 } from "../api/cmsClient";
 import { formatScopeSp } from "./scopeBoardHelpers";
 import { formatQueueTimelineDate } from "./scopePriorityQueueTimeline";
@@ -19,27 +18,42 @@ import {
 type ChartMode = "sp" | "tasks";
 type RoleKey = "front" | "back" | "qa";
 
-const ROLE_META: Record<
-  RoleKey,
-  { label: string; accent: "info" | "warning" | "neutral"; description: string }
-> = {
-  front: {
-    label: "Front",
-    accent: "neutral",
-    description: "Поле Jira «Разработчик Front». Учитываются задачи в работе и в тесте.",
-  },
-  back: {
-    label: "Back",
-    accent: "info",
-    description: "Поле Jira «Разработчик Back». Учитываются задачи в работе и в тесте.",
-  },
-  qa: {
-    label: "QA",
-    accent: "warning",
-    description:
-      "Тестирование, к релизу и готово. Атрибуция по SP Test: если поле заполнено — задача на исполнителе (Тестировщик или assignee), иначе в «Не атрибутировано».",
-  },
+const ROLE_META: Record<RoleKey, { label: string; accent: "info" | "warning" | "neutral" }> = {
+  front: { label: "Front", accent: "neutral" },
+  back: { label: "Back", accent: "info" },
+  qa: { label: "QA", accent: "warning" },
 };
+
+function RoleSegmentPicker({ value, onChange }: { value: RoleKey; onChange: (role: RoleKey) => void }) {
+  return (
+    <div
+      className="grid w-full grid-cols-3 gap-2 sm:inline-grid sm:w-auto sm:grid-cols-3"
+      role="tablist"
+      aria-label="Роль"
+    >
+      {(Object.keys(ROLE_META) as RoleKey[]).map((key) => {
+        const active = value === key;
+        return (
+          <button
+            key={key}
+            type="button"
+            role="tab"
+            aria-selected={active}
+            onClick={() => onChange(key)}
+            className={[
+              "min-h-10 rounded-lg border px-4 text-sm font-semibold transition-colors",
+              active
+                ? "border-blue bg-blue/10 text-ink"
+                : "border-line bg-surface text-ink2 hover:border-blue/40 hover:bg-bg/80",
+            ].join(" ")}
+          >
+            {ROLE_META[key].label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 
 export function ScopeAssigneeCharts({ metrics }: { metrics: ScopeBoardMetrics }) {
   const [role, setRole] = useState<RoleKey>("front");
@@ -52,16 +66,12 @@ export function ScopeAssigneeCharts({ metrics }: { metrics: ScopeBoardMetrics })
   }
 
   const roleMeta = ROLE_META[role];
-  const roleSummary = summarizeRoleWorkload(metrics, role);
 
   return (
     <Surface className="scope-collapsible-card overflow-hidden border-0 bg-surface/80 p-0">
       <details className="group">
         <summary className="scope-section-header flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 marker:content-none sm:px-5">
-          <div>
-            <h2 className="text-base font-semibold text-ink">Нагрузка по ролям</h2>
-            <p className="scope-section-header-subtitle mt-1 text-sm">Ролевой срез plan/unplan по полям Jira: Front, Back, QA</p>
-          </div>
+          <h2 className="text-base font-semibold text-ink">Нагрузка по ролям</h2>
           <span className="scope-section-header-icon inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-transform group-open:rotate-180">
             <svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4" aria-hidden="true">
               <path d="M5.23 7.21a.75.75 0 0 1 1.06.02L10 11.17l3.71-3.94a.75.75 0 1 1 1.08 1.04l-4.25 4.5a.75.75 0 0 1-1.08 0l-4.25-4.5a.75.75 0 0 1 .02-1.06z" />
@@ -70,61 +80,18 @@ export function ScopeAssigneeCharts({ metrics }: { metrics: ScopeBoardMetrics })
         </summary>
 
         <div className="space-y-5 p-4 sm:p-6 lg:p-7">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div className="max-w-3xl">
-            <p className="text-sm leading-relaxed text-ink3">
-            Это ролевой срез, а не сумма capacity: одна Jira-задача может одновременно попасть во Front, Back и QA.
-            SP роли = полный SP задачи, если роль участвовала; роли между собой не складываются.
-            </p>
-          </div>
-          <div className="inline-flex rounded-xl bg-line2/60 p-1">
-            {(Object.keys(ROLE_META) as RoleKey[]).map((key) => (
-              <Button
-                key={key}
-                type="button"
-                size="sm"
-                variant={role === key ? "secondary" : "ghost"}
-                className="min-h-8 px-3 text-xs"
-                onClick={() => setRole(key)}
-              >
-                {ROLE_META[key].label}
-              </Button>
-            ))}
-          </div>
-        </div>
+          <RoleSegmentPicker value={role} onChange={setRole} />
 
-        <div className="grid auto-rows-fr gap-3 sm:grid-cols-3">
-          <SummaryChip label="Scope всего" value={`${formatScopeSp(roleSummary.scopeSp)} SP`} meta={taskCountLabel(roleSummary.scopeCount)} />
-          <SummaryChip label={roleMeta.label} value={`${formatScopeSp(roleSummary.roleSp)} SP`} meta={taskCountLabel(roleSummary.roleCount)} tone="accent" />
-          <SummaryChip
-            label="Без роли"
-            value={taskCountLabel(roleSummary.unattributedCount)}
-            meta={role === "qa" ? "нет SP Test" : "поле Jira не заполнено"}
-            tone={roleSummary.unattributedCount > 0 ? "warning" : "neutral"}
-          />
-        </div>
-
-        <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(260px,0.55fr)]">
-          <p className="rounded-2xl bg-amber/[0.07] px-4 py-3 text-sm leading-relaxed text-ink2">
-            «Выполнено» наверху показывает полный SP всех задач в статусе «Готово». Здесь показан только выбранный
-            ролевой срез, поэтому {roleMeta.label} {formatScopeSp(roleSummary.roleSp)} SP не обязан равняться scope{" "}
-            {formatScopeSp(roleSummary.scopeSp)} SP.
-          </p>
-          <p className="rounded-2xl bg-line2/40 px-4 py-3 text-sm leading-relaxed text-ink3">{roleMeta.description}</p>
-        </div>
-
-        <div className="grid gap-5 xl:grid-cols-2">
+          <div className="grid gap-5 xl:grid-cols-2">
           <RoleDonutCard
             title={`Плановые задачи роли ${roleMeta.label}`}
             rows={planByRole?.[role] ?? []}
-            coverage={metrics.plan_role_coverage?.[role]}
             accent={roleMeta.accent}
             role={role}
           />
           <RoleDonutCard
             title={`Внеплановые задачи роли ${roleMeta.label}`}
             rows={unplanByRole?.[role] ?? []}
-            coverage={metrics.unplan_role_coverage?.[role]}
             accent={roleMeta.accent}
             role={role}
           />
@@ -157,53 +124,6 @@ function sumRoleCount(rows: ScopeDeveloperBreakdown[]): number {
   return rows.reduce((sum, row) => sum + Math.max(0, row.count), 0);
 }
 
-function SummaryChip({
-  label,
-  value,
-  meta,
-  tone = "neutral",
-}: {
-  label: string;
-  value: string;
-  meta: string;
-  tone?: "neutral" | "accent" | "warning";
-}) {
-  const valueClass = tone === "accent" ? "text-blue" : tone === "warning" ? "text-amber" : "text-ink";
-  return (
-    <div className="flex min-h-28 flex-col justify-center rounded-2xl bg-bg/70 px-4 py-4">
-      <div className="mb-1 flex items-center justify-between gap-2">
-        <p className="text-xs font-semibold uppercase tracking-wide text-ink3">{label}</p>
-        {tone === "warning" ? <Badge tone="warning">важно</Badge> : null}
-      </div>
-      <p className={`text-2xl font-bold ${valueClass}`}>{value}</p>
-      <p className="mt-1 text-sm text-ink3">{meta}</p>
-    </div>
-  );
-}
-
-function formatCoverageLabel(coverage?: ScopeRoleCoverageMap[RoleKey], role?: RoleKey): string | null {
-  if (!coverage || coverage.total <= 0) return null;
-  const parts = [
-    role === "qa"
-      ? `${coverage.attributed} из ${coverage.total} с SP Test`
-      : `${coverage.attributed} из ${coverage.total} с полем Jira`,
-  ];
-  const tiers: string[] = [];
-  if (coverage.confirmed_jira != null && coverage.confirmed_jira > 0) {
-    tiers.push(`${coverage.confirmed_jira} Jira`);
-  }
-  if (role === "qa" && coverage.confirmed_jira_qa != null && coverage.confirmed_jira_qa > 0 && coverage.confirmed_jira == null) {
-    tiers.push(`${coverage.confirmed_jira_qa} Jira`);
-  }
-  if (coverage.unattributed != null && coverage.unattributed > 0) {
-    tiers.push(role === "qa" ? `${coverage.unattributed} без SP Test` : `${coverage.unattributed} без поля`);
-  }
-  if (tiers.length > 0) {
-    parts.push(`(${tiers.join(" · ")})`);
-  }
-  return parts.join(" ");
-}
-
 function formatRoleSp(value: number | null | undefined): string {
   if (value === null || value === undefined || Number.isNaN(value)) {
     return "— SP";
@@ -222,13 +142,11 @@ function taskCountLabel(count: number): string {
 function RoleDonutCard({
   title,
   rows,
-  coverage,
   accent,
   role,
 }: {
   title: string;
   rows: ScopeDeveloperBreakdown[];
-  coverage?: ScopeRoleCoverageMap[RoleKey];
   accent: "info" | "warning" | "neutral";
   role: RoleKey;
 }) {
@@ -237,7 +155,6 @@ function RoleDonutCard({
   const arcs = useMemo(() => donutArcs(segments), [segments]);
   const center = useMemo(() => developerDonutCenter(rows, mode), [rows, mode]);
   const accentClass = accent === "info" ? "text-blue" : accent === "warning" ? "text-amber" : "text-ink";
-  const coverageLabel = formatCoverageLabel(coverage, role);
 
   return (
     <div className="rounded-2xl bg-bg/70 p-4 sm:p-5">
@@ -245,7 +162,6 @@ function RoleDonutCard({
         <div>
           <h3 className={`text-base font-semibold ${accentClass}`}>{title}</h3>
           <p className="mt-1 text-sm text-ink3">{rows.length} исполнителей</p>
-          {coverageLabel ? <p className="mt-1 max-w-xl text-sm leading-relaxed text-ink3">{coverageLabel}</p> : null}
         </div>
         <div className="inline-flex rounded-xl bg-line2/60 p-1">
           <ModeButton active={mode === "sp"} onClick={() => setMode("sp")}>
