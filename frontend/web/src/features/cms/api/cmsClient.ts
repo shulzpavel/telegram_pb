@@ -544,6 +544,9 @@ export interface ScopeDeveloperTaskSummary {
   status?: string;
   assignee?: string;
   developer_source?: string;
+  status_entered_at?: string | null;
+  status_changed_at?: string | null;
+  updated?: string | null;
   front?: string;
   back?: string;
   qa?: string;

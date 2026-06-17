@@ -257,6 +257,7 @@ _JIRA_FIELD_SOURCES = {"jira_field"}
 _UNATTRIBUTED_ROLE = "Не атрибутировано"
 _PAUSE_STATUS_KEYWORDS = ("пауз", "pause", "on hold", "blocked")
 _QA_TEST_STATUS_NAMES = frozenset({"тестирование", "к релизу"})
+_QA_WORKLOAD_STATUS_NAMES = _QA_TEST_STATUS_NAMES
 _REPORT_IN_TEST_STATUS_NAMES = frozenset({"тестирование", "к тестированию", "к релизу"})
 _DONE_STATUS_NAMES = frozenset({"готово", "done", "closed", "resolved", "cancelled", "canceled", "won't do", "wont do"})
 _NOT_STARTED_STATUS_NAMES = frozenset({"backlog", "бэклог", "к выполнению", "to do", "todo", "open"})
@@ -269,11 +270,19 @@ def _status_tokens(issue: dict[str, Any]) -> tuple[str, str]:
 
 
 def _issue_in_test_phase(issue: dict[str, Any]) -> bool:
-    """QA attribution is required only when the task is already in testing."""
+    """QA attention is required only when the task is already in testing."""
     status, category = _status_tokens(issue)
     if category == "done" or status in _DONE_STATUS_NAMES:
         return False
     return status in _QA_TEST_STATUS_NAMES
+
+
+def _issue_in_qa_workload_scope(issue: dict[str, Any]) -> bool:
+    """QA workload includes testing, release-ready, and done tasks."""
+    status, category = _status_tokens(issue)
+    if status in _QA_WORKLOAD_STATUS_NAMES:
+        return True
+    return category == "done" or status in _DONE_STATUS_NAMES
 
 
 def _developer_task_summary(issue: dict[str, Any]) -> dict[str, Any]:
@@ -316,12 +325,42 @@ def _issue_has_jira_role_assignee(issue: dict[str, Any], role: str) -> bool:
     return bool(_jira_role_assignee_name(issue, role))
 
 
+def _positive_story_points_test(issue: dict[str, Any]) -> float:
+    test_sp = issue.get("story_points_test")
+    if isinstance(test_sp, (int, float)) and test_sp > 0:
+        return float(test_sp)
+    return 0.0
+
+
+def _qa_workload_assignee_name(issue: dict[str, Any]) -> str:
+    """QA workload: SP Test must be filled; person from Тестировщик or assignee."""
+    if not _issue_in_qa_workload_scope(issue):
+        return ""
+    if _positive_story_points_test(issue) <= 0:
+        return ""
+    return _jira_role_assignee_name(issue, "qa") or str(issue.get("assignee") or "").strip()
+
+
+def _role_workload_assignee_name(issue: dict[str, Any], role: str) -> str:
+    if role == "qa":
+        return _qa_workload_assignee_name(issue)
+    return _jira_role_assignee_name(issue, role)
+
+
+def _issue_has_role_workload_attribution(issue: dict[str, Any], role: str) -> bool:
+    if role == "qa":
+        if not _issue_in_qa_workload_scope(issue):
+            return False
+        return _positive_story_points_test(issue) > 0 and bool(_qa_workload_assignee_name(issue))
+    return bool(_jira_role_assignee_name(issue, role))
+
+
 def _issue_in_role_workload_scope(issue: dict[str, Any], role: str) -> bool:
     bucket = classify_scope_report_bucket(issue)
     if role in {"front", "back"}:
         return bucket in {"in_work", "in_test"}
     if role == "qa":
-        return bucket == "in_test"
+        return _issue_in_qa_workload_scope(issue)
     return False
 
 
@@ -339,18 +378,37 @@ def _prefer_display_name(current: str, candidate: str) -> str:
     return candidate if len(candidate) > len(current) else current
 
 
-def _issue_unresolved_reason(issue: dict[str, Any], role: str) -> str:
+def _issue_requires_jira_role(issue: dict[str, Any], role: str) -> bool:
     if not _issue_in_role_workload_scope(issue, role):
+        return False
+    if role == "qa":
+        return True
+    if role not in {"front", "back"}:
+        return False
+    labels = issue.get("labels") if isinstance(issue.get("labels"), list) else []
+    from app.utils.jira_role_contributors import required_engineering_roles
+
+    return role in required_engineering_roles(labels)
+
+
+def _issue_unresolved_reason(issue: dict[str, Any], role: str) -> str:
+    if not _issue_requires_jira_role(issue, role):
         return ""
+    if role == "qa":
+        if _issue_has_role_workload_attribution(issue, role):
+            return ""
+        if _positive_story_points_test(issue) <= 0:
+            return "jira_sp_test_empty"
+        return "qa_user_missing"
     if _issue_has_jira_role_assignee(issue, role):
         return ""
     return "jira_field_empty"
 
 
 def _role_attribution_tier(issue: dict[str, Any], role: str) -> str:
-    if not _issue_in_role_workload_scope(issue, role):
+    if not _issue_requires_jira_role(issue, role):
         return "none"
-    if _issue_has_jira_role_assignee(issue, role):
+    if _issue_has_role_workload_attribution(issue, role):
         return "confirmed"
     return "unattributed"
 
@@ -375,9 +433,9 @@ def _parent_role_sp(issue: dict[str, Any], role: str) -> float:
 
 
 def _role_workload_slices(issue: dict[str, Any], role: str) -> list[tuple[str, dict[str, Any]]]:
-    if not _issue_in_role_workload_scope(issue, role):
+    if not _issue_requires_jira_role(issue, role):
         return []
-    name = _jira_role_assignee_name(issue, role)
+    name = _role_workload_assignee_name(issue, role)
     payload = {"count": 1, "story_points": _role_sp(issue, role)}
     if name:
         return [(name, payload)]
@@ -385,7 +443,10 @@ def _role_workload_slices(issue: dict[str, Any], role: str) -> list[tuple[str, d
 
 
 def _role_sp(issue: dict[str, Any], role: str) -> float:
-    if not _issue_in_role_workload_scope(issue, role):
+    if role == "qa":
+        if not _issue_in_qa_workload_scope(issue):
+            return 0.0
+    elif not _issue_in_role_workload_scope(issue, role):
         return 0.0
 
     field_by_role = {
@@ -410,10 +471,13 @@ def _role_sp(issue: dict[str, Any], role: str) -> float:
 
 def _role_task_summary(issue: dict[str, Any], *, role: str = "") -> dict[str, Any]:
     summary = _developer_task_summary(issue)
+    summary["status_entered_at"] = issue.get("status_entered_at")
+    summary["status_changed_at"] = issue.get("status_changed_at")
+    summary["updated"] = issue.get("updated")
     summary["role_contributors_list"] = issue.get("role_contributors_list") or []
     summary["front"] = _jira_role_assignee_name(issue, "front")
     summary["back"] = _jira_role_assignee_name(issue, "back")
-    summary["qa"] = _jira_role_assignee_name(issue, "qa")
+    summary["qa"] = _qa_workload_assignee_name(issue)
     unresolved_roles = (role,) if role else ("front", "back", "qa")
     unresolved = {
         role_key: _issue_unresolved_reason(issue, role_key)
@@ -426,6 +490,21 @@ def _role_task_summary(issue: dict[str, Any], *, role: str = "") -> dict[str, An
         role_sp = _role_sp(issue, role)
         summary["story_points"] = role_sp if role_sp > 0 else summary.get("story_points")
     return summary
+
+
+def _sort_role_workload_tasks(tasks: list[dict[str, Any]], role: str) -> list[dict[str, Any]]:
+    if role == "qa":
+        return sorted(
+            tasks,
+            key=lambda task: (
+                -_status_entered_timestamp(task),
+                str(task.get("key") or ""),
+            ),
+        )
+    return sorted(
+        tasks,
+        key=lambda task: (-(task.get("story_points") or 0), str(task.get("key") or "")),
+    )
 
 
 def _role_breakdown(issues: list[dict[str, Any]], role: str, *, max_items: int = 10) -> list[dict[str, Any]]:
@@ -455,10 +534,7 @@ def _role_breakdown(issues: list[dict[str, Any]], role: str, *, max_items: int =
         key=lambda item: (-float(item["story_points"]), -int(item["count"]), str(item["developer"])),
     )
     for row in rows:
-        row["issues"] = sorted(
-            row["issues"],
-            key=lambda task: (-(task.get("story_points") or 0), str(task.get("key") or "")),
-        )
+        row["issues"] = _sort_role_workload_tasks(row["issues"], role)
 
     if len(rows) <= max_items:
         return rows
@@ -485,12 +561,12 @@ def _role_metrics(issues: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]
 def _role_coverage(issues: list[dict[str, Any]]) -> dict[str, dict[str, int]]:
     coverage: dict[str, dict[str, int]] = {}
     for role in ("front", "back", "qa"):
-        total = sum(1 for issue in issues if _issue_in_role_workload_scope(issue, role))
+        total = sum(1 for issue in issues if _issue_requires_jira_role(issue, role))
         confirmed = unattributed = 0
         for issue in issues:
-            if not _issue_in_role_workload_scope(issue, role):
+            if not _issue_requires_jira_role(issue, role):
                 continue
-            if _issue_has_jira_role_assignee(issue, role):
+            if _issue_has_role_workload_attribution(issue, role):
                 confirmed += 1
             else:
                 unattributed += 1

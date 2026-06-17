@@ -481,12 +481,15 @@ def test_compute_scope_metrics_developer_breakdown():
                     "url": "/browse/U-1",
                     "story_points": 2.0,
                     "status": "",
-                        "assignee": "Tester Bob",
-                        "developer_source": "changelog",
-                        "role_contributors_list": [],
-                        "front": "",
-                        "back": "",
-                        "qa": "",
+                    "assignee": "Tester Bob",
+                    "developer_source": "changelog",
+                    "status_entered_at": None,
+                    "status_changed_at": None,
+                    "updated": "2026-05-01T10:00:00.000+0000",
+                    "role_contributors_list": [],
+                    "front": "",
+                    "back": "",
+                    "qa": "",
                     }
             ],
         }
@@ -521,6 +524,7 @@ def test_compute_scope_metrics_role_breakdown():
         {
             **_raw_issue("P-2", 3, status="Тестирование", category="indeterminate"),
             "jira_role_assignees": {"front": "Front Dev", "back": "", "qa": "QA Person"},
+            "story_points_test": 3,
         }
     )
     sections = [
@@ -567,6 +571,157 @@ def test_compute_scope_metrics_role_breakdown():
     }
 
 
+def test_role_attention_respects_single_engineering_label():
+    frontend_only = _active_issue(
+        "FLEX-2847",
+        3,
+        labels=["frontend"],
+        jira_role_assignees={"front": "", "back": "", "qa": ""},
+    )
+    backend_only = _active_issue(
+        "FLEX-2865",
+        8,
+        labels=["backend"],
+        jira_role_assignees={"front": "", "back": "", "qa": ""},
+    )
+    metrics = compute_scope_metrics_from_sections(
+        80,
+        [
+            {
+                "id": "core",
+                "name": "Plan",
+                "kind": "planned",
+                "order": 0,
+                "issues": [frontend_only, backend_only],
+            }
+        ],
+        "2026-06",
+    )
+
+    assert metrics["plan_role_coverage"]["front"] == {
+        "attributed": 0,
+        "total": 1,
+        "confirmed": 0,
+        "estimated": 0,
+        "unattributed": 1,
+        "confirmed_jira": 0,
+        "confirmed_gitlab": 0,
+        "unresolved_no_gitlab_link": 0,
+        "unresolved_ambiguous_role": 0,
+    }
+    assert metrics["plan_role_coverage"]["back"] == {
+        "attributed": 0,
+        "total": 1,
+        "confirmed": 0,
+        "estimated": 0,
+        "unattributed": 1,
+        "confirmed_jira": 0,
+        "confirmed_gitlab": 0,
+        "unresolved_no_gitlab_link": 0,
+        "unresolved_ambiguous_role": 0,
+    }
+
+
+def test_qa_role_workload_includes_done_status_with_sp_test():
+    issue = normalize_scope_issue(
+        {
+            **_raw_issue("FLEX-2739", 2, status="Готово", category="done"),
+            "jira_role_assignees": {"front": "", "back": "", "qa": ""},
+            "story_points_test": 2,
+            "assignee": "Егор Бухтояров",
+            "status_entered_at": "2026-06-20T10:00:00+00:00",
+        }
+    )
+    metrics = compute_scope_metrics_from_sections(
+        80,
+        [{"id": "core", "name": "Plan", "kind": "planned", "order": 0, "issues": [issue]}],
+        "2026-06",
+    )
+    assert metrics["plan_by_role"]["qa"][0]["developer"] == "Егор Бухтояров"
+    assert metrics["plan_role_coverage"]["qa"]["total"] == 1
+
+
+def test_qa_role_workload_marks_missing_sp_test_unattributed():
+    issue = normalize_scope_issue(
+        {
+            **_raw_issue("FLEX-2508", 3, status="Тестирование", category="indeterminate"),
+            "jira_role_assignees": {"front": "", "back": "", "qa": ""},
+            "story_points_test": None,
+            "assignee": "Александр Катанский",
+        }
+    )
+    metrics = compute_scope_metrics_from_sections(
+        80,
+        [{"id": "core", "name": "Plan", "kind": "planned", "order": 0, "issues": [issue]}],
+        "2026-06",
+    )
+    assert metrics["plan_by_role"]["qa"][0]["developer"] == "Не атрибутировано"
+    assert metrics["plan_role_coverage"]["qa"]["unattributed"] == 1
+    assert metrics["plan_by_role"]["qa"][0]["issues"][0]["role_unresolved"]["qa"] == "jira_sp_test_empty"
+
+
+def test_qa_role_workload_sorts_by_recent_status_transition():
+    older = normalize_scope_issue(
+        {
+            **_raw_issue("FLEX-1", 2, status="Тестирование", category="indeterminate"),
+            "story_points_test": 2,
+            "assignee": "QA Older",
+            "status_entered_at": "2026-06-10T10:00:00+00:00",
+        }
+    )
+    newer = normalize_scope_issue(
+        {
+            **_raw_issue("FLEX-2", 3, status="К релизу", category="indeterminate"),
+            "story_points_test": 3,
+            "assignee": "QA Newer",
+            "status_entered_at": "2026-06-20T10:00:00+00:00",
+        }
+    )
+    metrics = compute_scope_metrics_from_sections(
+        80,
+        [{"id": "core", "name": "Plan", "kind": "planned", "order": 0, "issues": [older, newer]}],
+        "2026-06",
+    )
+    row = next(item for item in metrics["plan_by_role"]["qa"] if item["developer"] == "QA Newer")
+    assert [task["key"] for task in row["issues"]] == ["FLEX-2"]
+
+
+def test_qa_role_workload_uses_assignee_when_tester_empty_and_sp_test_filled():
+    issue = normalize_scope_issue(
+        {
+            **_raw_issue("FLEX-2508", 3, status="Тестирование", category="indeterminate"),
+            "jira_role_assignees": {"front": "", "back": "", "qa": ""},
+            "story_points_test": 3,
+            "assignee": "Александр Катанский",
+        }
+    )
+    metrics = compute_scope_metrics_from_sections(
+        80,
+        [{"id": "core", "name": "Plan", "kind": "planned", "order": 0, "issues": [issue]}],
+        "2026-06",
+    )
+    assert metrics["plan_by_role"]["qa"][0]["developer"] == "Александр Катанский"
+    assert metrics["plan_role_coverage"]["qa"]["unattributed"] == 0
+
+
+def test_qa_role_workload_skips_ready_for_test_status():
+    issue = normalize_scope_issue(
+        {
+            **_raw_issue("FLEX-2085", 2, status="К тестированию", category="indeterminate"),
+            "jira_role_assignees": {"front": "", "back": "", "qa": ""},
+            "story_points_test": 2,
+            "assignee": "Сергей Баранов",
+        }
+    )
+    metrics = compute_scope_metrics_from_sections(
+        80,
+        [{"id": "core", "name": "Plan", "kind": "planned", "order": 0, "issues": [issue]}],
+        "2026-06",
+    )
+    assert metrics["plan_by_role"]["qa"] == []
+    assert metrics["plan_role_coverage"]["qa"]["total"] == 0
+
+
 def test_role_metrics_ignore_gitlab_when_jira_field_empty():
     issue = _active_issue(
         "P-1",
@@ -597,6 +752,7 @@ def test_role_metrics_trust_jira_field_contributors():
         {
             **_raw_issue("P-1", 3, status="Тестирование", category="indeterminate"),
             "jira_role_assignees": {"front": "", "back": "", "qa": "QA Person"},
+            "story_points_test": 2,
             "role_contributors": {"qa": {"name": "QA Person", "source": "jira_field"}},
         }
     )
@@ -632,6 +788,7 @@ def test_role_coverage_requires_qa_only_in_test_status():
         {
             **_raw_issue("P-3", 1, status="Тестирование", category="indeterminate"),
             "jira_role_assignees": {"front": "", "back": "", "qa": "QA Person"},
+            "story_points_test": 1,
         }
     )
     metrics = compute_scope_metrics_from_sections(

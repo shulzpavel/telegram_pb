@@ -126,6 +126,18 @@ def unambiguous_engineering_label(labels: list[str] | None) -> Optional[str]:
     return None
 
 
+def required_engineering_roles(labels: list[str] | None) -> set[str]:
+    """Roles whose Jira assignee fields must be filled for this issue."""
+    label_set = {str(label).strip().lower() for label in (labels or []) if label}
+    has_front = "frontend" in label_set
+    has_back = "backend" in label_set
+    if has_front and not has_back:
+        return {"front"}
+    if has_back and not has_front:
+        return {"back"}
+    return {"front", "back"}
+
+
 def _mention_score(kind: str) -> int:
     return 3 if _norm(kind).lower() == "merge request" else 1
 

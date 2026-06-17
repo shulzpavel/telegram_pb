@@ -580,6 +580,24 @@ export function hasJiraRoleAssignee(issue: ScopeBoardIssue, role: JiraScopeRole)
   return Boolean(jiraRoleAssigneeName(issue, role));
 }
 
+export function requiredJiraEngineeringRoles(issue: Pick<ScopeBoardIssue, "labels">): JiraScopeRole[] {
+  const labelSet = new Set((issue.labels ?? []).map((label) => label.trim().toLowerCase()).filter(Boolean));
+  const hasFront = labelSet.has("frontend");
+  const hasBack = labelSet.has("backend");
+  if (hasFront && !hasBack) return ["front"];
+  if (hasBack && !hasFront) return ["back"];
+  return ["front", "back"];
+}
+
+export function issueRequiresJiraRole(issue: ScopeBoardIssue, role: JiraScopeRole): boolean {
+  const bucket = classifyScopeReportBucket(issue);
+  if (role === "qa") {
+    return issueInTestPhase(issue);
+  }
+  if (bucket !== "in_work" && bucket !== "in_test") return false;
+  return requiredJiraEngineeringRoles(issue).includes(role);
+}
+
 export function roleAttentionReasons(
   issue: ScopeBoardIssue,
   options?: { jiraRoleFieldsConfigured?: JiraRoleFieldsConfigured },
@@ -593,6 +611,7 @@ export function roleAttentionReasons(
   if (bucket === "in_work" || bucket === "in_test") {
     for (const role of ["front", "back"] as const) {
       if (!configured[role]) continue;
+      if (!issueRequiresJiraRole(issue, role)) continue;
       if (!hasJiraRoleAssignee(issue, role)) {
         reasons.push(JIRA_ROLE_FIELD_LABELS[role]);
       }

@@ -410,8 +410,10 @@ class JiraHttpClient(JiraClient):
             JIRA_FRONT_ASSIGNEE_FIELD,
             JIRA_QA_ASSIGNEE_FIELD,
             JIRA_SP_BACK_FIELD,
+            JIRA_SP_DEV_FIELD,
             JIRA_SP_FRONT_FIELD,
             JIRA_SP_QA_FIELD,
+            JIRA_SP_TEST_FIELD,
         )
 
         fields = [*self._SCOPE_SEARCH_FIELDS, self.story_points_field, "key"]
@@ -424,7 +426,13 @@ class JiraHttpClient(JiraClient):
         ):
             if field_id and field_id not in fields:
                 fields.append(field_id)
-        for field_id in (JIRA_SP_FRONT_FIELD, JIRA_SP_BACK_FIELD, JIRA_SP_QA_FIELD):
+        for field_id in (
+            JIRA_SP_DEV_FIELD or "customfield_12978",
+            JIRA_SP_TEST_FIELD or "customfield_12979",
+            JIRA_SP_FRONT_FIELD,
+            JIRA_SP_BACK_FIELD,
+            JIRA_SP_QA_FIELD,
+        ):
             if field_id and field_id not in fields:
                 fields.append(field_id)
         for field_id in (JIRA_FRONT_ASSIGNEE_FIELD, JIRA_BACK_ASSIGNEE_FIELD, JIRA_QA_ASSIGNEE_FIELD):
@@ -630,7 +638,7 @@ class JiraHttpClient(JiraClient):
         role_from_comments = infer_role_contributors_from_comments(comments if isinstance(comments, list) else [])
         role_from_jira_fields = self._role_contributors_from_jira_fields(fields)
 
-        from config import JIRA_SP_BACK_FIELD, JIRA_SP_FRONT_FIELD, JIRA_SP_QA_FIELD
+        from config import JIRA_SP_BACK_FIELD, JIRA_SP_DEV_FIELD, JIRA_SP_FRONT_FIELD, JIRA_SP_QA_FIELD, JIRA_SP_TEST_FIELD
 
         linked_epic_key = self._scope_child_of_epic_key(fields)
 
@@ -642,8 +650,8 @@ class JiraHttpClient(JiraClient):
             "story_points_source": story_points_source,
             "story_points_plan": fields.get("customfield_11407"),
             "story_points_fact": fields.get("customfield_11408"),
-            "story_points_dev": fields.get("customfield_12978"),
-            "story_points_test": fields.get("customfield_12979"),
+            "story_points_dev": fields.get(JIRA_SP_DEV_FIELD or "customfield_12978"),
+            "story_points_test": fields.get(JIRA_SP_TEST_FIELD or "customfield_12979"),
             "story_points_front": fields.get(JIRA_SP_FRONT_FIELD) if JIRA_SP_FRONT_FIELD else None,
             "story_points_back": fields.get(JIRA_SP_BACK_FIELD) if JIRA_SP_BACK_FIELD else None,
             "story_points_qa": fields.get(JIRA_SP_QA_FIELD) if JIRA_SP_QA_FIELD else None,

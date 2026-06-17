@@ -271,6 +271,42 @@ describe("role attention", () => {
 
   const configured = { front: true, back: true, qa: true };
 
+  it("flags only roles required by engineering labels", () => {
+    const frontendOnly = {
+      ...baseIssue,
+      key: "FLEX-2847",
+      status: "В работе",
+      labels: ["frontend"],
+      jira_role_assignees: { front: "Front Dev", back: "", qa: "" },
+    };
+    expect(roleAttentionReasons(frontendOnly, { jiraRoleFieldsConfigured: configured })).toEqual([]);
+
+    const frontendOnlyMissingBack = {
+      ...frontendOnly,
+      jira_role_assignees: { front: "", back: "", qa: "" },
+    };
+    expect(roleAttentionReasons(frontendOnlyMissingBack, { jiraRoleFieldsConfigured: configured })).toEqual([
+      "Не заполнено поле «Разработчик Front»",
+    ]);
+
+    const backendOnly = {
+      ...baseIssue,
+      key: "FLEX-2865",
+      status: "В работе",
+      labels: ["backend"],
+      jira_role_assignees: { front: "", back: "Back Dev", qa: "" },
+    };
+    expect(roleAttentionReasons(backendOnly, { jiraRoleFieldsConfigured: configured })).toEqual([]);
+
+    const backendOnlyMissingFront = {
+      ...backendOnly,
+      jira_role_assignees: { front: "", back: "", qa: "" },
+    };
+    expect(roleAttentionReasons(backendOnlyMissingFront, { jiraRoleFieldsConfigured: configured })).toEqual([
+      "Не заполнено поле «Разработчик Back»",
+    ]);
+  });
+
   it("flags QA gaps only in testing status", () => {
     const inWork = {
       ...baseIssue,

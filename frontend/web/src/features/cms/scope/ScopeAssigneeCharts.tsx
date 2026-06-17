@@ -7,6 +7,7 @@ import type {
   ScopeRoleCoverageMap,
 } from "../api/cmsClient";
 import { formatScopeSp } from "./scopeBoardHelpers";
+import { formatQueueTimelineDate } from "./scopePriorityQueueTimeline";
 import { RoleContributorsLines } from "./scopeRoleContributors";
 import {
   buildDeveloperDonutSegments,
@@ -35,7 +36,8 @@ const ROLE_META: Record<
   qa: {
     label: "QA",
     accent: "warning",
-    description: "Поле Jira «Тестировщик». Учитываются только задачи в статусе тестирования.",
+    description:
+      "Тестирование, к релизу и готово. Атрибуция по SP Test: если поле заполнено — задача на исполнителе (Тестировщик или assignee), иначе в «Не атрибутировано».",
   },
 };
 
@@ -94,7 +96,12 @@ export function ScopeAssigneeCharts({ metrics }: { metrics: ScopeBoardMetrics })
         <div className="grid auto-rows-fr gap-3 sm:grid-cols-3">
           <SummaryChip label="Scope всего" value={`${formatScopeSp(roleSummary.scopeSp)} SP`} meta={taskCountLabel(roleSummary.scopeCount)} />
           <SummaryChip label={roleMeta.label} value={`${formatScopeSp(roleSummary.roleSp)} SP`} meta={taskCountLabel(roleSummary.roleCount)} tone="accent" />
-          <SummaryChip label="Без роли" value={taskCountLabel(roleSummary.unattributedCount)} meta="поле Jira не заполнено" tone={roleSummary.unattributedCount > 0 ? "warning" : "neutral"} />
+          <SummaryChip
+            label="Без роли"
+            value={taskCountLabel(roleSummary.unattributedCount)}
+            meta={role === "qa" ? "нет SP Test" : "поле Jira не заполнено"}
+            tone={roleSummary.unattributedCount > 0 ? "warning" : "neutral"}
+          />
         </div>
 
         <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(260px,0.55fr)]">
@@ -176,7 +183,11 @@ function SummaryChip({
 
 function formatCoverageLabel(coverage?: ScopeRoleCoverageMap[RoleKey], role?: RoleKey): string | null {
   if (!coverage || coverage.total <= 0) return null;
-  const parts = [`${coverage.attributed} из ${coverage.total} с полем Jira`];
+  const parts = [
+    role === "qa"
+      ? `${coverage.attributed} из ${coverage.total} с SP Test`
+      : `${coverage.attributed} из ${coverage.total} с полем Jira`,
+  ];
   const tiers: string[] = [];
   if (coverage.confirmed_jira != null && coverage.confirmed_jira > 0) {
     tiers.push(`${coverage.confirmed_jira} Jira`);
@@ -185,7 +196,7 @@ function formatCoverageLabel(coverage?: ScopeRoleCoverageMap[RoleKey], role?: Ro
     tiers.push(`${coverage.confirmed_jira_qa} Jira`);
   }
   if (coverage.unattributed != null && coverage.unattributed > 0) {
-    tiers.push(`${coverage.unattributed} без поля`);
+    tiers.push(role === "qa" ? `${coverage.unattributed} без SP Test` : `${coverage.unattributed} без поля`);
   }
   if (tiers.length > 0) {
     parts.push(`(${tiers.join(" · ")})`);
@@ -277,7 +288,7 @@ function RoleDonutCard({
               </div>
             </div>
           </div>
-          <RoleLegend rows={rows} segments={segments} mode={mode} />
+          <RoleLegend rows={rows} segments={segments} mode={mode} role={role} />
         </div>
       )}
     </div>
@@ -306,14 +317,29 @@ function ModeButton({
   );
 }
 
+function formatRoleUnresolvedReason(reason: string): string {
+  switch (reason) {
+    case "jira_sp_test_empty":
+      return "не заполнено поле SP Test";
+    case "qa_user_missing":
+      return "SP Test есть, но не указан исполнитель";
+    case "jira_field_empty":
+      return "не заполнено поле Jira";
+    default:
+      return reason;
+  }
+}
+
 function RoleLegend({
   rows,
   segments,
   mode,
+  role,
 }: {
   rows: ScopeDeveloperBreakdown[];
   segments: DonutSegment[];
   mode: ChartMode;
+  role: RoleKey;
 }) {
   const total =
     mode === "sp"
@@ -356,6 +382,14 @@ function RoleLegend({
                         <span className="font-medium text-ink">{task.key}</span>
                       )}
                       <span className="text-ink3">{formatRoleSp(task.story_points ?? null)}</span>
+                      {role === "qa" && task.status ? (
+                        <Badge tone="neutral">{task.status}</Badge>
+                      ) : null}
+                      {role === "qa" && (task.status_entered_at || task.status_changed_at) ? (
+                        <span className="text-ink3">
+                          {formatQueueTimelineDate(task.status_entered_at || task.status_changed_at || "")}
+                        </span>
+                      ) : null}
                     </div>
                     <p className="mt-1 line-clamp-2 text-ink2">{task.summary}</p>
                     <div className="mt-1.5">
@@ -366,12 +400,13 @@ function RoleLegend({
                         <summary className="cursor-pointer text-ink3">Почему нет атрибуции</summary>
                         <p className="mt-1 text-ink3">
                           {Object.entries(task.role_unresolved)
-                            .map(([roleKey, reason]) => `${roleKey}: ${reason}`)
+                            .map(([roleKey, reason]) => `${roleKey}: ${formatRoleUnresolvedReason(reason)}`)
                             .join("; ")}
                         </p>
                       </details>
                     ) : null}
-                    {task.assignee ? <p className="mt-1 text-ink3">Текущий assignee: {task.assignee}</p> : null}
+                    {role !== "qa" && task.assignee ? <p className="mt-1 text-ink3">Текущий assignee: {task.assignee}</p> : null}
+                    {role === "qa" && task.qa ? <p className="mt-1 text-ink3">Исполнитель QA: {task.qa}</p> : null}
                   </li>
                 ))}
               </ul>
